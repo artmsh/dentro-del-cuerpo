@@ -21,24 +21,7 @@ const shared_bodies = [_][]const u8{ "hash1", "vnoise", "fbm", "hash2", "cellHas
 const line_exceptions = [_][2][]const u8{
     // HLSL has no one-argument vector constructor; a scalar exponent is applied to each component.
     .{ "col = pow(saturate(col), float3(1.0 / 2.2));", "col = pow(saturate(col), 1.0 / 2.2);" },
-    // The two hashes take the sine of a large argument. Metal's sin is accurate there and Direct3D's need
-    // not be, so the HLSL file calls its own (see `sinExact` there).
-    .{ "return fract(sin(p) * 43758.5453);", "return frac(sinExact(p) * 43758.5453);" },
-    // The column of a cell on a pattern that closes around a tube: a remainder that has to come out whole.
-    .{ "if (period > 0.5) c.x = fmod(c.x + period * 8.0, period);", "if (period > 0.5) c.x = wholeMod(c.x + period * 8.0, period);" },
-    // The argument of the cell hash, with the rounding Metal's compiler gives it (see `dotFused` there).
-    .{
-        "p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));",
-        "p = float2(dotFused(p.x, 127.1, p.y, float3(310.0, 1.6953125, 0.00469970703125)), dotFused(p.x, 269.5, p.y, float3(183.0, 0.296875, 0.0031280517578125)));",
-    },
-    .{
-        "float g = fract(sin(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);",
-        "float g = frac(sinExact(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);",
-    },
 };
-
-/// Functions only the HLSL file has, standing in for something Metal provides.
-const hlsl_only = [_][]const u8{ "sinExact", "twoSum", "dotFused", "wholeMod" };
 
 const Function = struct {
     name: []const u8,
@@ -178,14 +161,7 @@ test "both shader files declare the same functions in the same order" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const m = try parse(arena, metal);
-    var shared: std.ArrayList(Function) = .empty;
-    for (try parse(arena, hlsl)) |f| {
-        const own = for (hlsl_only) |name| {
-            if (std.mem.eql(u8, f.name, name)) break true;
-        } else false;
-        if (!own) try shared.append(arena, f);
-    }
-    const h = shared.items;
+    const h = try parse(arena, hlsl);
     const want = [_][]const u8{ "hash1", "vnoise", "fbm", "hash2", "cellHash", "voronoi", "scene_vs", "scene_fs", "part_vs", "part_fs", "post_vs", "aces", "post_fs", "hud_vs", "hud_fs" };
     try std.testing.expectEqual(want.len, m.len);
     try std.testing.expectEqual(want.len, h.len);
@@ -240,103 +216,141 @@ test "the spelling rules do what they say" {
     try std.testing.expectEqualStrings("float mainline = margin.x;", try toHlsl(arena, "float mainline = margin.x;"));
 }
 
-/// `sinExact` in the HLSL file, step for step, in the same single-precision arithmetic.
-fn sinExact(x: f32) f32 {
-    const ax: f32 = @min(@abs(x), 4.0e9);
-    const whole: f32 = @floor(ax);
-    const xi: u32 = @intFromFloat(whole);
-    const a = xi >> 16;
-    const b = xi & 0xFFFF;
-    const carry = a * 0x9391 + ((a * 0x054A + b * 0x9391 + ((b * 0x054A) >> 16)) >> 16);
-    const phase = xi *% 0x28BE60DB +% carry +% @as(u32, @intFromFloat((ax - whole) * 683565275.6));
-    var turn: f32 = @as(f32, @floatFromInt(@as(i32, @bitCast(phase)))) * 2.3283064365386963e-10;
-    if (@abs(turn) > 0.25) turn = (if (turn > 0.0) @as(f32, 0.5) else -0.5) - turn;
-    const r: f32 = turn * 6.283185307179586;
-    const r2 = r * r;
-    const s = r * (1.0 + r2 * (-1.0 / 6.0 + r2 * (1.0 / 120.0 + r2 * (-1.0 / 5040.0 + r2 * (1.0 / 362880.0 + r2 * (-1.0 / 39916800.0 + r2 * (1.0 / 6227020800.0)))))));
-    return if (x < 0.0) -s else s;
-}
-
-test "the HLSL file's sine is the true sine for arguments of any size the hashes use" {
-    // The constants are in the shader as written here: 1 / 2 pi to 64 binary places, in two halves and
-    // the second half again in two.
-    const inv_two_pi: u64 = @intFromFloat(@floor((1.0 / (2.0 * std.math.pi)) * @as(f128, 1 << 64)));
-    try std.testing.expectEqual(@as(u64, 0x28BE60DB9391054A) >> 12, inv_two_pi >> 12);
-    for ([_][]const u8{ "0x28BE60DBu", "0x9391u", "0x054Au", "683565275.6", "2.3283064365386963e-10" }) |c|
-        try std.testing.expect(std.mem.indexOf(u8, hlsl, c) != null);
-    // A hash keeps the fraction of 43758 times the sine, so an error of 2e-7 moves it by under a hundredth.
-    var prng = std.Random.DefaultPrng.init(7);
-    const rnd = prng.random();
-    var worst: f64 = 0;
-    for (0..200_000) |_| {
-        const magnitude = std.math.pow(f32, 10.0, rnd.float(f32) * 6.5);
-        const x: f32 = (rnd.float(f32) * 2.0 - 1.0) * magnitude;
-        worst = @max(worst, @abs(@as(f64, sinExact(x)) - @sin(@as(f64, x))));
-    }
-    try std.testing.expect(worst < 2.5e-7);
-    // The arguments the cell hash meets on a villus, and the film grain's a minute into a chapter.
-    for ([_]f32{ 27_431.7, 149_873.3, 443_219.25, -31_005.1 }) |x|
-        try std.testing.expectApproxEqAbs(@as(f32, @floatCast(@sin(@as(f64, x)))), sinExact(x), 2.5e-7);
-}
-
-fn twoSum(a: f32, b: f32) [2]f32 {
-    const s = a + b;
-    const v = s - a;
-    return .{ s, (a - (s - v)) + (b - v) };
-}
-
-/// `dotFused` in the HLSL file, step for step.
-fn dotFused(x: f32, a: f32, y: f32, b: [3]f32) f32 {
-    var t = twoSum(x * a, y * b[0]);
-    var lost = t[1];
-    t = twoSum(t[0], y * b[1]);
-    lost += t[1];
-    t = twoSum(t[0], y * b[2]);
-    lost += t[1];
-    return t[0] + lost;
-}
-
-test "the HLSL file's dot product is a fused multiply-add, bit for bit" {
-    // The pieces in the shader add up to the single-precision constants of the Metal file.
-    const b1 = [3]f32{ 310.0, 1.6953125, 0.00469970703125 };
-    const b2 = [3]f32{ 183.0, 0.296875, 0.0031280517578125 };
-    try std.testing.expectEqual(@as(f32, 311.7), b1[0] + b1[1] + b1[2]);
-    try std.testing.expectEqual(@as(f32, 183.3), b2[0] + b2[1] + b2[2]);
-    try std.testing.expect(std.mem.indexOf(u8, hlsl, "float3(310.0, 1.6953125, 0.00469970703125)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, hlsl, "float3(183.0, 0.296875, 0.0031280517578125)") != null);
-    // Cell coordinates are whole numbers. Metal computes fma(y, b, x * a), which is what the bundle's
-    // frames are made of: writing it out as that in the Metal file leaves every frame as it was.
-    var prng = std.Random.DefaultPrng.init(11);
-    const rnd = prng.random();
-    var unfused_differs: usize = 0;
-    for (0..400_000) |i| {
-        const range: i32 = if (i % 2 == 0) 600 else 65_000;
-        const x: f32 = @floatFromInt(rnd.intRangeAtMost(i32, -range, range));
-        const y: f32 = @floatFromInt(rnd.intRangeAtMost(i32, -range, range));
-        const want1 = @mulAdd(f32, y, 311.7, x * @as(f32, 127.1));
-        const want2 = @mulAdd(f32, y, 183.3, x * @as(f32, 269.5));
-        try std.testing.expectEqual(@as(u32, @bitCast(want1)), @as(u32, @bitCast(dotFused(x, 127.1, y, b1))));
-        try std.testing.expectEqual(@as(u32, @bitCast(want2)), @as(u32, @bitCast(dotFused(x, 269.5, y, b2))));
-        if (x * @as(f32, 127.1) + y * @as(f32, 311.7) != want1) unfused_differs += 1;
-    }
-    // The plain product-and-sum is a different number often enough to matter, which is why this exists.
-    try std.testing.expect(unfused_differs > 10_000);
-}
-
-test "a remainder taken as fraction-of-quotient times divisor is not always whole" {
-    // What the HLSL compiler makes of fmod, and why the cell hash does not use it: for these whole numbers
-    // the true remainder is whole and the computed one is not, in a fair share of cases.
-    var off: usize = 0;
-    var total: usize = 0;
-    var m: f32 = 6;
-    while (m <= 60) : (m += 1) {
-        var x: f32 = 0;
-        while (x < m * 9) : (x += 1) {
-            const q = x / m;
-            const computed = (q - @floor(q)) * m;
-            if (computed != @mod(x, m)) off += 1;
-            total += 1;
+/// `hash1` of the shader files, step for step.
+fn hash1(p: [3]i32) f32 {
+    var v: [3]u32 = undefined;
+    for (&v, p) |*o, c| o.* = @as(u32, @bitCast(c)) *% 1664525 +% 1013904223;
+    for (0..2) |round| {
+        v[0] +%= v[1] *% v[2];
+        v[1] +%= v[2] *% v[0];
+        v[2] +%= v[0] *% v[1];
+        if (round == 0) {
+            for (&v) |*o| o.* ^= o.* >> 16;
         }
     }
-    try std.testing.expect(off * 20 > total);
+    return @as(f32, @floatFromInt(v[0] >> 8)) * (1.0 / 16777216.0);
+}
+
+/// `hash2` of the shader files, step for step.
+fn hash2(p: [2]i32) [2]f32 {
+    var v: [2]u32 = undefined;
+    for (&v, p) |*o, c| o.* = @as(u32, @bitCast(c)) *% 1664525 +% 1013904223;
+    for (0..2) |_| {
+        v[0] +%= v[1] *% 1664525;
+        v[1] +%= v[0] *% 1664525;
+        for (&v) |*o| o.* ^= o.* >> 16;
+    }
+    return .{ @as(f32, @floatFromInt(v[0] >> 8)) * (1.0 / 16777216.0), @as(f32, @floatFromInt(v[1] >> 8)) * (1.0 / 16777216.0) };
+}
+
+test "the hashes are integer arithmetic on whole-number coordinates" {
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // A hash built on a sine or on the fraction of a floating-point product depends on how the last bit of
+    // its argument is rounded, which differs between GPUs and, on some drivers, between two call sites
+    // in one shader: the cell patterns then disagree with themselves. Neither file may go back to that.
+    for ([_][]const u8{ metal, hlsl }) |src| {
+        const fns = try parse(arena, src);
+        for ([_][]const u8{ "hash1", "hash2", "cellHash" }) |name| {
+            const f = find(fns, name) orelse return error.MissingFunction;
+            for (f.body) |line| {
+                for ([_][]const u8{ "sin(", "cos(", "frac(", "fract(", "fmod(", "dot(" }) |call|
+                    try std.testing.expect(std.mem.indexOf(u8, line, call) == null);
+            }
+        }
+        try std.testing.expect(std.mem.indexOf(u8, src, "43758.5453") == null);
+        for ([_][]const u8{ "1664525u", "1013904223u", "(1.0 / 16777216.0)" }) |c|
+            try std.testing.expect(std.mem.indexOf(u8, src, c) != null);
+    }
+}
+
+/// Mean, variance and the correlation between a value and its neighbour `lag` steps on, for a sequence
+/// that should be uniform on [0, 1) and independent.
+const Stats = struct {
+    n: f64 = 0,
+    sum: f64 = 0,
+    sq: f64 = 0,
+    cross: f64 = 0,
+
+    fn add(s: *Stats, a: f32, b: f32) void {
+        s.n += 1;
+        s.sum += a;
+        s.sq += @as(f64, a) * a;
+        s.cross += @as(f64, a) * b;
+    }
+    fn check(s: Stats) !void {
+        const mean = s.sum / s.n;
+        try std.testing.expectApproxEqAbs(@as(f64, 0.5), mean, 0.01);
+        try std.testing.expectApproxEqAbs(@as(f64, 1.0 / 12.0), s.sq / s.n - mean * mean, 0.003);
+        // The covariance of independent values is zero; this many samples leave about 0.0003 of noise.
+        try std.testing.expectApproxEqAbs(@as(f64, 0), s.cross / s.n - mean * mean, 0.002);
+    }
+};
+
+test "the cell hash is uniform and neighbouring cells are unrelated" {
+    // Cell coordinates as the materials produce them: small, of either sign.
+    const size = 300;
+    const steps = [_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ 1, 1 }, .{ 1, -1 }, .{ 2, 0 }, .{ 0, 2 }, .{ 7, 3 } };
+    for (steps) |step| {
+        var same: Stats = .{};
+        var other: Stats = .{};
+        var y: i32 = -size / 2;
+        while (y < size / 2) : (y += 1) {
+            var x: i32 = -size / 2;
+            while (x < size / 2) : (x += 1) {
+                const a = hash2(.{ x, y });
+                const b = hash2(.{ x + step[0], y + step[1] });
+                same.add(a[0], b[0]);
+                other.add(a[1], b[1]);
+            }
+        }
+        try same.check();
+        try other.check();
+    }
+    // The two numbers of one cell place its centre, so they must not follow one another either.
+    var pair: Stats = .{};
+    var y: i32 = -size / 2;
+    while (y < size / 2) : (y += 1) {
+        var x: i32 = -size / 2;
+        while (x < size / 2) : (x += 1) {
+            const a = hash2(.{ x, y });
+            pair.add(a[0], a[1]);
+        }
+    }
+    try pair.check();
+}
+
+test "the lattice hash is uniform and unrelated along every axis, the film grain's included" {
+    // The film grain is this hash of the pixel and the frame, so a relation between neighbours along x, y,
+    // a diagonal or time would show as stripes or as a pattern that stands still.
+    const steps = [_][3]i32{ .{ 1, 0, 0 }, .{ 0, 1, 0 }, .{ 0, 0, 1 }, .{ 1, 1, 0 }, .{ 1, -1, 0 }, .{ 2, 0, 0 }, .{ 0, 2, 0 }, .{ 3, 1, 0 }, .{ 1, 1, 1 } };
+    const origins = [_][3]i32{ .{ 0, 0, 0 }, .{ 1700, 900, 58_620 }, .{ -40, -40, -40 } };
+    for (origins) |origin| {
+        for (steps) |step| {
+            var st: Stats = .{};
+            for (0..12) |zi| {
+                for (0..160) |yi| {
+                    for (0..160) |xi| {
+                        const c = [3]i32{ origin[0] + @as(i32, @intCast(xi)), origin[1] + @as(i32, @intCast(yi)), origin[2] + @as(i32, @intCast(zi)) };
+                        st.add(hash1(c), hash1(.{ c[0] + step[0], c[1] + step[1], c[2] + step[2] }));
+                    }
+                }
+            }
+            try st.check();
+        }
+    }
+}
+
+test "a cell on a closed pattern has one hash however its column is reached" {
+    // cellHash wraps the column with an integer remainder after adding eight periods, as the shader does.
+    var period: i32 = 6;
+    while (period <= 60) : (period += 1) {
+        var column: i32 = -3;
+        while (column <= period + 3) : (column += 1) {
+            const wrapped: i32 = @intCast(@as(u32, @intCast(column + period * 8)) % @as(u32, @intCast(period)));
+            try std.testing.expect(wrapped >= 0 and wrapped < period);
+            try std.testing.expectEqual(@mod(column, period), wrapped);
+        }
+    }
 }

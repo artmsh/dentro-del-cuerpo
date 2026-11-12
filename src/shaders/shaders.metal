@@ -34,10 +34,17 @@ struct SceneOut {
     float4 params [[flat]];
 };
 
+// The hashes take whole-number coordinates and work in 32-bit integers (the PCG hashes of Jarzynski and
+// Olano, "Hash Functions for GPU Rendering", 2020), so that every GPU and every call site computes the same
+// value for the same lattice point. A hash made of floating-point products and a sine or a fraction gives
+// a different value when its last bit is rounded differently, which compilers and drivers are free to do
+// from one call site to the next, and a cell pattern or a noise lattice then disagrees with itself.
 static float hash1(float3 p) {
-    p = fract(p * 0.3183099 + float3(0.71, 0.113, 0.419));
-    p *= 17.0;
-    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    uint3 v = uint3(int3(p)) * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> 16;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return (float)(v.x >> 8) * (1.0 / 16777216.0);
 }
 
 static float vnoise(float3 x) {
@@ -57,13 +64,19 @@ static float fbm(float3 p) {
 }
 
 static float2 hash2(float2 p) {
-    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
-    return fract(sin(p) * 43758.5453);
+    uint2 v = uint2(int2(p)) * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u; v.y += v.x * 1664525u;
+    v ^= v >> 16;
+    v.x += v.y * 1664525u; v.y += v.x * 1664525u;
+    v ^= v >> 16;
+    return float2(v >> 8) * (1.0 / 16777216.0);
 }
 
 // x = distance to nearest cell centre, y = distance to the cell border, z = cell id hash.
 static float2 cellHash(float2 c, float period) {
-    if (period > 0.5) c.x = fmod(c.x + period * 8.0, period);
+    // The column wraps as an integer remainder. The divisor is kept from zero because the HLSL compiler
+    // also evaluates this where the caller's period is the constant 0 and the branch is never taken.
+    if (period > 0.5) c.x = (float)((uint)(int)(c.x + period * 8.0) % (uint)max(period, 1.0));
     return hash2(c);
 }
 
@@ -346,7 +359,7 @@ fragment float4 post_fs(FsOut in [[stage_in]], texture2d<float> hdr [[texture(0)
     col = mix(col, float3(0.75, 0.02, 0.02), po.a.z * smoothstep(0.1, 0.8, r));
     col = mix(col, float3(0.15, 0.95, 0.75), po.c.z * 0.5 * smoothstep(0.2, 0.9, r));
     col = mix(col, float3(0.6, 0.0, 0.0), po.c.w * 0.35 * smoothstep(0.35, 0.9, r));
-    float g = fract(sin(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);
+    float g = hash1(float3(floor(in.position.xy), floor(po.b.x * 977.0)));
     col += (g - 0.5) * 0.018;
     col = pow(saturate(col), float3(1.0 / 2.2));
     col *= po.b.y;

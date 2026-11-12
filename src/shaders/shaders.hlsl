@@ -53,10 +53,17 @@ struct SceneOut {
     nointerpolation float4 params : TEXCOORD4;
 };
 
+// The hashes take whole-number coordinates and work in 32-bit integers (the PCG hashes of Jarzynski and
+// Olano, "Hash Functions for GPU Rendering", 2020), so that every GPU and every call site computes the same
+// value for the same lattice point. A hash made of floating-point products and a sine or a fraction gives
+// a different value when its last bit is rounded differently, which compilers and drivers are free to do
+// from one call site to the next, and a cell pattern or a noise lattice then disagrees with itself.
 float hash1(float3 p) {
-    p = frac(p * 0.3183099 + float3(0.71, 0.113, 0.419));
-    p *= 17.0;
-    return frac(p.x * p.y * p.z * (p.x + p.y + p.z));
+    uint3 v = uint3(int3(p)) * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> 16;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return (float)(v.x >> 8) * (1.0 / 16777216.0);
 }
 
 float vnoise(float3 x) {
@@ -75,79 +82,20 @@ float fbm(float3 p) {
     return s;
 }
 
-// The sine of an argument of any size, to within 2e-7. The two hashes below multiply a sine by 43758 and
-// keep the fraction, with arguments in the tens and hundreds of thousands, so they need the sine to its
-// last bits. Metal on Apple's GPUs returns it; Direct3D defines sin only between -100 pi and 100 pi and
-// leaves the rest to the implementation, and WARP's answers out there turned the film grain into diagonal
-// stripes and gave the epithelial cells a different and uneven layout. So the reduction to one turn is
-// done here in integers, where every Direct3D device computes the same thing: the fraction of x / 2 pi is
-// the low 32 bits of floor(x) * 0x28BE60DB (1 / 2 pi is 0x0.28BE60DB9391054A... in binary) plus what
-// carries in from the next 32 bits of that constant, plus the share of x's own fraction. The sine of the
-// remaining quarter turn is a polynomial in ordinary arithmetic, which Direct3D does round correctly.
-float sinExact(float x) {
-    float ax = min(abs(x), 4.0e9);
-    float whole = floor(ax);
-    uint xi = (uint)whole;
-    uint a = xi >> 16, b = xi & 0xFFFFu;
-    uint carry = a * 0x9391u + ((a * 0x054Au + b * 0x9391u + ((b * 0x054Au) >> 16)) >> 16);
-    uint phase = xi * 0x28BE60DBu + carry + (uint)((ax - whole) * 683565275.6);
-    float turn = (float)(int)phase * 2.3283064365386963e-10; // 2^-32: a turn in [-0.5, 0.5)
-    if (abs(turn) > 0.25) turn = (turn > 0.0 ? 0.5 : -0.5) - turn; // sin(pi - r) = sin(r)
-    float r = turn * 6.283185307179586;
-    float r2 = r * r;
-    float s = r * (1.0 + r2 * (-1.0 / 6.0 + r2 * (1.0 / 120.0 + r2 * (-1.0 / 5040.0 + r2 * (1.0 / 362880.0 + r2 * (-1.0 / 39916800.0 + r2 * (1.0 / 6227020800.0)))))));
-    return x < 0.0 ? -s : s;
-}
-float2 sinExact(float2 p) {
-    return float2(sinExact(p.x), sinExact(p.y));
-}
-
-// a + b as rounded, and what the rounding took away: the two together are the sum exactly.
-float2 twoSum(float a, float b) {
-    precise float s = a + b;
-    precise float v = s - a;
-    precise float lost = (a - (s - v)) + (b - v);
-    return float2(s, lost);
-}
-// dot(float2(x, y), float2(a, b)) to the bit as Metal's compiler computes it for Apple's GPUs: x * a rounded,
-// then y * b added to that with a single rounding (a fused multiply-add). The argument of the cell hash is
-// such a product, and a difference in its last bit gives a different cell. Direct3D leaves it to the
-// driver whether a multiply-add is fused, so the single rounding is built here from operations it does
-// define. b comes as three pieces of eight bits each, which makes every y * piece exact for a whole y
-// below 65536; the pieces are added to the running sum one at a time with their rounding errors kept,
-// and the last addition, of the sum and the collected errors, is the one rounding.
-float dotFused(float x, float a, float y, float3 b) {
-    precise float acc = x * a;
-    precise float2 t = twoSum(acc, y * b.x);
-    precise float lost = t.y;
-    t = twoSum(t.x, y * b.y);
-    lost += t.y;
-    t = twoSum(t.x, y * b.z);
-    lost += t.y;
-    precise float sum = t.x + lost;
-    return sum;
-}
-
 float2 hash2(float2 p) {
-    // 311.7 and 183.3 as single-precision numbers, each in three pieces
-    p = float2(dotFused(p.x, 127.1, p.y, float3(310.0, 1.6953125, 0.00469970703125)), dotFused(p.x, 269.5, p.y, float3(183.0, 0.296875, 0.0031280517578125)));
-    return frac(sinExact(p) * 43758.5453);
+    uint2 v = uint2(int2(p)) * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u; v.y += v.x * 1664525u;
+    v ^= v >> 16;
+    v.x += v.y * 1664525u; v.y += v.x * 1664525u;
+    v ^= v >> 16;
+    return float2(v >> 8) * (1.0 / 16777216.0);
 }
 
 // x = distance to nearest cell centre, y = distance to the cell border, z = cell id hash.
-// fmod(x, m) of two whole numbers, as a whole number. The compiler turns fmod into a division, the
-// fraction of the quotient and a multiplication, which answers 5.9999995 where the remainder is 6, and
-// the hash of that is some other cell's. Metal's fmod of whole numbers is exact, and so is integer
-// division on any Direct3D device.
-float wholeMod(float x, float m) {
-    // The compiler also evaluates this where the caller's period is the constant 0 and the branch around
-    // it is never taken, and refuses a division by a zero it can see.
-    float r = (float)((uint)abs(x) % (uint)max(m, 1.0));
-    return x < 0.0 ? -r : r;
-}
-
 float2 cellHash(float2 c, float period) {
-    if (period > 0.5) c.x = wholeMod(c.x + period * 8.0, period);
+    // The column wraps as an integer remainder. The divisor is kept from zero because the HLSL compiler
+    // also evaluates this where the caller's period is the constant 0 and the branch is never taken.
+    if (period > 0.5) c.x = (float)((uint)(int)(c.x + period * 8.0) % (uint)max(period, 1.0));
     return hash2(c);
 }
 
@@ -430,7 +378,7 @@ float4 post_fs(FsOut IN) : SV_Target {
     col = lerp(col, float3(0.75, 0.02, 0.02), po.a.z * smoothstep(0.1, 0.8, r));
     col = lerp(col, float3(0.15, 0.95, 0.75), po.c.z * 0.5 * smoothstep(0.2, 0.9, r));
     col = lerp(col, float3(0.6, 0.0, 0.0), po.c.w * 0.35 * smoothstep(0.35, 0.9, r));
-    float g = frac(sinExact(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);
+    float g = hash1(float3(floor(IN.position.xy), floor(po.b.x * 977.0)));
     col += (g - 0.5) * 0.018;
     col = pow(saturate(col), 1.0 / 2.2);
     col *= po.b.y;
