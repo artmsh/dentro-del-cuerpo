@@ -94,7 +94,7 @@ fn hasEnglishWord(s: []const u8) bool {
 
 /// Text that is deliberately the same in every language although it contains Latin words: the binomial,
 /// names printed on the keyboard, and the two PlayStation buttons that go by their product names.
-const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Esc", "Enter", "Shift", "Tab", "Cmd+F", "Cmd+Q", "Create", "Options" };
+const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Esc", "Enter", "Shift", "Tab", "Create", "Options" };
 
 /// The wordings of a text: the one for keyboard and mouse, then the one for a controller if it has its own.
 fn wordingsOf(t: Text) struct { list: [2]i18n.Wording, len: usize } {
@@ -149,6 +149,31 @@ test "every string has a Ukrainian translation" {
     try forEach(&check);
     // The walk reached the script, the atlas and the route map, not just a corner of the catalogue.
     try std.testing.expect(check.count > 300 + 4 * guide.Topic.count + 7 * campaign.chapters.len);
+}
+
+/// A shortcut made of a modifier and a key belongs to the window, and each system's window has its own:
+/// Cmd+Q and Cmd+F on a Mac, Alt+F4 and Alt+Enter on Windows. The platform layer names them
+/// (`platform.quit_keys`, `platform.fullscreen_keys`), so no text of the catalogue may.
+const window_key_words = [_][]const u8{ "Cmd", "⌘", "⌥", "⌃", "Command+", "Option+", "Opt+", "Alt+", "Ctrl+", "Win+", "F4", "F11" };
+
+test "no text names a window shortcut, which is each platform's to name" {
+    const Check = struct {
+        count: usize = 0,
+        pub fn text(c: *@This(), where: []const u8, t: Text) !void {
+            const ws = wordingsOf(t);
+            for (ws.list[0..ws.len]) |w| {
+                for ([_][]const u8{ w.en, w.uk }) |s| {
+                    for (window_key_words) |word| {
+                        if (std.mem.indexOf(u8, s, word) != null) return fail(where, s, "names a modifier shortcut; those come from the platform layer");
+                    }
+                }
+            }
+            c.count += 1;
+        }
+    };
+    var check: Check = .{};
+    try forEach(&check);
+    try std.testing.expect(check.count > 300);
 }
 
 test "placeholders are well formed and the same in both languages" {
@@ -317,10 +342,9 @@ const not_keys = [_][2][]const u8{
     .{ "strings.objective.v2_approach", "Enter" }, // "Enter the pocket": the verb
     .{ "strings.title.tagline", "" }, // letter-spaced: I N S I D E
 };
-/// Parts of the catalogue the check does not apply to: the names of the keys themselves and the one control
-/// that exists only on the keyboard, which only a keyboard player is shown; and the names of a controller's
-/// buttons, where X is not a key.
-const exempt_from_key_check = [_][]const u8{ "strings.keys.", "strings.pause.fullscreen", "strings.pad." };
+/// Parts of the catalogue the check does not apply to: the names of the keys themselves, which only a
+/// keyboard player is shown; and the names of a controller's buttons, where X is not a key.
+const exempt_from_key_check = [_][]const u8{ "strings.keys.", "strings.pad." };
 
 fn isWordChar(cp: u21) bool {
     return isLatin(cp) or isCyrillic(cp) or (cp >= '0' and cp <= '9');

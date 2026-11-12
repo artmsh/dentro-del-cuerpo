@@ -143,6 +143,9 @@ pub const Shortcut = struct {
     /// The key that toggles full screen when pressed with the modifier, and its legend.
     fullscreen: Key,
     fullscreen_name: []const u8,
+    /// The legend of the key that quits when pressed with the modifier. It need not be a key the game
+    /// binds (F4 on Windows), so the input test presses it through `Platform.postQuitShortcut`.
+    quit_name: []const u8,
 };
 
 /// Drawable size in pixels and the number of pixels per point.
@@ -181,11 +184,12 @@ pub const setTerminateHook = backend.setTerminateHook;
 pub const shaderPath = backend.shaderPath;
 /// Tell the player why the game could not start, where there is no terminal to print to.
 pub const reportFatal = backend.reportFatal;
-/// The keyboard shortcut for full screen, as the pause screen should print it; null for the one written
-/// in the string catalogue.
-pub const fullscreen_key: ?[]const u8 = backend.fullscreen_key;
 /// This platform's window shortcuts; see `Shortcut`.
 pub const shortcut: Shortcut = backend.shortcut;
+/// The two shortcuts as a prompt prints them: "Cmd+F" and "Cmd+Q" on a Mac, "Alt+Enter" and "Alt+F4" on
+/// Windows. The string catalogue holds neither, so a screen cannot name another platform's keys.
+pub const fullscreen_keys: []const u8 = shortcut.modifier ++ "+" ++ shortcut.fullscreen_name;
+pub const quit_keys: []const u8 = shortcut.modifier ++ "+" ++ shortcut.quit_name;
 /// One line for the demo log: where controllers come from and whether that is available.
 pub const padBackendStatus = backend.padBackendStatus;
 

@@ -198,8 +198,15 @@ Keyboard and mouse events arrive through the platform backend's event pump (AppK
 message queue on Windows) as `platform.Input`, and are turned into the game's actions by `gather` in
 `src/main.zig`. Both pumps keep one rule: a key that was recorded going down must be seen coming up,
 whatever modifier is held at the time, and a key pressed with the system's shortcut modifier is offered to
-the window before the game sees it. The second half is what `platform.Shortcut` describes (Cmd and `F` on
-macOS, Alt and `Enter` on Windows), so that the input test can press the right keys on either system.
+the window before the game sees it. The second half is what `platform.Shortcut` describes (Cmd with `F`
+and `Q` on macOS, Alt with `Enter` and `F4` on Windows), so that the input test can press the right keys on
+either system. The same description is the only source of these shortcuts' names on screen. The title and
+pause menus print the quit shortcut beside their Quit entry and the pause screen lists the full-screen
+one, and the first Windows build printed `Cmd+Q` there because the name was a string in the catalogue. The
+catalogue now holds neither: `main.zig` hands `platform.quit_keys` and `platform.fullscreen_keys` to the
+app as `bindings.WindowKeys`, a test in `src/l10n.zig` fails if any text of the game spells a modifier
+shortcut, each backend has a test of the names it supplies, and the input test checks in the running
+window that the menus name this system's shortcut.
 
 On macOS the pump records key events itself and never forwards them to AppKit, which would beep at keys no
 view handles and which discards a key-up that arrives while Cmd is held: releasing an arrow key between
@@ -368,8 +375,9 @@ The simulation being headless makes five layers possible.
   macOS, the window's system menu on Windows) to see that it followed, and it covers the keys under the
   shortcut modifier: an arrow key released while the modifier is held stops the turn, a key the window has
   no shortcut for reaches the game with the modifier down, and the full-screen shortcut (Cmd+F, Alt+Enter)
-  reaches the full-screen command exactly once without also being read as a key of the game's. For that
-  last check the command is pointed at a counter for a few frames, so the window does not change mode.
+  reaches the full-screen command exactly once without also being read as a key of the game's, as the
+  quit shortcut (Cmd+Q, Alt+F4) reaches the quit command. For those checks each command is pointed at a
+  counter for a few frames, so the window neither changes mode nor closes.
 - `dentro --padtest` opens the window and plays from the title screen with a controller alone: the title
   menu, the route map, the briefing, flight in chapter 1 (both sticks, both triggers and a Sync Strike,
   tool stepping, climb, descent, boost, identify, hint, skip), the pause menu with its language and quit

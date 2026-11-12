@@ -43,6 +43,15 @@ pub const Device = enum(u8) {
 pub const Prompt = struct {
     lang: Lang = .en,
     device: Device = .kbm,
+    window: WindowKeys = .{},
+};
+
+/// The window's own keyboard shortcuts as this system's keyboard names them: "Cmd+Q" on a Mac, "Alt+F4"
+/// on Windows. They come from the platform layer by way of `main.zig`, never from the string catalogue,
+/// so one system's key names cannot be printed on another. A prompt made without them prints none.
+pub const WindowKeys = struct {
+    fullscreen: []const u8 = "",
+    quit: []const u8 = "",
 };
 
 /// Everything the player can do. The names are the ones text refers to: `{@examine}`.
@@ -94,8 +103,8 @@ pub const Control = union(enum) {
 };
 
 pub const Binding = struct {
-    /// The keyboard and mouse control, by name.
-    keys: Text,
+    /// The keyboard and mouse control, by name; null where it is the window's shortcut (see `WindowKeys`).
+    keys: ?Text,
     pad: Control,
     /// A second button that does the same, which prompts do not mention.
     pad_also: ?Button = null,
@@ -131,7 +140,7 @@ pub fn binding(a: Action) Binding {
         .retry => .{ .keys = K.retry, .pad = .menu },
         .restart => .{ .keys = K.restart, .pad = .menu },
         .leave => .{ .keys = K.leave, .pad = .menu },
-        .quit => .{ .keys = K.quit, .pad = .menu },
+        .quit => .{ .keys = null, .pad = .menu },
     };
 }
 
@@ -187,7 +196,10 @@ pub fn buttonName(b: Button, device: Device) Text {
 /// menu entry on a controller: there is no button to name, and the entry itself is on screen.
 pub fn label(a: Action, p: Prompt) []const u8 {
     const b = binding(a);
-    if (p.device == .kbm) return b.keys.get(p.lang);
+    if (p.device == .kbm) return if (b.keys) |keys| keys.get(p.lang) else switch (a) {
+        .quit => p.window.quit,
+        else => unreachable,
+    };
     return switch (b.pad) {
         .button => |btn| buttonName(btn, p.device).get(p.lang),
         .left_stick => strings.pad.left_stick.get(p.lang),
@@ -274,11 +286,12 @@ test "every action is bound on the keyboard and on a controller, and named for e
     inline for (comptime std.meta.fieldNames(Action)) |name| {
         const a = @field(Action, name);
         const b = binding(a);
+        const window: WindowKeys = .{ .fullscreen = "Mod+1", .quit = "Mod+2" };
         for (Lang.all) |l| {
-            try expect(b.keys.get(l).len > 0);
-            try expect(label(a, .{ .lang = l, .device = .kbm }).len > 0);
+            if (b.keys) |keys| try expect(keys.get(l).len > 0);
+            try expect(label(a, .{ .lang = l, .device = .kbm, .window = window }).len > 0);
             for ([_]Device{ .xbox, .playstation }) |d| {
-                const text = label(a, .{ .lang = l, .device = d });
+                const text = label(a, .{ .lang = l, .device = d, .window = window });
                 // Only a menu entry may go without a button, and then the menu has to offer it: app.zig
                 // tests that every entry of the pause menu can be reached and chosen.
                 if (b.pad == .menu) try expect(text.len == 0) else try expect(text.len > 0);
@@ -300,6 +313,26 @@ test "every action is bound on the keyboard and on a controller, and named for e
     // d-pad up/down are `nav`, which is not a `.button` binding; d-pad up is also the tether's second button.
     try std.testing.expectEqual(@as(usize, 1), free);
     try std.testing.expectEqual(@as(usize, 0), on_button[@intFromEnum(Button.dpad_down)]);
+}
+
+test "the quit shortcut is the one the platform names, and nothing else stands in for it" {
+    // Only Quit is the window's own on the keyboard; every other action's key is in the catalogue.
+    inline for (comptime std.meta.fieldNames(Action)) |name| {
+        const a = @field(Action, name);
+        try expect((binding(a).keys == null) == (a == .quit));
+    }
+    for (Lang.all) |l| {
+        // Whatever the platform layer supplies is printed as it is, in every language.
+        for ([_][]const u8{ "Alt+F4", "Cmd+Q" }) |keys| {
+            try expectEqualStrings(keys, label(.quit, .{ .lang = l, .device = .kbm, .window = .{ .quit = keys } }));
+            var buf: [64]u8 = undefined;
+            try expectEqualStrings(keys, resolve(&buf, .{ .en = "{@quit}", .uk = "{@quit}" }, .{ .lang = l, .device = .kbm, .window = .{ .quit = keys } }));
+        }
+        // Without it there is no name to print, rather than some system's by default.
+        try expectEqualStrings("", label(.quit, .{ .lang = l, .device = .kbm }));
+        // A controller reaches Quit through the menu entry and is never shown a key.
+        try expectEqualStrings("", label(.quit, .{ .lang = l, .device = .xbox, .window = .{ .quit = "Alt+F4" } }));
+    }
 }
 
 test "every button has a name in each family, and the two families differ where the plastic does" {

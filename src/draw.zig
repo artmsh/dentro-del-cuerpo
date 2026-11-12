@@ -50,9 +50,10 @@ fn mixc(a: Color, b: Color, t: f32) Color {
 /// `frame`.
 var lang: Lang = .en;
 var device: bindings.Device = .kbm;
+var window_keys: bindings.WindowKeys = .{};
 
 fn prompt() bindings.Prompt {
-    return .{ .lang = lang, .device = device };
+    return .{ .lang = lang, .device = device, .window = window_keys };
 }
 
 /// Text that names a control is written out afresh for the device each frame; it lives here until the
@@ -157,6 +158,7 @@ pub fn frame(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, dt: f32) Out {
     const s = &app.sim;
     lang = app.lang;
     device = app.prompts;
+    window_keys = app.window_keys;
     scratch_len = 0;
     const aspect = r.ui_w / r.ui_h;
 
@@ -1059,7 +1061,7 @@ fn drawPause(app: *App, r: *Renderer) void {
     // The card is as tall as its rows: the options, then the controls, with the rows that depend on the
     // device and on what the drone carries.
     const tether_row = app.sim.has_tether;
-    const fullscreen_row = device == .kbm;
+    const fullscreen_row = device == .kbm and app.window_keys.fullscreen.len > 0;
     const rows: f32 = @floatFromInt(P.controls.len + @intFromBool(tether_row) + @intFromBool(fullscreen_row));
     const o = card(r, 760, 104 + 30 * @as(f32, app_mod.PauseItem.count) + 48 + 23 * rows + 36, cyan);
     r.textCentered(.bold, cx, o[1] + 28, 46, white, tr(P.heading));
@@ -1112,12 +1114,10 @@ fn drawPause(app: *App, r: *Renderer) void {
         y += 23;
     }
     if (fullscreen_row) {
-        if (app.fullscreen_key) |key| {
-            // The shortcut belongs to the window, which names its own where it differs from the Mac's.
-            const what = tr(P.fullscreen[1]);
-            r.textRight(.bold, cx - 20, y, 16, dim, key);
-            _ = r.text(.regular, cx + 10, y, fitSize(r, .regular, 16, 350, what), white, what);
-        } else row(r, cx, y, P.fullscreen);
+        // The shortcut belongs to the window, so the platform names it and not the catalogue.
+        const what = tr(P.fullscreen);
+        r.textRight(.bold, cx - 20, y, 16, dim, app.window_keys.fullscreen);
+        _ = r.text(.regular, cx + 10, y, fitSize(r, .regular, 16, 350, what), white, what);
     }
 }
 

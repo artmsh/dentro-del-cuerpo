@@ -15,11 +15,8 @@ const Input = common.Input;
 const PadSource = common.PadSource;
 const MenuTitles = common.MenuTitles;
 
-/// Windows has no Cmd key; the pause screen prints this in place of the catalogue's shortcut.
-pub const fullscreen_key: ?[]const u8 = "Alt+Enter";
-
 /// Alt+Enter and Alt+F4 are handled in `Platform.onKey`; F11 is a second full-screen key with no modifier.
-pub const shortcut: common.Shortcut = .{ .modifier = "Alt", .fullscreen = .enter, .fullscreen_name = "Enter" };
+pub const shortcut: common.Shortcut = .{ .modifier = "Alt", .fullscreen = .enter, .fullscreen_name = "Enter", .quit_name = "F4" };
 
 /// The window handle; the Direct3D backend makes a swap chain for it.
 pub const Surface = w.HWND;
@@ -41,6 +38,8 @@ const icon_resource: usize = 1;
 var quit_requested = false;
 var fullscreen_probe = false;
 var fullscreen_probe_hits: u32 = 0;
+var quit_probe = false;
+var quit_probe_hits: u32 = 0;
 var lost_focus = false;
 var on_terminate: ?*const fn () void = null;
 /// The platform the window procedure writes input into. Set when the window is shown; messages that
@@ -358,8 +357,8 @@ pub const Platform = struct {
     /// Retitle the two commands in the system menu, for when the language changes while the game is
     /// running. The rest of that menu is Windows' own and follows the system language.
     pub fn setMenuTitles(p: *Platform, menu: MenuTitles) void {
-        p.retitle(cmd_fullscreen, std.mem.span(menu.fullscreen), "Alt+Enter");
-        p.retitle(w.SC_CLOSE, std.mem.span(menu.quit), "Alt+F4");
+        p.retitle(cmd_fullscreen, std.mem.span(menu.fullscreen), common.fullscreen_keys);
+        p.retitle(w.SC_CLOSE, std.mem.span(menu.quit), common.quit_keys);
     }
 
     fn retitle(p: *Platform, command: usize, title: []const u8, keys: []const u8) void {
@@ -433,6 +432,24 @@ pub const Platform = struct {
 
     pub fn fullscreenProbeHits(_: *Platform) u32 {
         return fullscreen_probe_hits;
+    }
+
+    /// For the input test. While `on`, a request to close the window (Alt+F4, the title bar's button, the
+    /// system menu's entry: they all arrive as WM_CLOSE) is counted instead of ending the game.
+    pub fn probeQuit(_: *Platform, on: bool) void {
+        quit_probe = on;
+    }
+
+    pub fn quitProbeHits(_: *Platform) u32 {
+        return quit_probe_hits;
+    }
+
+    /// Press or release the quit shortcut, Alt+F4, as the keyboard does: F4 with the context bit set.
+    pub fn postQuitShortcut(p: *Platform, is_down: bool) void {
+        const f4_scan: usize = 0x3E;
+        var lp: usize = 1 | (f4_scan << 16) | (1 << 29);
+        if (!is_down) lp |= (1 << 30) | (1 << 31);
+        _ = w.PostMessageW(p.hwnd, if (is_down) w.WM_SYSKEYDOWN else w.WM_SYSKEYUP, w.VK_F4, @bitCast(lp));
     }
 
     /// Hide the cursor and keep it inside the window so mouse movement drives the look direction. The
@@ -621,6 +638,10 @@ fn windowProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WIN
     const p = current;
     switch (msg) {
         w.WM_CLOSE => {
+            if (quit_probe) {
+                quit_probe_hits += 1;
+                return 0;
+            }
             // The main loop sees the flag, leaves, and its cleanup runs; the window goes with the process.
             quit_requested = true;
             return 0;
@@ -776,3 +797,13 @@ pub const SyntheticPad = struct {
     pub const round_trip_name = "every stick, trigger and button written to an XInput report is read back by the device code";
     pub const no_device_note = "no XInput report to write to; the state goes straight to Platform.pad";
 };
+
+test "the window's shortcuts are named as a PC keyboard has them" {
+    // A PC keyboard has no Cmd or Option key, and Alt+F4 and Alt+Enter are what `onKey` acts on.
+    try std.testing.expectEqualStrings("Alt+Enter", common.fullscreen_keys);
+    try std.testing.expectEqualStrings("Alt+F4", common.quit_keys);
+    for ([_][]const u8{ common.fullscreen_keys, common.quit_keys, shortcut.modifier }) |name| {
+        for ([_][]const u8{ "Cmd", "Command", "Option", "Opt", "\u{2318}", "\u{2325}" }) |mac|
+            try std.testing.expect(std.mem.indexOf(u8, name, mac) == null);
+    }
+}

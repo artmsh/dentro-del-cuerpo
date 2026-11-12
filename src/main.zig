@@ -147,7 +147,7 @@ const Engine = struct {
         e.g = try gpu.Gpu.init(shaderSource(arena), options);
         e.app = try arena.create(app_mod.App);
         e.app.init(persist, fallback);
-        e.app.fullscreen_key = platform.fullscreen_key;
+        e.app.window_keys = .{ .fullscreen = platform.fullscreen_keys, .quit = platform.quit_keys };
         if (lang) |l| e.app.lang = l;
         var b = mesh.Builder.init(arena);
         const meshes = render.Meshes.build(&b);
@@ -746,6 +746,7 @@ const InputTest = struct {
     yaw_after_release: f32 = 0,
     saw_shortcut_down: bool = false,
     menu_hits: u32 = 0,
+    quit_hits: u32 = 0,
 
     fn begin(it: *InputTest, app: *app_mod.App) void {
         _ = it;
@@ -877,6 +878,22 @@ const InputTest = struct {
                 it.check(plat.fullscreenProbeHits() == it.menu_hits + 1, sc.modifier ++ "+" ++ sc.fullscreen_name ++ " reaches the full-screen command, once");
                 it.check(!it.saw_shortcut_down, "and is not also read as the " ++ sc.fullscreen_name ++ " key");
                 plat.probeFullscreen(false);
+            },
+            // The quit shortcut, the same way: it has to reach the command that ends the game, and the
+            // menus have to name it as this platform does.
+            255 => {
+                plat.probeQuit(true);
+                it.quit_hits = plat.quitProbeHits();
+                plat.postQuitShortcut(true);
+            },
+            257 => plat.postQuitShortcut(false),
+            259 => {
+                it.check(plat.quitProbeHits() == it.quit_hits + 1, sc.modifier ++ "+" ++ sc.quit_name ++ " reaches the quit command, once");
+                plat.probeQuit(false);
+                it.check(!plat.shouldQuit(), "and the probe kept it from ending the test");
+                const kbm: bindings.Prompt = .{ .lang = app.lang, .device = .kbm, .window = app.window_keys };
+                it.check(std.mem.eql(u8, bindings.label(.quit, kbm), sc.modifier ++ "+" ++ sc.quit_name), "the Quit entry of the menus names " ++ sc.modifier ++ "+" ++ sc.quit_name);
+                it.check(std.mem.eql(u8, app.window_keys.fullscreen, sc.modifier ++ "+" ++ sc.fullscreen_name), "the pause screen names " ++ sc.modifier ++ "+" ++ sc.fullscreen_name ++ " for full screen");
             },
             260 => {
                 plat.postKey(.escape, true);

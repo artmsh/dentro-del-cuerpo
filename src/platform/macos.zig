@@ -19,11 +19,8 @@ extern fn CGWarpMouseCursorPosition(p: objc.Point) i32;
 extern const NSDefaultRunLoopMode: id;
 extern "c" fn _NSGetExecutablePath(buf: [*]u8, size: *u32) c_int;
 
-/// Cmd+F is what the string catalogue already says.
-pub const fullscreen_key: ?[]const u8 = null;
-
 /// Cmd+F and Cmd+Q are the application menu's key equivalents.
-pub const shortcut: common.Shortcut = .{ .modifier = "Cmd", .fullscreen = .f, .fullscreen_name = "F" };
+pub const shortcut: common.Shortcut = .{ .modifier = "Cmd", .fullscreen = .f, .fullscreen_name = "F", .quit_name = "Q" };
 
 /// The window's content view; the Metal backend gives it a layer.
 pub const Surface = id;
@@ -234,6 +231,12 @@ fn menuProbe(_: id, _: SEL, _: id) callconv(.c) void {
     menu_probe_hits += 1;
 }
 
+var quit_probe_hits: u32 = 0;
+
+fn quitProbe(_: id, _: SEL, _: id) callconv(.c) void {
+    quit_probe_hits += 1;
+}
+
 fn windowWillClose(_: id, _: SEL, _: id) callconv(.c) void {
     quit_requested = true;
 }
@@ -328,6 +331,7 @@ pub const Platform = struct {
         objc.addMethod(Delegate, "applicationShouldTerminate:", &shouldTerminate, "Q@:@");
         objc.addMethod(Delegate, "applicationShouldTerminateAfterLastWindowClosed:", &shouldTerminateAfterLastWindowClosed, "B@:@");
         objc.addMethod(Delegate, "ddcMenuProbe:", &menuProbe, "v@:@");
+        objc.addMethod(Delegate, "ddcQuitProbe:", &quitProbe, "v@:@");
         objc.registerClass(Delegate);
         const delegate = objc.send(fn (id, SEL) callconv(.c) id, objc.send(fn (id, SEL) callconv(.c) id, Delegate, "alloc", .{}), "init", .{});
         objc.setObj(app, "setDelegate:", delegate);
@@ -420,6 +424,22 @@ pub const Platform = struct {
 
     pub fn fullscreenProbeHits(_: *Platform) u32 {
         return menu_probe_hits;
+    }
+
+    /// For the input test. While `on`, the Quit menu item counts its activations instead of terminating,
+    /// so the test can press Cmd+Q and see the shortcut arrive at the command.
+    pub fn probeQuit(p: *Platform, on: bool) void {
+        objc.setObj(p.quit_item, "setTarget:", if (on) p.delegate else null);
+        objc.send(fn (id, SEL, SEL) callconv(.c) void, p.quit_item, "setAction:", .{objc.sel(if (on) "ddcQuitProbe:" else "terminate:")});
+    }
+
+    pub fn quitProbeHits(_: *Platform) u32 {
+        return quit_probe_hits;
+    }
+
+    /// Press or release the quit shortcut, Cmd+Q.
+    pub fn postQuitShortcut(p: *Platform, is_down: bool) void {
+        p.postSystemKey(.q, is_down);
     }
 
     /// Hide and freeze the cursor so mouse deltas drive the look direction.
@@ -642,4 +662,9 @@ test "the capture warp flips about the primary display, whichever display the wi
     try std.testing.expectEqual(@as(f64, -458 + 720), on_second.y);
     // Flipping about that display's own height, as the code once did, lands 458 points lower, off centre.
     try std.testing.expect(warpTarget(.{ .x = 1512, .y = 0, .w = 2560, .h = 1440 }, 1440).y != on_second.y);
+}
+
+test "the window's shortcuts are named as a Mac keyboard has them" {
+    try std.testing.expectEqualStrings("Cmd+F", common.fullscreen_keys);
+    try std.testing.expectEqualStrings("Cmd+Q", common.quit_keys);
 }

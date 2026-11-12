@@ -213,9 +213,9 @@ pub const App = struct {
     want_capture: bool = false,
     last_voice_serial: u32 = 0,
     comm_chirp: bool = false,
-    /// The keyboard shortcut for full screen as this platform's window has it, where that is not the one
-    /// the string catalogue names; the pause screen prints it. Set once at startup.
-    fullscreen_key: ?[]const u8 = null,
+    /// The window's keyboard shortcuts as this platform names them; the menus print them. Set once at
+    /// startup.
+    window_keys: bindings.WindowKeys = .{},
     save_path: [paths.max_path]u8 = undefined,
     save_path_len: usize = 0,
 

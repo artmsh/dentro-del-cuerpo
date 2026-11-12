@@ -55,8 +55,8 @@ pub const keys = struct {
     pub const retry: T = .{ .en = "R", .uk = "R" };
     pub const restart: T = .{ .en = "N", .uk = "N" };
     pub const leave: T = .{ .en = "L", .uk = "L" };
-    /// The menu bar's shortcut; the menus also list Quit as an entry, which is how a controller reaches it.
-    pub const quit: T = .{ .en = "Cmd+Q", .uk = "Cmd+Q" };
+    // Quit and full screen are the window's own shortcuts, which differ between systems (Cmd+Q, Alt+F4).
+    // They are not written here: the platform layer names them and `bindings.WindowKeys` carries them.
 };
 
 /// Names of a game controller's parts, as a prompt names them. The buttons are named as each family prints
@@ -302,9 +302,9 @@ pub const pause = struct {
         .{ .en = "{@tether}", .uk = "{@tether}" },
         .{ .en = "Mucus Tether: attach to tissue, release on nothing", .uk = "Муциновий трос: зачепитися за тканину; у порожнечу — відпустити" },
     };
-    /// A control that exists only on the keyboard: the menu bar's shortcut. It is listed when the prompts
-    /// are for the keyboard.
-    pub const fullscreen = [2]T{ .{ .en = "Cmd+F", .uk = "Cmd+F" }, .{ .en = "Full screen", .uk = "На весь екран" } };
+    /// A control that exists only on the keyboard: the window's own shortcut, which the platform names.
+    /// It is listed when the prompts are for the keyboard.
+    pub const fullscreen: T = .{ .en = "Full screen", .uk = "На весь екран" };
 };
 
 /// The language switch on the title and pause screens: the key, then this label, then each language's own name.
