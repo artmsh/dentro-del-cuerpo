@@ -82,7 +82,8 @@ jobs:
       - name: Render both chapters in both languages
         run: |
           for lang in en uk; do
-            DENTRO_GPU_LOG=1 "$EXE" --software --lang $lang --shots shots/$lang 2>&1 | grep -v '^wrote '
+            mkdir -p shots/$lang
+            "$EXE" --software --lang $lang --shots shots/$lang 2>&1 | grep -v '^wrote '
             (cd shots/$lang && sha256sum *.bmp > ../sha256-$lang.txt)
             test "$(wc -l < shots/sha256-$lang.txt)" -ge 80
           done
@@ -90,6 +91,7 @@ jobs:
       # produce the same frames, byte for byte.
       - name: Render again across a lost device
         run: |
+          mkdir -p shots/lost
           DENTRO_FORCE_DEVICE_LOSS=20 "$EXE" --software --lang en --shots shots/lost 2>&1 | grep -v '^wrote '
           (cd shots/lost && sha256sum *.bmp > ../sha256-lost.txt)
           diff shots/sha256-en.txt shots/sha256-lost.txt
