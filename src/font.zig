@@ -47,8 +47,9 @@ pub const Face = enum(u8) { regular = 0, bold = 1 };
 
 /// Blocks taken whole: ASCII, Latin-1, and Cyrillic Ѐ–џ plus Ґ ґ (everything Ukrainian needs).
 const ranges = [_][2]u21{ .{ 0x20, 0x7E }, .{ 0xA0, 0xFF }, .{ 0x400, 0x45F }, .{ 0x490, 0x491 } };
-/// Individual code points: ʼ ‘ ’ “ ” „ – — • … № − and the marks ← ↑ → ↓ ● ▲ ▶ ◆ ✓.
-const singles = [_]u21{ 0x2BC, 0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x201E, 0x2022, 0x2026, 0x2116, 0x2190, 0x2191, 0x2192, 0x2193, 0x2212, 0x25B2, 0x25B6, 0x25C6, 0x25CF, 0x2713 };
+/// Individual code points: ʼ ‘ ’ “ ” „ – — • … № − and the marks ← ↑ → ↓ ● ▲ ▶ ◆ ✓, then the four shapes
+/// printed on a PlayStation controller's face buttons, □ △ ○ ✕.
+const singles = [_]u21{ 0x2BC, 0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x201E, 0x2022, 0x2026, 0x2116, 0x2190, 0x2191, 0x2192, 0x2193, 0x2212, 0x25B2, 0x25B6, 0x25C6, 0x25CF, 0x2713, 0x25A1, 0x25B3, 0x25CB, 0x2715 };
 
 /// Every code point the atlas holds, ascending.
 pub const charset = blk: {
@@ -181,7 +182,7 @@ test "the character set is sorted and searchable" {
     try std.testing.expectEqual(@as(?usize, null), slot(0x3A9));
     try std.testing.expectEqual(@as(?usize, null), slot(0x10FFFF));
     var i: usize = 0;
-    const s = "ЇїЄєҐґІі’«»—…→✓";
+    const s = "ЇїЄєҐґІі’«»—…→✓□△○✕";
     while (i < s.len) try std.testing.expect(slot(utf8.next(s, &i)) != null);
 }
 

@@ -9,6 +9,7 @@ const game = @import("game.zig");
 const gut = @import("gut.zig");
 const guide = @import("guide.zig");
 const i18n = @import("i18n.zig");
+const bindings = @import("bindings.zig");
 const strings = @import("strings.zig");
 const Text = i18n.Text;
 const Lang = i18n.Lang;
@@ -224,7 +225,7 @@ pub fn upgradeTaken(s: *Sim) void {
     s.setStage(.g_tether);
 }
 
-pub fn objective(s: *const Sim, lang: Lang, buf: []u8) []const u8 {
+pub fn objective(s: *const Sim, p: bindings.Prompt, buf: []u8) []const u8 {
     const g = &s.g;
     const text: Text = switch (s.stage) {
         .g_arrive => O.g_arrive,
@@ -232,9 +233,9 @@ pub fn objective(s: *const Sim, lang: Lang, buf: []u8) []const u8 {
         .g_descend => O.g_descend,
         .g_wave => O.g_wave,
         .g_scan => O.g_scan,
-        .g_extrude => return i18n.format(buf, lang, O.g_extrude, .{ i18n.int(g.cleared), i18n.int(g.total), i18n.int(g.spread), i18n.int(s.count(.shed) + s.count(.virion)) }),
+        .g_extrude => return bindings.format(buf, p, O.g_extrude, .{ i18n.int(g.cleared), i18n.int(g.total), i18n.int(g.spread), i18n.int(s.count(.shed) + s.count(.virion)) }),
         .g_factory => if (s.findConst(.factory)) |e|
-            return i18n.format(buf, lang, O.g_factory, .{i18n.int(@as(i32, @intFromFloat(100 * (1 - e.hp / e.max_hp))))})
+            return bindings.format(buf, p, O.g_factory, .{i18n.int(@as(i32, @intFromFloat(100 * (1 - e.hp / e.max_hp))))})
         else
             O.g_factory_done,
         .g_tether => O.g_tether,
@@ -242,7 +243,7 @@ pub fn objective(s: *const Sim, lang: Lang, buf: []u8) []const u8 {
         .g_exit => O.transit_marker,
         else => return "",
     };
-    return text.get(lang);
+    return bindings.resolve(buf, text, p);
 }
 
 pub fn hintText(s: *const Sim) Text {

@@ -2,11 +2,14 @@
 //!
 //!   dentro                     windowed game
 //!   dentro --demo              windowed, flown by the scripted pilot (end-to-end run on the real display)
+//!   dentro --demo --pad        the same, with the pilot's controls passed through a game controller's state
 //!   dentro --inputtest         windowed, posts key events into its own queue and checks they reach the arms
+//!   dentro --padtest           windowed, plays from the title screen with a synthetic game controller
 //!   dentro --selftest          headless: scripted pilot plays chapter 1, prints the timeline
 //!   dentro --shots <dir>       headless GPU: renders every screen offscreen and writes BMP frames
 //!
-//! `--lang en|uk` picks the language for the run. Without it the game uses the language the player chose in
+//! `--prompts kbm|xbox|ps` fixes the device the on-screen prompts are written for; without it they follow
+//! the device last used. `--lang en|uk` picks the language for the run. Without it the game uses the language the player chose in
 //! the game, or else the first supported one in the system's preference list; the scripted modes, whose
 //! output is compared between runs, use English.
 
@@ -31,13 +34,18 @@ const strings = @import("strings.zig");
 const guide = @import("guide.zig");
 const campaign = @import("campaign.zig");
 const l10n = @import("l10n.zig");
+const pad = @import("pad.zig");
+const bindings = @import("bindings.zig");
+const input = @import("input.zig");
 const Lang = i18n.Lang;
 const Text = i18n.Text;
 
 const embedded_shaders = @embedFile("shaders/shaders.metal");
 extern "c" fn _NSGetExecutablePath(buf: [*]u8, size: *u32) c_int;
 
-const Mode = enum { play, demo, inputtest, selftest, shots, icon };
+const Mode = enum { play, demo, inputtest, padtest, selftest, shots, icon };
+
+const usage = "usage: dentro [--fullscreen] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2] [--demo [--pad] | --inputtest | --padtest | --selftest | --shots <dir> | --icon <png>]\n";
 
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
@@ -47,10 +55,12 @@ pub fn main(init: std.process.Init) !void {
     var start_chapter: ?u8 = null;
     var fullscreen = false;
     var lang_arg: ?Lang = null;
+    var prompts_arg: ?bindings.Device = null;
+    var via_pad = false;
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const a = args[i];
-        const known = [_][]const u8{ "--selftest", "--demo", "--inputtest", "--fullscreen", "--icon", "--shots", "--chapter", "--lang" };
+        const known = [_][]const u8{ "--selftest", "--demo", "--inputtest", "--padtest", "--pad", "--fullscreen", "--icon", "--shots", "--chapter", "--lang", "--prompts" };
         var ok = false;
         for (known) |k| ok = ok or std.mem.eql(u8, a, k);
         // Cocoa reads "-AppleLanguages (uk)" and its kin from the command line as user defaults; they come
@@ -61,12 +71,23 @@ pub fn main(init: std.process.Init) !void {
         }
         // Finder passes -psn_… on some launch paths; anything else unknown is a mistake worth stopping for.
         if (!ok and !std.mem.startsWith(u8, a, "-psn")) {
-            std.debug.print("unknown argument: {s}\nusage: dentro [--fullscreen] [--lang en|uk] [--chapter 1|2] [--demo | --inputtest | --selftest | --shots <dir> | --icon <png>]\n", .{a});
+            std.debug.print("unknown argument: {s}\n" ++ usage, .{a});
             std.process.exit(2);
         }
         if (std.mem.eql(u8, a, "--selftest")) mode = .selftest;
         if (std.mem.eql(u8, a, "--demo")) mode = .demo;
         if (std.mem.eql(u8, a, "--inputtest")) mode = .inputtest;
+        if (std.mem.eql(u8, a, "--padtest")) mode = .padtest;
+        if (std.mem.eql(u8, a, "--pad")) via_pad = true;
+        if (std.mem.eql(u8, a, "--prompts")) {
+            prompts_arg = if (i + 1 < args.len) bindings.Device.fromArg(args[i + 1]) else null;
+            if (prompts_arg == null) {
+                std.debug.print("--prompts takes kbm, xbox or ps\n", .{});
+                std.process.exit(2);
+            }
+            i += 1;
+            continue;
+        }
         if (std.mem.eql(u8, a, "--fullscreen")) fullscreen = true;
         if (std.mem.eql(u8, a, "--chapter") and i + 1 < args.len) {
             const n = std.fmt.parseInt(u8, args[i + 1], 10) catch 0;
@@ -100,9 +121,9 @@ pub fn main(init: std.process.Init) !void {
     }
     switch (mode) {
         .selftest => return runSelftest(arena),
-        .shots => return runShots(arena, shots_dir, start_chapter, lang_arg),
+        .shots => return runShots(arena, shots_dir, start_chapter, lang_arg, prompts_arg orelse .kbm),
         .icon => return runIcon(arena, shots_dir),
-        else => return runWindow(arena, mode, fullscreen, start_chapter, lang_arg),
+        else => return runWindow(arena, mode, .{ .fullscreen = fullscreen, .start_chapter = start_chapter, .lang = lang_arg, .prompts = prompts_arg, .via_pad = via_pad }),
     }
 }
 
@@ -218,11 +239,12 @@ fn longestDeep(lang: Lang) Text {
     return best;
 }
 
-fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8, lang: ?Lang) !void {
+fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8, lang: ?Lang, prompts: bindings.Device) !void {
     const pool = objc.poolPush();
     defer objc.poolPop(pool);
     const e = try arena.create(Engine);
     try e.init(arena, false, lang, .en);
+    e.app.prompts = prompts;
     const w: u32 = 1600;
     const h: u32 = 1000;
     e.g.resize(w, h, true);
@@ -408,14 +430,16 @@ fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8, lang: ?Lang) !
         s.mode = .playing;
     }
 
-    // Pause screen, and the language key on it.
-    app.screen = .pause;
+    // Pause screen, the language key on it, and the selection moved down to the language entry.
+    app.openPause();
     sh.snap("pause");
     for (1..Lang.count) |_| {
         app.step(.{}, .{ .language = true }, dt);
         sh.snap("pause-language-switched");
     }
     app.step(.{}, .{ .language = true }, dt);
+    for (1..app_mod.PauseItem.count) |_| app.step(.{}, .{ .down = true }, dt);
+    sh.snap("pause-language-selected");
     std.debug.print("shots: {d} frames, chapters complete = {}\n", .{ sh.n, all_done });
 }
 
@@ -451,11 +475,12 @@ fn runIcon(arena: std.mem.Allocator, path: []const u8) !void {
 
 // ---------------------------------------------------------------------------- windowed game
 
-fn gather(in: *const platform.Input, captured: bool, dt: f32) struct { c: game.Controls, ui: app_mod.UiInput } {
+/// Keyboard and mouse as the game's actions. The controller's half of this is `input.Mapper`.
+fn gather(in: *const platform.Input, captured: bool, dt: f32) input.Out {
     var c: game.Controls = .{};
     const f = struct {
-        fn axis(input: *const platform.Input, pos: platform.Key, neg: platform.Key) f32 {
-            return @as(f32, if (input.down(pos)) 1 else 0) - @as(f32, if (input.down(neg)) 1 else 0);
+        fn axis(keys: *const platform.Input, pos: platform.Key, neg: platform.Key) f32 {
+            return @as(f32, if (keys.down(pos)) 1 else 0) - @as(f32, if (keys.down(neg)) 1 else 0);
         }
     };
     c.move = m.v3(f.axis(in, .d, .a), f.axis(in, .space, .c), f.axis(in, .w, .s));
@@ -492,7 +517,7 @@ fn gather(in: *const platform.Input, captured: bool, dt: f32) struct { c: game.C
         .quit_to_title = in.hit(.l),
         .language = in.hit(.tab),
     };
-    return .{ .c = c, .ui = ui };
+    return .{ .controls = c, .ui = ui };
 }
 
 var live_audio: ?*audio_mod.Audio = null;
@@ -501,13 +526,51 @@ fn stopAudioOnTerminate() void {
     if (live_audio) |a| a.stop();
 }
 
-fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapter: ?u8, lang: ?Lang) !void {
+const WindowOptions = struct {
+    fullscreen: bool = false,
+    start_chapter: ?u8 = null,
+    lang: ?Lang = null,
+    /// The device the prompts are written for, if the command line fixed it.
+    prompts: ?bindings.Device = null,
+    /// `--demo --pad`: the scripted pilot holds a controller instead of handing its controls to the game.
+    via_pad: bool = false,
+};
+
+/// The controller the scripted modes hold. It is one of the GameController framework's own objects where
+/// the framework will make one, so that the state is read back through `platform.Gamepad.read`, the code
+/// that reads a real device; failing that the state is written straight into `Platform.pad`.
+const SyntheticPad = struct {
+    controller: objc.id = null,
+
+    fn attach(plat: *platform.Platform) SyntheticPad {
+        const c = platform.Gamepad.makeSnapshot();
+        plat.pad_source = if (c != null) .{ .controller = c } else .injected;
+        return .{ .controller = c };
+    }
+
+    fn set(sp: SyntheticPad, plat: *platform.Platform, st: pad.State) void {
+        switch (plat.pad_source) {
+            .controller => platform.Gamepad.write(sp.controller, st),
+            else => plat.pad = st,
+        }
+    }
+
+    fn describe(sp: SyntheticPad) []const u8 {
+        return if (sp.controller != null) "GCController snapshot, read by the device code" else "state written to Platform.pad";
+    }
+};
+
+fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
+    const fullscreen = opts.fullscreen;
+    const start_chapter = opts.start_chapter;
+    const lang = opts.lang;
     const outer = objc.poolPush();
     defer objc.poolPop(outer);
     const e = try arena.create(Engine);
-    // The input test asserts on its output, so it does not follow the machine it runs on.
-    try e.init(arena, mode == .play, lang, if (mode == .inputtest) .en else systemLanguage());
+    // The scripted tests assert on their output, so they do not follow the machine they run on.
+    try e.init(arena, mode == .play, lang, if (mode == .inputtest or mode == .padtest) .en else systemLanguage());
     const app = e.app;
+    if (opts.prompts) |d| app.prompts = d;
     const layer = e.g.makeLayer();
     var menu_text: MenuText = .{};
     var menu_lang = app.lang;
@@ -526,14 +589,24 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
         app.unlock_all = true;
         app.chapter = ch;
     }
+    const pad_pilot = mode == .demo and opts.via_pad;
     if (mode == .demo) {
-        app.bot = .{};
+        if (!pad_pilot) app.bot = .{};
         app.startChapter(0);
     } else if (mode == .play and start_chapter != null) {
         app.startChapter(0);
     }
     var it: InputTest = .{};
     if (mode == .inputtest) it.begin(app);
+    var pt: PadTest = .{};
+    if (mode == .padtest) pt.begin(&plat, app);
+    var held_pad: SyntheticPad = .{};
+    if (pad_pilot) held_pad = SyntheticPad.attach(&plat);
+    var pilot: bot.Bot = .{};
+    var pilot_retries: u32 = 0;
+    var puppet: input.Puppet = .{};
+    var mapper: input.Mapper = .{};
+    var tracker: input.Tracker = .{};
     if (mode == .demo) {
         var prefs: [512]u8 = undefined;
         std.debug.print("[demo] language {s} (asked for: {s}; system preference: {s})\n", .{ app.lang.tag(), if (lang) |l| l.tag() else "-", platform.preferredLanguages(&prefs) });
@@ -547,28 +620,48 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
         const pool = objc.poolPush();
         defer objc.poolPop(pool);
 
+        const now = platform.now();
+        const dt: f32 = @floatCast(@min(@max(now - last, 0.0005), 1.0 / 20.0));
+        last = now;
+
         if (mode == .inputtest) it.post(&plat, app);
-        const lost_focus = plat.pump();
-        if (lost_focus and app.screen == .play and mode == .play) {
-            app.screen = .pause;
-            app.want_capture = false;
+        if (mode == .padtest) pt.drive(&plat, app, dt);
+        if (pad_pilot) {
+            // The pilot decides what it wants, and a controller is held the way that takes. From here its
+            // input is a controller's: read by the platform, mapped, merged with the keyboard's.
+            const s = &app.sim;
+            if (s.stats.retries != pilot_retries) {
+                pilot_retries = s.stats.retries;
+                pilot = .{};
+            }
+            var want: game.Controls = .{};
+            if (app.screen == .play) {
+                want = pilot.think(s, dt);
+                if (s.mode == .dead and app.screen_t > 1) want.confirm = true;
+            }
+            held_pad.set(&plat, puppet.drive(want, input.Context.of(app), dt));
         }
+        const lost_focus = plat.pump();
+        if (lost_focus and app.screen == .play and mode == .play) app.openPause();
         const size = plat.pixelSize();
         if (size.w != e.g.width or size.h != e.g.height) {
             objc.send(fn (objc.id, objc.SEL, f64) callconv(.c) void, layer, "setContentsScale:", .{size.scale});
             e.g.resize(size.w, size.h, false);
         }
 
-        const now = platform.now();
-        const dt: f32 = @floatCast(@min(@max(now - last, 0.0005), 1.0 / 20.0));
-        last = now;
+        // Both devices are read every frame and their input is added together; the prompts are written
+        // for whichever was used last.
+        const from_pad = mapper.update(plat.pad, plat.padFocused(), input.Context.of(app), dt);
+        const gathered = gather(&plat.input, plat.captured, dt).merge(from_pad);
+        const used = tracker.update(.{ .pressed = plat.input.anyPressed(), .held = plat.input.anyHeld() }, &mapper.sample);
+        app.prompts = opts.prompts orelse used;
 
-        const gathered = gather(&plat.input, plat.captured, dt);
         const steps: usize = @intFromFloat(m.clamp(@ceil(dt * 120.0), 1, 4));
         const sub = dt / @as(f32, @floatFromInt(steps));
         for (0..steps) |k| {
-            var c = gathered.c;
+            var c = gathered.controls;
             if (k > 0) {
+                // One-shot actions belong to the frame, not to each step of it.
                 c.look = .{ 0, 0 };
                 c.cycle = .{ false, false };
                 c.select = .{ null, null };
@@ -576,6 +669,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
                 c.hint = false;
                 c.confirm = false;
                 c.skip = false;
+                c.tether = false;
             }
             app.step(c, if (k == 0) gathered.ui else .{}, sub);
             for (app.sim.sfx[0..app.sim.nsfx]) |ev| audio.playSfx(ev);
@@ -606,6 +700,16 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
 
         _ = e.renderFrame(dt, false);
         frames += 1;
+        if (mode == .demo and frames == 30) {
+            std.debug.print("[demo] controller: {s}, {s}; GameController framework {s}\n", .{
+                if (plat.pad.connected) @tagName(plat.pad.family) else "none attached",
+                switch (plat.pad_source) {
+                    .system => "polled from the system",
+                    else => held_pad.describe(),
+                },
+                if (platform.Gamepad.available()) "loaded" else "missing",
+            });
+        }
 
         if (mode == .demo) {
             const s = &app.sim;
@@ -615,7 +719,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
             }
             if (s.mode == .complete and app.screen_t > 0) {
                 const secs = now - t_start;
-                if (it.linger == 0) std.debug.print("demo: chapter complete on the display. grade={c} stability={d:.0} dual_arm_time={d:.1}s sync_strikes={d} retries={d} frames={d} avg_fps={d:.0} drawable={d}x{d} audio={}\n", .{ s.grade(), s.stability, s.stats.dual_time, s.stats.sync_strikes, s.stats.retries, frames, @as(f64, @floatFromInt(frames)) / secs, e.g.width, e.g.height, audio_ok });
+                if (it.linger == 0) std.debug.print("demo: chapter complete on the display. grade={c} stability={d:.0} dual_arm_time={d:.1}s sync_strikes={d} retries={d} frames={d} avg_fps={d:.0} drawable={d}x{d} audio={} input={s}\n", .{ s.grade(), s.stability, s.stats.dual_time, s.stats.sync_strikes, s.stats.retries, frames, @as(f64, @floatFromInt(frames)) / secs, e.g.width, e.g.height, audio_ok, if (pad_pilot) held_pad.describe() else "pilot's controls, direct" });
                 // linger on the debrief for a moment so it is visible
                 if (it.linger == 0) it.linger = now;
                 if (now - it.linger > 2.5) return;
@@ -628,6 +732,14 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
         if (mode == .inputtest and it.finished) {
             std.debug.print("inputtest: {s} ({d} checks, {d} failed) drawable={d}x{d}\n", .{ if (it.failed == 0) "PASS" else "FAIL", it.checks, it.failed, e.g.width, e.g.height });
             if (it.failed != 0) {
+                audio.stop();
+                std.process.exit(1);
+            }
+            return;
+        }
+        if (mode == .padtest and pt.finished) {
+            std.debug.print("padtest: {s} ({d} checks, {d} failed) pad={s} drawable={d}x{d}\n", .{ if (pt.failed == 0) "PASS" else "FAIL", pt.checks, pt.failed, pt.held.describe(), e.g.width, e.g.height });
+            if (pt.failed != 0) {
                 audio.stop();
                 std.process.exit(1);
             }
@@ -654,7 +766,11 @@ const InputTest = struct {
     fn begin(it: *InputTest, app: *app_mod.App) void {
         _ = it;
         app.startChapter(0);
-        // Stand in front of the phlebolith with the upgrade installed, both arms on Punch.
+        standAtStone(app);
+    }
+
+    /// Stand in front of the phlebolith with the upgrade installed, both arms on Punch.
+    fn standAtStone(app: *app_mod.App) void {
         const s = &app.sim;
         s.in_bore = false;
         s.stage = .septum_break;
@@ -797,6 +913,484 @@ const InputTest = struct {
     }
 };
 
+/// Plays the game from the title screen with a controller and nothing else. The controller is synthetic
+/// (see `SyntheticPad`), and from there on its input takes the path a real one's does: `Platform.pump`
+/// reads it, `input.Mapper` turns it into actions, and the result is read back from the game. Where the
+/// script needs a particular place to stand it sets the simulation up, as the input test does; it never
+/// hands the game an action.
+const PadTest = struct {
+    phase: u32 = 0,
+    /// Seconds spent in the current phase.
+    t: f32 = 0,
+    advanced: bool = false,
+    checks: u32 = 0,
+    failed: u32 = 0,
+    finished: bool = false,
+    held: SyntheticPad = .{},
+    st: pad.State = .{ .connected = true },
+    lang0: Lang = .en,
+    pos0: m.Vec3 = .{},
+    yaw0: f32 = 0,
+    pitch0: f32 = 0,
+    stone_hp: f32 = 0,
+    sel0: usize = 0,
+    steps: u32 = 0,
+    pages: usize = 0,
+    count0: u32 = 0,
+    serial0: u32 = 0,
+    top_speed: f32 = 0,
+    lift: [2]f32 = .{ 0, 0 },
+    saw_both: bool = false,
+    saw_mixed: bool = false,
+    saw_key_arm: bool = false,
+    /// The controller is reported as gone, whatever `st` holds.
+    unplugged: bool = false,
+
+    fn begin(pt: *PadTest, plat: *platform.Platform, app: *app_mod.App) void {
+        pt.held = SyntheticPad.attach(plat);
+        // The route map is walked to chapter 2, which a fresh save has locked.
+        app.unlock_all = true;
+    }
+
+    fn check(pt: *PadTest, ok: bool, what: []const u8) void {
+        pt.checks += 1;
+        if (!ok) pt.failed += 1;
+        std.debug.print("  [{s}] {s}\n", .{ if (ok) "ok" else "FAIL", what });
+    }
+
+    /// True while the script is at the `k`th phase, counting them in the order they are written.
+    fn at(pt: *PadTest, k: *u32) bool {
+        defer k.* += 1;
+        return pt.phase == k.* and !pt.advanced;
+    }
+
+    fn next(pt: *PadTest) void {
+        pt.phase += 1;
+        pt.t = 0;
+        pt.advanced = true;
+    }
+
+    /// Press `b` and let it go. True once the game has had a few frames to act on the press.
+    fn tap(pt: *PadTest, b: pad.Button) bool {
+        pt.st.set(b, pt.t < 0.07);
+        return pt.t >= 0.2;
+    }
+
+    /// `n` taps of `b`, one after another.
+    fn taps(pt: *PadTest, b: pad.Button, n: u32) bool {
+        const period: f32 = 0.2;
+        pt.st.set(b, pt.t < period * @as(f32, @floatFromInt(n)) and @mod(pt.t, period) < 0.07);
+        return pt.t >= period * @as(f32, @floatFromInt(n)) + 0.1;
+    }
+
+    fn rest(pt: *PadTest) void {
+        pt.st = .{ .connected = true };
+    }
+
+    /// Everything a controller has, written to the framework's controller and read back by the code
+    /// that reads a device. Opposite d-pad directions cannot be down together, so it takes two states.
+    fn roundTrip(pt: *PadTest) bool {
+        if (pt.held.controller == null) return false;
+        var ok = true;
+        for (0..2) |pass| {
+            var st: pad.State = .{ .connected = true };
+            if (pass == 0) {
+                st.left = .{ 0.25, -0.5 };
+                st.right = .{ -0.75, 1 };
+                st.lt = 0.5;
+                st.rt = 1;
+            }
+            for (std.enums.values(pad.Button)) |b| {
+                const second = b == .dpad_down or b == .dpad_left or b == .b or b == .rb;
+                // The triggers are analog here; their buttons are derived from the values further on.
+                if (b != .lt and b != .rt) st.set(b, second == (pass == 1));
+            }
+            platform.Gamepad.write(pt.held.controller, st);
+            const got = platform.Gamepad.read(objc.get(pt.held.controller, "extendedGamepad"));
+            if (!std.meta.eql(got.left, st.left) or !std.meta.eql(got.right, st.right) or got.lt != st.lt or got.rt != st.rt) {
+                std.debug.print("      sticks or triggers read back as {any} {any} {d} {d}\n", .{ got.left, got.right, got.lt, got.rt });
+                ok = false;
+            }
+            for (std.enums.values(pad.Button)) |b| {
+                if (got.buttons.contains(b) != st.buttons.contains(b)) {
+                    std.debug.print("      {s} was written {} and read back {}\n", .{ @tagName(b), st.buttons.contains(b), got.buttons.contains(b) });
+                    ok = false;
+                }
+            }
+        }
+        platform.Gamepad.write(pt.held.controller, .{ .connected = true });
+        return ok;
+    }
+
+    fn drive(pt: *PadTest, plat: *platform.Platform, app: *app_mod.App, dt: f32) void {
+        const s = &app.sim;
+        pt.t += dt;
+        pt.advanced = false;
+        if (s.arms[0].held and s.arms[1].held) pt.saw_both = true;
+        if (s.arms[0].held and s.arms[1].held and s.arms[0].tool != s.arms[1].tool) pt.saw_mixed = true;
+        pt.top_speed = @max(pt.top_speed, s.vrel.len());
+        var k: u32 = 0;
+
+        // ------------------------------------------------------------------ the device and the prompts
+        if (pt.at(&k) and pt.t >= 0.4) {
+            pt.check(app.screen == .title, "the game opens on the title screen");
+            pt.check(app.prompts == .kbm, "an attached controller that nobody has touched leaves the prompts on the keyboard");
+            if (pt.held.controller != null) {
+                pt.check(pt.roundTrip(), "every stick, trigger and button written to a GCController is read back by the device code");
+            } else {
+                std.debug.print("  [--] the GameController framework made no controller to write to; the state goes straight to Platform.pad\n", .{});
+            }
+            pt.lang0 = app.lang;
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.dpad_right)) {
+            pt.check(app.lang == pt.lang0.next() and app.lang != pt.lang0, "d-pad right on the title screen switches to the next language");
+            pt.check(std.mem.eql(u8, plat.menuTitle(.quit), strings.menu.quit.get(app.lang)), "the menu bar follows the language");
+            pt.check(app.prompts == .xbox, "a button press moves the prompts to the controller (one of no known family gets Xbox names)");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.taps(.back, Lang.count - 1)) {
+            pt.check(app.lang == pt.lang0, "View on the title screen switches language too, back to the first");
+            pt.next();
+        }
+        if (pt.at(&k)) {
+            plat.postMouseMove();
+            if (pt.t >= 0.4) {
+                pt.check(app.prompts == .xbox, "mouse-moved events arriving do not take the prompts from the controller");
+                plat.postKey(.h, true);
+                pt.next();
+            }
+        }
+        if (pt.at(&k) and pt.t >= 0.1) {
+            plat.postKey(.h, false);
+            pt.check(app.prompts == .kbm, "a key press moves the prompts to the keyboard");
+            pt.st.right = .{ pad.look_shape.inner * 0.8, 0 };
+            pt.next();
+        }
+        if (pt.at(&k) and pt.t >= 0.3) {
+            pt.check(app.prompts == .kbm, "a stick resting inside its dead zone does not take the prompts");
+            pt.st.right = .{ 0.6, 0 };
+            pt.next();
+        }
+        if (pt.at(&k) and pt.t >= 0.2) {
+            pt.check(app.prompts == .xbox, "a stick pushed past its dead zone does");
+            pt.rest();
+            // The framework's own controller has no family; a PlayStation one is written at the seam.
+            plat.pad_source = .injected;
+            pt.st.family = .playstation;
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.x)) {
+            pt.check(app.prompts == .playstation, "a press on a PlayStation controller moves the prompts to PlayStation names");
+            pt.rest();
+            if (pt.held.controller != null) plat.pad_source = .{ .controller = pt.held.controller };
+            pt.next();
+        }
+
+        // ------------------------------------------------------------------ menus
+        if (pt.at(&k) and pt.tap(.y)) {
+            pt.check(app.screen == .map, "Y on the title screen opens the route map");
+            pt.sel0 = app.map_sel;
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.dpad_down)) {
+            pt.check(app.map_sel == (pt.sel0 + 1) % campaign.chapters.len, "d-pad down moves the map selection one chapter");
+            pt.sel0 = app.map_sel;
+            pt.steps = 0;
+            pt.next();
+        }
+        if (pt.at(&k)) {
+            // Held down on the stick for the repeat delay and two and a half intervals: one step at once,
+            // one at the end of the delay, two more an interval apart.
+            pt.st.left = .{ 0, -1 };
+            if (app.map_sel != pt.sel0) {
+                pt.sel0 = app.map_sel;
+                pt.steps += 1;
+            }
+            if (pt.t >= pad.Repeat.delay + 2.5 * pad.Repeat.interval) {
+                pt.st.left = .{ 0, 0 };
+                pt.check(pt.steps >= 3 and pt.steps <= 5, "the left stick held down steps the selection and then repeats");
+                pt.next();
+            }
+        }
+        if (pt.at(&k) and pt.tap(.b)) {
+            pt.check(app.screen == .title, "B backs out of the route map");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.check(app.screen == .briefing and app.briefing_page == 0, "A on the title screen opens the briefing");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.b)) {
+            pt.check(app.screen == .title, "B backs out of the briefing");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.pages = 0;
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.pages += 1;
+            if (app.screen == .briefing and pt.pages <= strings.briefing.pages.len) {
+                pt.t = 0;
+            } else {
+                pt.check(app.screen == .play and pt.pages == strings.briefing.pages.len, "A pages through the briefing and launches chapter 1");
+                pt.next();
+            }
+        }
+
+        // ------------------------------------------------------------------ flying, chapter 1
+        if (pt.at(&k) and pt.t >= 0.3) {
+            InputTest.standAtStone(app);
+            pt.stone_hp = s.findConst(.phlebolith).?.hp;
+            pt.saw_both = false;
+            pt.next();
+        }
+        if (pt.at(&k)) {
+            // Both triggers pulled in the same frame, past the press point but not to the end of their travel.
+            const pull: f32 = if (pt.t >= 0.3 and pt.t < 0.4) 0.7 else 0;
+            pt.st.lt = pull;
+            pt.st.rt = pull;
+            if (pt.t >= 1.2) {
+                pt.check(pt.saw_both, "LT and RT pulled in the same frame drive both arms");
+                pt.check(s.stats.sync_strikes == 1, "the two punches landed as one Sync Strike");
+                pt.check(s.findConst(.phlebolith).?.hp == pt.stone_hp - 10, "the Sync Strike did 10 damage to the phlebolith");
+                pt.next();
+            }
+        }
+        if (pt.at(&k) and pt.tap(.dpad_left)) {
+            pt.check(s.arms[0].tool == .shoot, "d-pad left steps the left arm back a tool, Punch to Shoot");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.lb)) {
+            pt.check(s.arms[0].tool == .punch, "LB steps the left arm on a tool, Shoot to Punch");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.dpad_left)) pt.next();
+        if (pt.at(&k) and pt.tap(.rb)) {
+            pt.check(s.arms[1].tool == .drill, "RB steps the right arm on a tool, Punch to Drill");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.dpad_right)) {
+            pt.check(s.arms[1].tool == .punch, "d-pad right steps the right arm back a tool, Drill to Punch");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.rb)) {
+            pt.saw_mixed = false;
+            pt.next();
+        }
+        if (pt.at(&k)) {
+            pt.st.lt = 1;
+            pt.st.rt = 1;
+            if (pt.t >= 1.0) {
+                pt.check(s.arms[0].tool == .shoot and s.arms[1].tool == .drill and pt.saw_mixed, "different tools run on both arms at once");
+                pt.check(s.arms[1].engaged, "the drill arm is cutting while the other arm fires");
+                pt.check(s.arms[0].charge < 1, "the shoot arm fired");
+                pt.rest();
+                pt.pos0 = s.pos;
+                pt.yaw0 = s.yaw;
+                pt.saw_key_arm = false;
+                plat.postKey(.q, true);
+                pt.next();
+            }
+        }
+        if (pt.at(&k)) {
+            // Thrust and turn on the sticks, with a key held down on the keyboard through it.
+            pt.st.left = .{ 0, -1 };
+            pt.st.right = .{ -1, 0 };
+            if (s.arms[0].held) pt.saw_key_arm = true;
+            if (pt.t >= 1.0) {
+                plat.postKey(.q, false);
+                pt.check(s.pos.dist(pt.pos0) > 20, "the left stick pulled back thrusts the drone backward");
+                pt.check(s.yaw - pt.yaw0 > 1.5, "the right stick pushed left turns the view left");
+                pt.check(pt.saw_key_arm, "a key held on the keyboard works its arm while the sticks fly");
+                pt.rest();
+                pt.pitch0 = s.pitch;
+                pt.next();
+            }
+        }
+        if (pt.at(&k)) {
+            pt.st.right = .{ 0, 1 };
+            if (pt.t >= 0.4) {
+                pt.check(s.pitch - pt.pitch0 > 0.4, "the right stick pushed up looks up");
+                pt.rest();
+                pt.next();
+            }
+        }
+        if (pt.at(&k)) {
+            pt.st.set(.a, true);
+            pt.lift[0] = s.vrel.dot(s.upVec());
+            if (pt.t >= 0.4) {
+                pt.rest();
+                pt.next();
+            }
+        }
+        if (pt.at(&k)) {
+            pt.st.set(.b, pt.t >= 0.1);
+            pt.lift[1] = s.vrel.dot(s.upVec());
+            if (pt.t >= 0.6) {
+                pt.check(pt.lift[0] > 100, "A climbs");
+                pt.check(pt.lift[1] < -100, "B descends");
+                pt.check(app.screen == .play, "and neither confirmed nor backed out of anything while flying");
+                pt.rest();
+                pt.next();
+            }
+        }
+        if (pt.at(&k)) {
+            // Cruise, then a click of the stick while it is pushed: boost, for as long as it stays pushed.
+            pt.st.left = .{ 0, 1 };
+            if (pt.t < 0.1) pt.top_speed = 0;
+            if (pt.t >= 0.7) {
+                pt.check(pt.top_speed > game.cruise_speed * 0.7 and pt.top_speed <= game.cruise_speed * 1.01, "the left stick pushed forward thrusts at cruise speed");
+                pt.top_speed = 0;
+                pt.next();
+            }
+        }
+        if (pt.at(&k)) {
+            pt.st.left = .{ 0, 1 };
+            pt.st.set(.ls, pt.t < 0.07);
+            if (pt.t >= 0.7) {
+                pt.check(pt.top_speed > game.cruise_speed * 1.5, "a click of the left stick boosts, and the boost lasts after the click while the stick is pushed");
+                pt.rest();
+                s.voice.clear();
+                pt.next();
+            }
+        }
+        // Let the drone coast to a stop before the one-shot actions.
+        if (pt.at(&k) and pt.t >= 0.5) pt.next();
+        if (pt.at(&k) and pt.tap(.x)) {
+            pt.check(s.examine_cd > 0, "X identifies whatever is under the reticle");
+            pt.count0 = s.stats.hints;
+            s.voice.clear();
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.y)) {
+            pt.check(s.stats.hints == pt.count0 + 1, "Y asks Marín for a hint");
+            pt.check(s.voice.current != null, "and she is saying it");
+            pt.serial0 = s.voice.serial;
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.back)) {
+            pt.check(s.voice.current == null or s.voice.serial != pt.serial0, "View cuts her line short");
+            pt.next();
+        }
+
+        // ------------------------------------------------------------------ the pause menu
+        if (pt.at(&k) and pt.tap(.start)) {
+            pt.check(app.screen == .pause and app.pause_sel == .resume_game, "Menu pauses, with Resume selected");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.taps(.dpad_down, 4)) {
+            pt.check(app.pause_sel == .language, "d-pad down four times selects the language entry");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.check(app.lang == pt.lang0.next(), "A on the language entry switches to the next language");
+            pt.check(std.mem.eql(u8, plat.menuTitle(.quit), strings.menu.quit.get(app.lang)), "the menu bar follows the language");
+            pt.check(app.save.lang == app.lang and app.save_path_len == 0, "the choice is recorded for saving, and a scripted run has no save file to write");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.taps(.dpad_right, Lang.count - 1)) {
+            pt.check(app.lang == pt.lang0, "d-pad right on the language entry switches it too, back to the first");
+            pt.count0 = s.stats.retries;
+            pt.next();
+        }
+        if (pt.at(&k) and pt.taps(.dpad_up, 3)) {
+            pt.check(app.pause_sel == .retry, "d-pad up three times selects Relaunch from last checkpoint");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.check(app.screen == .play and s.stats.retries == pt.count0 + 1, "A chooses it: the drone is back at the checkpoint");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.start)) pt.next();
+        if (pt.at(&k) and pt.tap(.b)) {
+            pt.check(app.screen == .play, "B backs out of the pause menu into the game");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.start)) {
+            pt.check(app.screen == .pause, "Menu pauses again");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.start)) {
+            pt.check(app.screen == .play, "Menu on the pause menu resumes");
+            pt.next();
+        }
+
+        // ------------------------------------------------------------------ the controller goes away
+        if (pt.at(&k)) {
+            pt.st.rt = 1;
+            if (pt.t >= 0.3) {
+                pt.check(s.arms[1].held, "RT held works the right arm");
+                plat.pad_source = .injected;
+                pt.unplugged = true;
+                pt.next();
+            }
+        }
+        if (pt.at(&k)) {
+            if (pt.t >= 0.2) {
+                pt.check(!s.arms[1].held, "the controller disconnects with the trigger held: the arm stops");
+                pt.check(app.prompts == .kbm, "and the prompts return to the keyboard");
+                pt.rest();
+                pt.unplugged = false;
+                if (pt.held.controller != null) plat.pad_source = .{ .controller = pt.held.controller };
+                pt.next();
+            }
+        }
+
+        // ------------------------------------------------------------------ leaving, and chapter 2 from the map
+        if (pt.at(&k) and pt.t >= 0.2) pt.next();
+        if (pt.at(&k) and pt.tap(.start)) pt.next();
+        if (pt.at(&k) and pt.taps(.dpad_down, 3)) {
+            pt.check(app.screen == .pause and app.pause_sel == .leave, "Leave to title is selected");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.check(app.screen == .title, "A chooses it: back on the title screen");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.y)) pt.next();
+        if (pt.at(&k) and pt.tap(.dpad_down)) {
+            // The selection is wherever the earlier walk left it; step until it is on chapter 2.
+            if (app.map_sel != 1 and pt.steps < 40) {
+                pt.steps += 1;
+                pt.t = 0;
+            } else {
+                pt.check(app.screen == .map and app.map_sel == 1, "the route map selection is on chapter 2");
+                pt.next();
+            }
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.check(app.screen == .play and app.chapter == 1, "A on the route map launches the selected chapter");
+            // The tether, from where the drone arrives among the villi.
+            s.has_tether = true;
+            s.stage = .g_tether;
+            s.voice.clear();
+            pt.next();
+        }
+        if (pt.at(&k) and pt.t >= 0.5) {
+            pt.check(InputTest.aim(s, true), "a villus is within tether range of the arrival point");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.rs)) {
+            pt.check(s.tether != null and s.g.tether_uses == 1, "a click of the right stick fires the tether at the tissue under the reticle");
+            pt.next();
+        }
+        if (pt.at(&k) and (pt.t >= 4 or (s.tether != null and s.pos.dist(s.tether_hold) < 30))) {
+            pt.check(s.tether != null and s.pos.dist(s.tether_hold) < 30, "the line reels the drone in and holds it with no thrust");
+            pt.check(InputTest.aim(s, false), "open lumen is in view from the hold point");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.dpad_up)) {
+            pt.check(s.tether == null, "d-pad up, the tether's other button, releases it on nothing");
+            pt.finished = true;
+            pt.next();
+        }
+
+        if (pt.unplugged) plat.pad = .{} else pt.held.set(plat, pt.st);
+    }
+};
+
 test {
     _ = @import("math.zig");
     _ = @import("mesh.zig");
@@ -811,4 +1405,7 @@ test {
     _ = @import("utf8.zig");
     _ = @import("i18n.zig");
     _ = @import("l10n.zig");
+    _ = @import("pad.zig");
+    _ = @import("bindings.zig");
+    _ = @import("input.zig");
 }

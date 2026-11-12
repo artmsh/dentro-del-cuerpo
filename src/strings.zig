@@ -11,6 +11,12 @@
 //!
 //! Text with numbers in it uses the placeholders of `i18n.expand`: `{0}` for an argument and
 //! `{0|one|few|many}` for a word that agrees with it.
+//!
+//! Text never spells out a key or a button. It names the action, `{@examine}`, and `bindings.zig` puts in
+//! what that action is bound to on the device in the player's hands: T, X or □. Where the two devices need
+//! different sentences ("hold W" against "push the left stick forward"), the text carries a second wording
+//! in `.pad`; the first may then name keys outright, since only a keyboard player sees it. A test in
+//! `l10n.zig` fails on any text a controller player could see that still names a key.
 
 const i18n = @import("i18n.zig");
 const T = i18n.Text;
@@ -22,13 +28,86 @@ pub const tool = struct {
     pub const shoot: T = .{ .en = "SHOOT", .uk = "ПОСТРІЛ" };
 };
 
+/// What each action is bound to on the keyboard and mouse, as a prompt names it; `bindings.zig` pairs
+/// each with its action. Names of keys stay as they are printed on the keyboard.
+pub const keys = struct {
+    pub const move: T = .{ .en = "W A S D", .uk = "W A S D" };
+    pub const look: T = .{ .en = "Mouse / arrow keys", .uk = "Миша / стрілки" };
+    pub const up: T = .{ .en = "Space", .uk = "Пробіл" };
+    pub const down: T = .{ .en = "C", .uk = "C" };
+    pub const boost: T = .{ .en = "Shift", .uk = "Shift" };
+    pub const arm_left: T = .{ .en = "Q", .uk = "Q" };
+    pub const arm_right: T = .{ .en = "E", .uk = "E" };
+    pub const tool_left: T = .{ .en = "Z", .uk = "Z" };
+    pub const tool_right: T = .{ .en = "X", .uk = "X" };
+    pub const pick_left: T = .{ .en = "1 2 3", .uk = "1 2 3" };
+    pub const pick_right: T = .{ .en = "8 9 0", .uk = "8 9 0" };
+    pub const examine: T = .{ .en = "T", .uk = "T" };
+    pub const hint: T = .{ .en = "H", .uk = "H" };
+    pub const tether: T = .{ .en = "G", .uk = "G" };
+    pub const skip: T = .{ .en = "Tab", .uk = "Tab" };
+    pub const pause: T = .{ .en = "Esc", .uk = "Esc" };
+    pub const confirm: T = .{ .en = "Enter", .uk = "Enter" };
+    pub const back: T = .{ .en = "Esc", .uk = "Esc" };
+    pub const nav: T = .{ .en = "↑ ↓", .uk = "↑ ↓" };
+    pub const map: T = .{ .en = "M", .uk = "M" };
+    pub const language: T = .{ .en = "Tab", .uk = "Tab" };
+    pub const retry: T = .{ .en = "R", .uk = "R" };
+    pub const restart: T = .{ .en = "N", .uk = "N" };
+    pub const leave: T = .{ .en = "L", .uk = "L" };
+};
+
+/// Names of a game controller's parts, as a prompt names them. The buttons are named as each family prints
+/// or documents them: letters on Xbox, shapes on PlayStation. The two buttons beside the Xbox guide button
+/// carry only pictograms and take Microsoft's names for them, translated; PlayStation's Create and Options
+/// are product names and stay as they are.
+pub const pad = struct {
+    pub const left_stick: T = .{ .en = "Left stick", .uk = "Лівий стік" };
+    pub const right_stick: T = .{ .en = "Right stick", .uk = "Правий стік" };
+    pub const dpad_up: T = .{ .en = "D-pad ↑", .uk = "↑ хрестовини" };
+    pub const dpad_down: T = .{ .en = "D-pad ↓", .uk = "↓ хрестовини" };
+    pub const dpad_left: T = .{ .en = "D-pad ←", .uk = "← хрестовини" };
+    pub const dpad_right: T = .{ .en = "D-pad →", .uk = "→ хрестовини" };
+    pub const dpad_vertical: T = .{ .en = "D-pad ↑ ↓", .uk = "↑ ↓ хрестовини" };
+
+    pub const xbox = struct {
+        pub const a: T = .{ .en = "A", .uk = "A" };
+        pub const b: T = .{ .en = "B", .uk = "B" };
+        pub const x: T = .{ .en = "X", .uk = "X" };
+        pub const y: T = .{ .en = "Y", .uk = "Y" };
+        pub const lb: T = .{ .en = "LB", .uk = "LB" };
+        pub const rb: T = .{ .en = "RB", .uk = "RB" };
+        pub const lt: T = .{ .en = "LT", .uk = "LT" };
+        pub const rt: T = .{ .en = "RT", .uk = "RT" };
+        pub const ls: T = .{ .en = "LS", .uk = "LS" };
+        pub const rs: T = .{ .en = "RS", .uk = "RS" };
+        pub const view: T = .{ .en = "View", .uk = "Перегляд" };
+        pub const menu: T = .{ .en = "Menu", .uk = "Меню" };
+    };
+
+    pub const playstation = struct {
+        pub const cross: T = .{ .en = "✕", .uk = "✕" };
+        pub const circle: T = .{ .en = "○", .uk = "○" };
+        pub const square: T = .{ .en = "□", .uk = "□" };
+        pub const triangle: T = .{ .en = "△", .uk = "△" };
+        pub const l1: T = .{ .en = "L1", .uk = "L1" };
+        pub const r1: T = .{ .en = "R1", .uk = "R1" };
+        pub const l2: T = .{ .en = "L2", .uk = "L2" };
+        pub const r2: T = .{ .en = "R2", .uk = "R2" };
+        pub const l3: T = .{ .en = "L3", .uk = "L3" };
+        pub const r3: T = .{ .en = "R3", .uk = "R3" };
+        pub const create: T = .{ .en = "Create", .uk = "Create" };
+        pub const options: T = .{ .en = "Options", .uk = "Options" };
+    };
+};
+
 pub const hud = struct {
     pub const sync: T = .{ .en = "SYNC", .uk = "СИНХРО" };
     pub const tissue_damage: T = .{ .en = "TISSUE DAMAGE", .uk = "УШКОДЖЕННЯ ТКАНИНИ" };
-    pub const unidentified: T = .{ .en = "UNIDENTIFIED  —  T", .uk = "НЕРОЗПІЗНАНО  —  T" };
+    pub const unidentified: T = .{ .en = "UNIDENTIFIED  —  {@examine}", .uk = "НЕРОЗПІЗНАНО  —  {@examine}" };
     /// Distance, then the entry's size.
     pub const focus: T = .{ .en = "{0}  ·  {1}", .uk = "{0}  ·  {1}" };
-    pub const focus_more: T = .{ .en = "{0}  ·  {1}  ·  T: more", .uk = "{0}  ·  {1}  ·  T: докладніше" };
+    pub const focus_more: T = .{ .en = "{0}  ·  {1}  ·  {@examine}: more", .uk = "{0}  ·  {1}  ·  {@examine}: докладніше" };
     pub const embolus: T = .{ .en = "EMBOLUS", .uk = "ЕМБОЛ" };
     pub const micrometres: T = .{ .en = "{0} µm", .uk = "{0} мкм" };
     pub const millimetres: T = .{ .en = "{0} mm", .uk = "{0} мм" };
@@ -50,7 +129,7 @@ pub const hud = struct {
     pub const contraction_overhead: T = .{ .en = "CONTRACTION — STAY BETWEEN THE VILLI", .uk = "СКОРОЧЕННЯ — ЗАЛИШАЙТЕСЯ МІЖ ВОРСИНКАМИ" };
     pub const contraction_in: T = .{ .en = "CONTRACTION RING IN {0} s", .uk = "КІЛЬЦЕ СКОРОЧЕННЯ ЧЕРЕЗ {0} с" };
     pub const ring_passed: T = .{ .en = "RING PASSED", .uk = "КІЛЬЦЕ ПРОЙШЛО" };
-    pub const tethered: T = .{ .en = "TETHERED  ·  G releases", .uk = "НА ТРОСІ  ·  G — відпустити" };
+    pub const tethered: T = .{ .en = "TETHERED  ·  {@tether} releases", .uk = "НА ТРОСІ  ·  {@tether} — відпустити" };
     pub const lumen_open: T = .{ .en = "LUMEN OPEN", .uk = "ПРОСВІТ ВІДКРИТИЙ" };
     pub const no_flow: T = .{ .en = "NO FLOW — VEIN OBSTRUCTED", .uk = "ТЕЧІЇ НЕМАЄ — ВЕНУ ПЕРЕКРИТО" };
     pub const reflux: T = .{ .en = "REFLUX — VALVES SHUT", .uk = "РЕФЛЮКС — КЛАПАНИ ЗАКРИТІ" };
@@ -60,15 +139,31 @@ pub const hud = struct {
     pub const checkpoint_saved: T = .{ .en = "CHECKPOINT SAVED", .uk = "КОНТРОЛЬНУ ТОЧКУ ЗБЕРЕЖЕНО" };
     pub const hidden_route: T = .{ .en = "HIDDEN ROUTE LOGGED: BONE MARROW", .uk = "ЗАПИСАНО ПРИХОВАНИЙ МАРШРУТ: КІСТКОВИЙ МОЗОК" };
 
-    pub const left_arm: T = .{ .en = "LEFT ARM  ·  Q  /  left click", .uk = "ЛІВА РУКА  ·  Q  /  ліва кнопка миші" };
-    pub const right_arm: T = .{ .en = "RIGHT ARM  ·  E  /  right click", .uk = "ПРАВА РУКА  ·  E  /  права кнопка миші" };
+    pub const left_arm: T = .{
+        .en = "LEFT ARM  ·  {@arm_left}  /  left click",
+        .uk = "ЛІВА РУКА  ·  {@arm_left}  /  ліва кнопка миші",
+        .pad = &.{ .en = "LEFT ARM  ·  {@arm_left}", .uk = "ЛІВА РУКА  ·  {@arm_left}" },
+    };
+    pub const right_arm: T = .{
+        .en = "RIGHT ARM  ·  {@arm_right}  /  right click",
+        .uk = "ПРАВА РУКА  ·  {@arm_right}  /  права кнопка миші",
+        .pad = &.{ .en = "RIGHT ARM  ·  {@arm_right}", .uk = "ПРАВА РУКА  ·  {@arm_right}" },
+    };
     pub const charge: T = .{ .en = "CHARGE", .uk = "ЗАРЯД" };
     pub const overheated: T = .{ .en = "OVERHEATED", .uk = "ПЕРЕГРІВ" };
     pub const cutting: T = .{ .en = "CUTTING", .uk = "РІЖЕ" };
     pub const heat: T = .{ .en = "HEAT", .uk = "НАГРІВ" };
     pub const ready: T = .{ .en = "READY", .uk = "ГОТОВО" };
-    pub const left_keys: T = .{ .en = "Z: change tool   1 2 3: punch / drill / shoot", .uk = "Z: змінити   1 2 3: удар / свердло / постріл" };
-    pub const right_keys: T = .{ .en = "X: change tool   8 9 0: punch / drill / shoot", .uk = "X: змінити   8 9 0: удар / свердло / постріл" };
+    pub const left_keys: T = .{
+        .en = "{@tool_left}: change tool   {@pick_left}: punch / drill / shoot",
+        .uk = "{@tool_left}: змінити   {@pick_left}: удар / свердло / постріл",
+        .pad = &.{ .en = "{@tool_left}: next tool   {@pick_left}: previous", .uk = "{@tool_left}: наступний   {@pick_left}: попередній" },
+    };
+    pub const right_keys: T = .{
+        .en = "{@tool_right}: change tool   {@pick_right}: punch / drill / shoot",
+        .uk = "{@tool_right}: змінити   {@pick_right}: удар / свердло / постріл",
+        .pad = &.{ .en = "{@tool_right}: next tool   {@pick_right}: previous", .uk = "{@tool_right}: наступний   {@pick_right}: попередній" },
+    };
 
     /// The speaker label over a comms line.
     pub const marin: T = .{ .en = "DRA. MARÍN", .uk = "Д-Р МАРІН" };
@@ -85,10 +180,18 @@ pub const hud = struct {
     pub const controls: T = .{
         .en = "WASD move   Space / C up, down   Shift boost   T identify   H hint   Tab skip line   Esc pause",
         .uk = "WASD рух   Пробіл / C вгору, вниз   Shift прискорення   T розпізнати   H підказка   Tab пропустити репліку   Esc пауза",
+        .pad = &.{
+            .en = "{@move}: move   {@up} / {@down}: up, down   {@boost}: boost   {@examine}: identify   {@hint}: hint   {@skip}: skip line   {@pause}: pause",
+            .uk = "{@move}: рух   {@up} / {@down}: вгору, вниз   {@boost}: прискорення   {@examine}: розпізнати   {@hint}: підказка   {@skip}: пропустити репліку   {@pause}: пауза",
+        },
     };
     pub const controls_tether: T = .{
         .en = "WASD move   Space / C up, down   Shift boost   G tether   T scan   H hint   Tab skip   Esc pause",
         .uk = "WASD рух   Пробіл / C вгору, вниз   Shift прискорення   G трос   T скан   H підказка   Tab пропустити   Esc пауза",
+        .pad = &.{
+            .en = "{@move}: move   {@up} / {@down}: up, down   {@boost}: boost   {@tether}: tether   {@examine}: scan   {@hint}: hint   {@skip}: skip   {@pause}: pause",
+            .uk = "{@move}: рух   {@up} / {@down}: вгору, вниз   {@boost}: прискорення   {@tether}: трос   {@examine}: скан   {@hint}: підказка   {@skip}: пропустити   {@pause}: пауза",
+        },
     };
 };
 
@@ -97,8 +200,8 @@ pub const card = struct {
     pub const tether_kicker: T = .{ .en = "MUCIN SYNTHESIS CALIBRATED  —  UPGRADE", .uk = "СИНТЕЗ МУЦИНУ ВІДКАЛІБРОВАНО  —  ПОКРАЩЕННЯ" };
     pub const tether_name: T = .{ .en = "MUCUS TETHER", .uk = "МУЦИНОВИЙ ТРОС" };
     pub const tether_body: T = .{
-        .en = "G fires a mucin line at whatever tissue the reticle is on, up to 0.4 mm away, reels the drone in and holds it there against any stream. G on a new point moves the line; G on nothing releases it. Hold on through a contraction, or cross a stream the thrusters cannot beat one pull at a time.",
-        .uk = "G вистрілює муциновий трос у тканину під прицілом на відстань до 0,4 мм, підтягує дрон і втримує його там проти будь-якої течії. G на новій точці переносить трос; G у порожнечу відпускає його. Перечекайте на ньому скорочення або здолайте течію, непосильну для двигунів, — ривок за ривком.",
+        .en = "{@tether} fires a mucin line at whatever tissue the reticle is on, up to 0.4 mm away, reels the drone in and holds it there against any stream. {@tether} on a new point moves the line; {@tether} on nothing releases it. Hold on through a contraction, or cross a stream the thrusters cannot beat one pull at a time.",
+        .uk = "{@tether} вистрілює муциновий трос у тканину під прицілом на відстань до 0,4 мм, підтягує дрон і втримує його там проти будь-якої течії. {@tether} на новій точці переносить трос; {@tether} у порожнечу відпускає його. Перечекайте на ньому скорочення або здолайте течію, непосильну для двигунів, — ривок за ривком.",
     };
     pub const sync_kicker: T = .{ .en = "FIELD CALIBRATION COMPLETE  —  UPGRADE", .uk = "ПОЛЬОВЕ КАЛІБРУВАННЯ ЗАВЕРШЕНО  —  ПОКРАЩЕННЯ" };
     pub const sync_name: T = .{ .en = "SYNC SERVO", .uk = "СИНХРОСЕРВО" };
@@ -106,15 +209,15 @@ pub const card = struct {
         .en = "Trigger both arms within a tenth of a second and they land as one Sync Strike: three times the effect, with a shockwave that clears small organisms around you. Two punches shatter calcium. Two rounds merge into a lance that pierces.",
         .uk = "Запустіть обидві руки з різницею до десятої частки секунди — і вони спрацюють як один синхроудар: утричі сильніший, з ударною хвилею, що змітає дрібні організми довкола. Два удари розбивають кальцій. Два заряди зливаються у спис, що пробиває наскрізь.",
     };
-    pub const install: T = .{ .en = "Enter — install", .uk = "Enter — встановити" };
+    pub const install: T = .{ .en = "{@confirm} — install", .uk = "{@confirm} — встановити" };
 
     pub const signal_lost: T = .{ .en = "SIGNAL LOST", .uk = "СИГНАЛ ВТРАЧЕНО" };
     pub const hull_failed: T = .{ .en = "The hull failed. The patient is unharmed; the drone is not.", .uk = "Корпус не витримав. Пацієнтка не постраждала, а от дрон — так." };
-    pub const relaunch: T = .{ .en = "Enter — relaunch from the last checkpoint", .uk = "Enter — перезапуск з останньої контрольної точки" };
+    pub const relaunch: T = .{ .en = "{@confirm} — relaunch from the last checkpoint", .uk = "{@confirm} — перезапуск з останньої контрольної точки" };
     pub const patient_lost: T = .{ .en = "PATIENT LOST", .uk = "ПАЦІЄНТКУ ВТРАЧЕНО" };
     pub const lost_vein: T = .{ .en = "Too much damage to healthy tissue, too many emboli. She did not make it.", .uk = "Забагато ушкоджень здорової тканини, забагато емболів. Вона не вижила." };
     pub const lost_gut: T = .{ .en = "Too much damage to the lining, too much virus spread. She did not make it.", .uk = "Забагато ушкоджень слизової, вірус поширився надто далеко. Вона не вижила." };
-    pub const restart: T = .{ .en = "Enter — restart the chapter", .uk = "Enter — почати розділ заново" };
+    pub const restart: T = .{ .en = "{@confirm} — restart the chapter", .uk = "{@confirm} — почати розділ заново" };
 
     pub const vein_kicker: T = .{ .en = "CHAPTER 1  ·  VEIN", .uk = "РОЗДІЛ 1  ·  ВЕНА" };
     pub const vein_title: T = .{ .en = "Into the femoral vein", .uk = "До стегнової вени" };
@@ -143,53 +246,76 @@ pub const card = struct {
     pub const note_gut_clean: T = .{ .en = "Nothing spread and her flora is intact. The villi will be back within the week.", .uk = "Вірус не поширився, і її флора ціла. Ворсинки відновляться за тиждень." };
     pub const note_gut_flora: T = .{ .en = "The virus is cleared, and so is some of what kept other things out.", .uk = "Вірус усунено — а разом із ним і частину того, що не пускало сюди інших." };
     pub const note_gut_spread: T = .{ .en = "Cleared. What spread will slow her recovery by a day or two.", .uk = "Усунено. Те, що встигло поширитися, затримає її одужання на день-два." };
-    pub const to_route_map: T = .{ .en = "Enter — route map", .uk = "Enter — карта маршруту" };
+    pub const to_route_map: T = .{ .en = "{@confirm} — route map", .uk = "{@confirm} — карта маршруту" };
 };
 
 pub const pause = struct {
     pub const heading: T = .{ .en = "PAUSED", .uk = "ПАУЗА" };
-    /// Key, then what it does. Key names that are the same on every keyboard are not translated.
-    pub const options = [_][2]T{
-        .{ .{ .en = "Esc / Enter", .uk = "Esc / Enter" }, .{ .en = "Resume", .uk = "Продовжити" } },
-        .{ .{ .en = "R", .uk = "R" }, .{ .en = "Relaunch from last checkpoint", .uk = "Перезапуск з останньої контрольної точки" } },
-        .{ .{ .en = "N", .uk = "N" }, .{ .en = "Restart chapter", .uk = "Почати розділ заново" } },
-        .{ .{ .en = "L", .uk = "L" }, .{ .en = "Leave to title", .uk = "Вийти на титульний екран" } },
+    /// What resumes the game, beside the first option. The other options show their own key, if they have one.
+    pub const resume_keys: T = .{ .en = "{@back}", .uk = "{@back}", .pad = &.{ .en = "{@back} / {@pause}", .uk = "{@back} / {@pause}" } };
+    /// The options, in the order `app.PauseItem` lists them; the language switch follows as one more.
+    pub const options = [_]T{
+        .{ .en = "Resume", .uk = "Продовжити" },
+        .{ .en = "Relaunch from last checkpoint", .uk = "Перезапуск з останньої контрольної точки" },
+        .{ .en = "Restart chapter", .uk = "Почати розділ заново" },
+        .{ .en = "Leave to title", .uk = "Вийти на титульний екран" },
     };
+    /// How to choose an option without its own key.
+    pub const choose: T = .{ .en = "{@nav} select    {@confirm} choose", .uk = "{@nav} вибір    {@confirm} обрати" };
+    /// Control, then what it does.
     pub const controls = [_][2]T{
-        .{ .{ .en = "Mouse / arrow keys", .uk = "Миша / стрілки" }, .{ .en = "Look", .uk = "Огляд" } },
-        .{ .{ .en = "W A S D", .uk = "W A S D" }, .{ .en = "Thrust and strafe", .uk = "Тяга і рух убік" } },
-        .{ .{ .en = "Space / C", .uk = "Пробіл / C" }, .{ .en = "Up / down", .uk = "Вгору / вниз" } },
-        .{ .{ .en = "Shift", .uk = "Shift" }, .{ .en = "Boost", .uk = "Прискорення" } },
-        .{ .{ .en = "Q  ·  left click", .uk = "Q  ·  ліва кнопка миші" }, .{ .en = "Left arm", .uk = "Ліва рука" } },
-        .{ .{ .en = "E  ·  right click", .uk = "E  ·  права кнопка миші" }, .{ .en = "Right arm", .uk = "Права рука" } },
-        .{ .{ .en = "Z / X", .uk = "Z / X" }, .{ .en = "Cycle left / right arm tool", .uk = "Змінити інструмент лівої / правої руки" } },
-        .{ .{ .en = "1 2 3  ·  8 9 0", .uk = "1 2 3  ·  8 9 0" }, .{ .en = "Punch, drill, shoot on left · right arm", .uk = "Удар, свердло, постріл на лівій · правій руці" } },
-        .{ .{ .en = "T", .uk = "T" }, .{ .en = "Identify what the reticle is on (again for more)", .uk = "Розпізнати те, що під прицілом (ще раз — докладніше)" } },
-        .{ .{ .en = "H", .uk = "H" }, .{ .en = "Hint", .uk = "Підказка" } },
-        .{ .{ .en = "Tab", .uk = "Tab" }, .{ .en = "Skip the current line", .uk = "Пропустити поточну репліку" } },
-        .{ .{ .en = "Cmd+F", .uk = "Cmd+F" }, .{ .en = "Full screen", .uk = "На весь екран" } },
+        .{ .{ .en = "{@look}", .uk = "{@look}" }, .{ .en = "Look", .uk = "Огляд" } },
+        .{ .{ .en = "{@move}", .uk = "{@move}" }, .{ .en = "Thrust and strafe", .uk = "Тяга і рух убік" } },
+        .{ .{ .en = "{@up} / {@down}", .uk = "{@up} / {@down}" }, .{ .en = "Up / down", .uk = "Вгору / вниз" } },
+        .{
+            .{ .en = "{@boost}", .uk = "{@boost}" },
+            .{ .en = "Boost", .uk = "Прискорення", .pad = &.{ .en = "Boost: click once, it lasts while the stick is pushed", .uk = "Прискорення: натисніть раз, діє, поки стік відхилено" } },
+        },
+        .{
+            .{ .en = "{@arm_left}  ·  left click", .uk = "{@arm_left}  ·  ліва кнопка миші", .pad = &.{ .en = "{@arm_left}", .uk = "{@arm_left}" } },
+            .{ .en = "Left arm", .uk = "Ліва рука" },
+        },
+        .{
+            .{ .en = "{@arm_right}  ·  right click", .uk = "{@arm_right}  ·  права кнопка миші", .pad = &.{ .en = "{@arm_right}", .uk = "{@arm_right}" } },
+            .{ .en = "Right arm", .uk = "Права рука" },
+        },
+        .{ .{ .en = "{@tool_left} / {@tool_right}", .uk = "{@tool_left} / {@tool_right}" }, .{ .en = "Cycle left / right arm tool", .uk = "Змінити інструмент лівої / правої руки" } },
+        .{
+            .{ .en = "{@pick_left}  ·  {@pick_right}", .uk = "{@pick_left}  ·  {@pick_right}" },
+            .{
+                .en = "Punch, drill, shoot on left · right arm",
+                .uk = "Удар, свердло, постріл на лівій · правій руці",
+                .pad = &.{ .en = "Previous tool on left · right arm", .uk = "Попередній інструмент лівої · правої руки" },
+            },
+        },
+        .{ .{ .en = "{@examine}", .uk = "{@examine}" }, .{ .en = "Identify what the reticle is on (again for more)", .uk = "Розпізнати те, що під прицілом (ще раз — докладніше)" } },
+        .{ .{ .en = "{@hint}", .uk = "{@hint}" }, .{ .en = "Hint", .uk = "Підказка" } },
+        .{ .{ .en = "{@skip}", .uk = "{@skip}" }, .{ .en = "Skip the current line", .uk = "Пропустити поточну репліку" } },
     };
+    /// A control that exists only on the keyboard: the menu bar's shortcut. It is listed when the prompts
+    /// are for the keyboard.
+    pub const fullscreen = [2]T{ .{ .en = "Cmd+F", .uk = "Cmd+F" }, .{ .en = "Full screen", .uk = "На весь екран" } };
 };
 
 /// The language switch on the title and pause screens: the key, then this label, then each language's own name.
 pub const language = struct {
-    pub const key: T = .{ .en = "Tab", .uk = "Tab" };
+    pub const key: T = .{ .en = "{@language}", .uk = "{@language}" };
     pub const label: T = .{ .en = "Language", .uk = "Мова" };
 };
 
 pub const title = struct {
     pub const tagline: T = .{ .en = "I N S I D E   T H E   B O D Y", .uk = "У С Е Р Е Д И Н І   Т І Л А" };
-    pub const begin: T = .{ .en = "Enter — begin", .uk = "Enter — почати" };
-    pub const route_map: T = .{ .en = "M — route map", .uk = "M — карта маршруту" };
-    pub const progress_one: T = .{ .en = "Chapter 1 complete  ·  grade {0}  ·  chapter 2 is open on the route map — M", .uk = "Розділ 1 завершено  ·  оцінка {0}  ·  розділ 2 відкрито на карті маршруту — M" };
-    pub const progress_two: T = .{ .en = "Chapters 1 and 2 complete  ·  grades {0} and {1}  ·  M for the route map", .uk = "Розділи 1 і 2 завершено  ·  оцінки {0} і {1}  ·  M — карта маршруту" };
+    pub const begin: T = .{ .en = "{@confirm} — begin", .uk = "{@confirm} — почати" };
+    pub const route_map: T = .{ .en = "{@map} — route map", .uk = "{@map} — карта маршруту" };
+    pub const progress_one: T = .{ .en = "Chapter 1 complete  ·  grade {0}  ·  chapter 2 is open on the route map — {@map}", .uk = "Розділ 1 завершено  ·  оцінка {0}  ·  розділ 2 відкрито на карті маршруту — {@map}" };
+    pub const progress_two: T = .{ .en = "Chapters 1 and 2 complete  ·  grades {0} and {1}  ·  {@map} for the route map", .uk = "Розділи 1 і 2 завершено  ·  оцінки {0} і {1}  ·  {@map} — карта маршруту" };
     pub const backdrop: T = .{ .en = "Right great saphenous vein, 3.6 mm across. Every disc is a red blood cell, 7.8 µm.", .uk = "Права велика підшкірна вена, 3,6 мм у діаметрі. Кожен диск — еритроцит, 7,8 мкм." };
 };
 
 pub const briefing = struct {
     pub const heading: T = .{ .en = "BRIEFING  ·  {0} / {1}", .uk = "ІНСТРУКТАЖ  ·  {0} / {1}" };
-    pub const launch: T = .{ .en = "Enter — launch", .uk = "Enter — старт" };
-    pub const next: T = .{ .en = "Enter — continue", .uk = "Enter — далі" };
+    pub const launch: T = .{ .en = "{@confirm} — launch", .uk = "{@confirm} — старт" };
+    pub const next: T = .{ .en = "{@confirm} — continue", .uk = "{@confirm} — далі" };
     pub const pages = [_]T{
         .{
             .en = "Patient: 58, colloid cyst of the third ventricle. It plugs the foramina of Monro without warning; the next time may be the last. She is septic from an infected clot in her right leg, and she will not survive open surgery.\n\nSo we go in through the leg.",
@@ -200,8 +326,8 @@ pub const briefing = struct {
             .uk = "Ви керуєте дроном завбільшки з еритроцит: вісім мікрометрів. Дві руки, на кожній — ударник, свердло або літичний випромінювач, у кожної свій спуск.\n\nВаш дисплей прибирає дев’яносто дев’ять еритроцитів зі ста, інакше кров була б суцільною стіною. Зв’язок працює в масштабі часу один до ста: секунда вашого часу — це десять мілісекунд її.",
         },
         .{
-            .en = "Every stop between here and the brain removes something that would kill her before the operation, and teaches the drone something it needs at the end. First stop is the clot.\n\nI'm Elena Marín. I'll be on comms the whole way. Point at anything and press T — I'll tell you what it is.",
-            .uk = "Кожна зупинка на шляху до мозку усуває щось, що вбило б її ще до операції, і вчить дрон чогось, що знадобиться наприкінці. Перша зупинка — тромб.\n\nЯ Елена Марін. Буду на зв’язку всю дорогу. Наведіть приціл на що завгодно й натисніть T — я скажу, що це.",
+            .en = "Every stop between here and the brain removes something that would kill her before the operation, and teaches the drone something it needs at the end. First stop is the clot.\n\nI'm Elena Marín. I'll be on comms the whole way. Point at anything and press {@examine} — I'll tell you what it is.",
+            .uk = "Кожна зупинка на шляху до мозку усуває щось, що вбило б її ще до операції, і вчить дрон чогось, що знадобиться наприкінці. Перша зупинка — тромб.\n\nЯ Елена Марін. Буду на зв’язку всю дорогу. Наведіть приціл на що завгодно й натисніть {@examine} — я скажу, що це.",
         },
     };
 };
@@ -223,11 +349,11 @@ pub const map = struct {
     pub const field_objective: T = .{ .en = "OBJECTIVE", .uk = "ЗАВДАННЯ" };
     pub const field_challenge: T = .{ .en = "WHAT MAKES IT HARD HERE", .uk = "У ЧОМУ ТУТ СКЛАДНІСТЬ" };
     pub const field_upgrade: T = .{ .en = "UPGRADE", .uk = "ПОКРАЩЕННЯ" };
-    pub const fly: T = .{ .en = "Enter — fly this chapter", .uk = "Enter — летіти сюди" };
+    pub const fly: T = .{ .en = "{@confirm} — fly this chapter", .uk = "{@confirm} — летіти сюди" };
     pub const need_previous: T = .{ .en = "Complete the chapter before it to fly this one.", .uk = "Щоб летіти сюди, завершіть попередній розділ." };
     pub const not_found: T = .{ .en = "Not yet found.", .uk = "Ще не знайдено." };
     pub const not_built: T = .{ .en = "Designed and routed; not yet flyable in this build.", .uk = "Спроєктовано й нанесено на карту; у цій збірці ще недоступно." };
-    pub const keys: T = .{ .en = "↑ ↓ select    Enter fly    Esc back", .uk = "↑ ↓ вибір    Enter летіти    Esc назад" };
+    pub const keys: T = .{ .en = "{@nav} select    {@confirm} fly    {@back} back", .uk = "{@nav} вибір    {@confirm} летіти    {@back} назад" };
 };
 
 /// The application menu in the menu bar.
@@ -247,6 +373,10 @@ pub const line = struct {
     pub const youre_inside_the_cannula: T = .{
         .en = "You're inside the cannula, in a vein of the right thigh. Mouse or arrow keys to look, W to thrust.",
         .uk = "Ви в канюлі, у вені правого стегна. Миша або стрілки — огляд, W — тяга.",
+        .pad = &.{
+            .en = "You're inside the cannula, in a vein of the right thigh. Right stick to look, left stick to thrust.",
+            .uk = "Ви в канюлі, у вені правого стегна. Правий стік — огляд, лівий — тяга.",
+        },
     };
     pub const first_lesson: T = .{
         .en = "First lesson, because everything after depends on it: blood in a vessel does not move as one block. Fly out to the wall and stop there.",
@@ -263,8 +393,8 @@ pub const line = struct {
     };
     pub const ride_it_downstream: T = .{ .en = "Ride it downstream. Watch for the wall changing shape.", .uk = "Пливіть за течією. Стежте, де стінка змінить форму." };
     pub const there_the_wall_bulges: T = .{
-        .en = "There: the wall bulges. Put your reticle on the pale flap inside the bulge and press T. Ask me about anything that way.",
-        .uk = "Ось: стінка випинається. Наведіть приціл на бліду заслінку всередині випину й натисніть T. Так можна спитати мене про будь-що.",
+        .en = "There: the wall bulges. Put your reticle on the pale flap inside the bulge and press {@examine}. Ask me about anything that way.",
+        .uk = "Ось: стінка випинається. Наведіть приціл на бліду заслінку всередині випину й натисніть {@examine}. Так можна спитати мене про будь-що.",
     };
     pub const watch_one_cycle: T = .{
         .en = "Watch one cycle. When the calf relaxes, blood falls back, the cusps meet and nothing passes. Go through while they lie open.",
@@ -280,12 +410,12 @@ pub const line = struct {
         .uk = "Що більше їх на стінці, то ближче інфекція. А ось і причина.",
     };
     pub const bacteria_ahead: T = .{
-        .en = "Bacteria ahead. Left arm is Q, right arm is E. Your left arm carries lytic rounds: hold Q.",
-        .uk = "Попереду бактерії. Ліва рука — Q, права — E. У лівій руці літичні заряди: утримуйте Q.",
+        .en = "Bacteria ahead. Left arm is {@arm_left}, right arm is {@arm_right}. Your left arm carries lytic rounds: hold {@arm_left}.",
+        .uk = "Попереду бактерії. Ліва рука — {@arm_left}, права — {@arm_right}. У лівій руці літичні заряди: утримуйте {@arm_left}.",
     };
     pub const each_arm_carries_three_tools: T = .{
-        .en = "Each arm carries three tools. Z cycles the left arm, X the right. Rounds for organisms, the drill for anything fibrous, the punch for anything brittle — and the arms work at the same time.",
-        .uk = "На кожній руці три інструменти. Z перемикає ліву руку, X — праву. Заряди — для мікроорганізмів, свердло — для всього волокнистого, удар — для всього крихкого. І руки працюють одночасно.",
+        .en = "Each arm carries three tools. {@tool_left} cycles the left arm, {@tool_right} the right. Rounds for organisms, the drill for anything fibrous, the punch for anything brittle — and the arms work at the same time.",
+        .uk = "На кожній руці три інструменти. {@tool_left} перемикає ліву руку, {@tool_right} — праву. Заряди — для мікроорганізмів, свердло — для всього волокнистого, удар — для всього крихкого. І руки працюють одночасно.",
     };
     pub const fit_the_drill_to_one_arm: T = .{
         .en = "Fit the drill to one arm and keep rounds on the other. You will need both at once.",
@@ -386,7 +516,7 @@ pub const line = struct {
     pub const its_in_the_stream: T = .{ .en = "It's in the stream. That's a massive embolus.", .uk = "Він у потоці. Це масивний ембол." };
     pub const the_stones_colonised_company: T = .{ .en = "The stone's colonised — company!", .uk = "Камінь заселений — у нас гості!" };
     pub const its_glowing_shoot_it_or_move: T = .{ .en = "It's glowing — shoot it or move!", .uk = "Воно світиться — стріляйте або відходьте!" };
-    pub const if_you_want_a_pointer: T = .{ .en = "If you want a pointer, press H.", .uk = "Якщо потрібна підказка, натисніть H." };
+    pub const if_you_want_a_pointer: T = .{ .en = "If you want a pointer, press {@hint}.", .uk = "Якщо потрібна підказка, натисніть {@hint}." };
     pub const youre_out: T = .{
         .en = "You're out. This is the great saphenous vein: 3.6 millimetres across, and to you a cathedral.",
         .uk = "Ви вийшли. Це велика підшкірна вена: 3,6 міліметра в діаметрі, а для вас — собор.",
@@ -404,8 +534,8 @@ pub const line = struct {
         .uk = "Це порожня кишка, верхній відділ тонкої кишки. Ви вийшли з кінчика одного з цих пальців.",
     };
     pub const look_around_before_you_move: T = .{
-        .en = "Look around before you move. Put your reticle on one of the fingers and press T.",
-        .uk = "Роззирніться, перш ніж рухатися. Наведіть приціл на один із пальців і натисніть T.",
+        .en = "Look around before you move. Put your reticle on one of the fingers and press {@examine}.",
+        .uk = "Роззирніться, перш ніж рухатися. Наведіть приціл на один із пальців і натисніть {@examine}.",
     };
     pub const now_feel_the_stream: T = .{
         .en = "Now feel the stream. Up here it will carry you a millimetre a second the wrong way. Between the villi it barely moves.",
@@ -425,8 +555,8 @@ pub const line = struct {
         .uk = "Так буває щопівхвилини. Кільце завжди приходить за течією; щойно я попереджу — спускайтеся.",
     };
     pub const now_the_job: T = .{
-        .en = "Now the job. Rotavirus is inside her own cells at the tips, and from outside an infected cell looks like any other. Fly to the marker, get above the tips and scan: T.",
-        .uk = "Тепер до справи. Ротавірус сидить у її власних клітинах на верхівках, а ззовні заражена клітина нічим не відрізняється від інших. Летіть до маркера, підніміться над верхівками і скануйте: T.",
+        .en = "Now the job. Rotavirus is inside her own cells at the tips, and from outside an infected cell looks like any other. Fly to the marker, get above the tips and scan: {@examine}.",
+        .uk = "Тепер до справи. Ротавірус сидить у її власних клітинах на верхівках, а ззовні заражена клітина нічим не відрізняється від інших. Летіть до маркера, підніміться над верхівками і скануйте: {@examine}.",
     };
     pub const there_the_swollen_ones: T = .{
         .en = "There. The swollen ones. Punch each one out of the sheet, then shoot it once it floats free.",
@@ -445,12 +575,12 @@ pub const line = struct {
         .uk = "Вище за течією ворсинок немає, а з ними й вашого сховку. Ось для чого потрібен трос.",
     };
     pub const aim_at_a_villus_within_reach: T = .{
-        .en = "Aim at a villus within reach and press G. It reels you in and holds you there. G again lets go.",
-        .uk = "Наведіть приціл на ворсинку в межах досяжності й натисніть G. Трос підтягне вас і втримає на місці. Ще раз G — відпустить.",
+        .en = "Aim at a villus within reach and press {@tether}. It reels you in and holds you there. {@tether} again lets go.",
+        .uk = "Наведіть приціл на ворсинку в межах досяжності й натисніть {@tether}. Трос підтягне вас і втримає на місці. Ще раз {@tether} — відпустить.",
     };
     pub const good_now_go_upstream: T = .{
-        .en = "Good. Now go upstream through the stripped stretch. Aim at the floor ahead, G, and let it pull you. Then the next point.",
-        .uk = "Добре. Тепер — проти течії через оголену ділянку. Наведіть приціл на дно попереду, G, і дайте тросу вас підтягнути. Потім наступна точка.",
+        .en = "Good. Now go upstream through the stripped stretch. Aim at the floor ahead, {@tether}, and let it pull you. Then the next point.",
+        .uk = "Добре. Тепер — проти течії через оголену ділянку. Наведіть приціл на дно попереду, {@tether}, і дайте тросу вас підтягнути. Потім наступна точка.",
     };
     pub const youre_across: T = .{ .en = "You're across. The villi here are whole again.", .uk = "Ви перебралися. Тут ворсинки знову цілі." };
     pub const the_marker_takes_you_up: T = .{
@@ -521,10 +651,18 @@ pub const line = struct {
 pub const hint = struct {
     pub const needle = [3]T{
         .{ .en = "The light at the end of the tube is the bevel. Head for it.", .uk = "Світло в кінці трубки — це зріз голки. Летіть до нього." },
-        .{ .en = "Hold W. Steer with the mouse or the arrow keys.", .uk = "Утримуйте W. Керуйте мишею або стрілками." },
+        .{
+            .en = "Hold W. Steer with the mouse or the arrow keys.",
+            .uk = "Утримуйте W. Керуйте мишею або стрілками.",
+            .pad = &.{ .en = "Push the left stick forward. Steer with the right stick.", .uk = "Відхиліть лівий стік уперед. Керуйте правим стіком." },
+        },
         .{
             .en = "Hold W and Shift together and keep the bright opening in the middle of your view until the walls fall away.",
             .uk = "Утримуйте разом W і Shift і тримайте світлий отвір у центрі поля зору, доки стінки не розступляться.",
+            .pad = &.{
+                .en = "Push the left stick forward, click {@boost} to boost, and keep the bright opening in the middle of your view until the walls fall away.",
+                .uk = "Відхиліть лівий стік уперед, натисніть {@boost} для прискорення і тримайте світлий отвір у центрі поля зору, доки стінки не розступляться.",
+            },
         },
     };
     pub const flow_wall = [3]T{
@@ -535,10 +673,18 @@ pub const hint = struct {
         .{
             .en = "Turn until the diamond marker is ahead, then hold W with Shift. It is over a millimetre away.",
             .uk = "Повертайтеся, доки ромбовий маркер не опиниться попереду, тоді утримуйте W із Shift. До нього понад міліметр.",
+            .pad = &.{
+                .en = "Turn until the diamond marker is ahead, then push the left stick forward and click {@boost}. It is over a millimetre away.",
+                .uk = "Повертайтеся, доки ромбовий маркер не опиниться попереду, тоді відхиліть лівий стік уперед і натисніть {@boost}. До нього понад міліметр.",
+            },
         },
         .{
             .en = "Face the marker, hold Shift+W for about five seconds, and stop when the cobbled wall fills your view.",
             .uk = "Станьте лицем до маркера, утримуйте Shift+W секунд п’ять і зупиніться, коли брукована стінка заповнить поле зору.",
+            .pad = &.{
+                .en = "Face the marker, click {@boost} and hold the left stick forward for about five seconds, and stop when the cobbled wall fills your view.",
+                .uk = "Станьте лицем до маркера, натисніть {@boost} і секунд п’ять тримайте лівий стік відхиленим уперед, а коли брукована стінка заповнить поле зору — зупиніться.",
+            },
         },
     };
     pub const flow_core = [3]T{
@@ -560,6 +706,10 @@ pub const hint = struct {
         .{
             .en = "Stay in the core and let it carry you; add W to go faster.",
             .uk = "Тримайтеся середини, і потік понесе вас сам; додайте W, щоб летіти швидше.",
+            .pad = &.{
+                .en = "Stay in the core and let it carry you; push the left stick forward to go faster.",
+                .uk = "Тримайтеся середини, і потік понесе вас сам; відхиліть лівий стік уперед, щоб летіти швидше.",
+            },
         },
         .{
             .en = "Follow the diamond marker. The valve is where the wall swells outward.",
@@ -572,12 +722,12 @@ pub const hint = struct {
             .uk = "Усередині випину висять дві бліді пластинки. Про них і мова.",
         },
         .{
-            .en = "Centre the reticle on one of the pale sheets — the label under the reticle changes — and press T.",
-            .uk = "Наведіть приціл на одну з блідих пластинок — напис під прицілом зміниться — і натисніть T.",
+            .en = "Centre the reticle on one of the pale sheets — the label under the reticle changes — and press {@examine}.",
+            .uk = "Наведіть приціл на одну з блідих пластинок — напис під прицілом зміниться — і натисніть {@examine}.",
         },
         .{
-            .en = "Fly toward the marker, aim at a sheet until the reticle reads UNIDENTIFIED, press T.",
-            .uk = "Летіть до маркера, цільтеся в пластинку, доки під прицілом не з’явиться НЕРОЗПІЗНАНО, і натисніть T.",
+            .en = "Fly toward the marker, aim at a sheet until the reticle reads UNIDENTIFIED, press {@examine}.",
+            .uk = "Летіть до маркера, цільтеся в пластинку, доки під прицілом не з’явиться НЕРОЗПІЗНАНО, і натисніть {@examine}.",
         },
     };
     pub const valve1_pass = [3]T{
@@ -592,6 +742,10 @@ pub const hint = struct {
         .{
             .en = "Hover near the axis. When VALVE on the right reads OPEN, hold Shift+W straight down the centre.",
             .uk = "Зависніть біля осі. Коли праворуч з’явиться КЛАПАНИ ВІДКРИТІ, утримуйте Shift+W і летіть прямо по центру.",
+            .pad = &.{
+                .en = "Hover near the axis. When VALVE on the right reads OPEN, click {@boost} and fly straight down the centre.",
+                .uk = "Зависніть біля осі. Коли праворуч з’явиться КЛАПАНИ ВІДКРИТІ, натисніть {@boost} і летіть прямо по центру.",
+            },
         },
     };
     pub const neutrophil = [3]T{
@@ -604,19 +758,23 @@ pub const hint = struct {
             .uk = "Підлетіть до стінки трохи далі за течією. Вам потрібні бліді, ледь шпичасті кульки.",
         },
         .{
-            .en = "Hug the wall past the valve, put the reticle on a pale sphere larger than a red cell, press T.",
-            .uk = "Тримайтеся стінки за клапаном, наведіть приціл на бліду кульку, більшу за еритроцит, і натисніть T.",
+            .en = "Hug the wall past the valve, put the reticle on a pale sphere larger than a red cell, press {@examine}.",
+            .uk = "Тримайтеся стінки за клапаном, наведіть приціл на бліду кульку, більшу за еритроцит, і натисніть {@examine}.",
         },
     };
     pub const staph = [3]T{
         .{ .en = "Gold clusters, small. They come to you.", .uk = "Золотаві скупчення, дрібні. Вони самі до вас прийдуть." },
         .{
-            .en = "Point the reticle at a cluster and hold Q. When one glows it is about to lunge: shoot it or sidestep.",
-            .uk = "Наведіть приціл на скупчення й утримуйте Q. Якщо котресь засвітилося, воно зараз кинеться: стріляйте або ухиляйтеся вбік.",
+            .en = "Point the reticle at a cluster and hold {@arm_left}. When one glows it is about to lunge: shoot it or sidestep.",
+            .uk = "Наведіть приціл на скупчення й утримуйте {@arm_left}. Якщо котресь засвітилося, воно зараз кинеться: стріляйте або ухиляйтеся вбік.",
         },
         .{
-            .en = "Hold Q and sweep the reticle over each gold cluster. Strafe with A or D whenever one flares.",
-            .uk = "Утримуйте Q і ведіть прицілом по кожному золотавому скупченню. Щойно котресь спалахне — зміщуйтеся вбік клавішею A або D.",
+            .en = "Hold {@arm_left} and sweep the reticle over each gold cluster. Strafe with A or D whenever one flares.",
+            .uk = "Утримуйте {@arm_left} і ведіть прицілом по кожному золотавому скупченню. Щойно котресь спалахне — зміщуйтеся вбік клавішею A або D.",
+            .pad = &.{
+                .en = "Hold {@arm_left} and sweep the reticle over each gold cluster. Strafe with the left stick whenever one flares.",
+                .uk = "Утримуйте {@arm_left} і ведіть прицілом по кожному золотавому скупченню. Щойно котресь спалахне — зміщуйтеся вбік лівим стіком.",
+            },
         },
     };
     pub const tools = [3]T{
@@ -625,12 +783,12 @@ pub const hint = struct {
             .uk = "Панелі в нижніх кутах показують, що встановлено на кожній руці.",
         },
         .{
-            .en = "Press Z or X until one panel reads DRILL and the other SHOOT.",
-            .uk = "Натискайте Z або X, доки на одній панелі не буде СВЕРДЛО, а на другій — ПОСТРІЛ.",
+            .en = "Press {@tool_left} or {@tool_right} until one panel reads DRILL and the other SHOOT.",
+            .uk = "Натискайте {@tool_left} або {@tool_right}, доки на одній панелі не буде СВЕРДЛО, а на другій — ПОСТРІЛ.",
         },
         .{
-            .en = "Press X once: the right arm goes from PUNCH to DRILL. Leave the left on SHOOT. Then fly to the ring.",
-            .uk = "Натисніть X один раз: права рука перемкнеться з УДАРУ на СВЕРДЛО. На лівій залиште ПОСТРІЛ. Потім летіть до кільця.",
+            .en = "Press {@tool_right} once: the right arm goes from PUNCH to DRILL. Leave the left on SHOOT. Then fly to the ring.",
+            .uk = "Натисніть {@tool_right} один раз: права рука перемкнеться з УДАРУ на СВЕРДЛО. На лівій залиште ПОСТРІЛ. Потім летіть до кільця.",
         },
     };
     pub const v2_approach = [3]T{
@@ -659,6 +817,10 @@ pub const hint = struct {
         .{
             .en = "Fly to a gold dome until it fills the view. Hold the Drill arm's key until the dome turns clear, and hold the Shoot arm's key with it. Eight rounds kill it.",
             .uk = "Підлетіть до золотавого купола, щоб він заповнив поле зору. Утримуйте клавішу руки зі свердлом, доки купол не стане прозорим, і разом із нею — клавішу руки з пострілом. Вісім зарядів знищать колонію.",
+            .pad = &.{
+                .en = "Fly to a gold dome until it fills the view. Hold the Drill arm's trigger until the dome turns clear, and hold the Shoot arm's trigger with it. Eight rounds kill it.",
+                .uk = "Підлетіть до золотавого купола, щоб він заповнив поле зору. Утримуйте тригер руки зі свердлом, доки купол не стане прозорим, і разом із ним — тригер руки з пострілом. Вісім зарядів знищать колонію.",
+            },
         },
     };
     pub const treat_cables = [3]T{
@@ -680,10 +842,14 @@ pub const hint = struct {
         .{
             .en = "Put both arms on Shoot and hold both keys on the clot.",
             .uk = "Поставте обидві руки на «Постріл» і утримуйте обидві клавіші, цілячись у тромб.",
+            .pad = &.{
+                .en = "Put both arms on Shoot and hold both triggers on the clot.",
+                .uk = "Поставте обидві руки на «Постріл» і утримуйте обидва тригери, цілячись у тромб.",
+            },
         },
         .{
-            .en = "Z and X until both panels read SHOOT. Aim at the clot, hold Q and E until it is gone.",
-            .uk = "Z і X, доки на обох панелях не буде ПОСТРІЛ. Цільтеся в тромб і утримуйте Q та E, доки він не зникне.",
+            .en = "{@tool_left} and {@tool_right} until both panels read SHOOT. Aim at the clot, hold {@arm_left} and {@arm_right} until it is gone.",
+            .uk = "{@tool_left} і {@tool_right}, доки на обох панелях не буде ПОСТРІЛ. Цільтеся в тромб і утримуйте {@arm_left} та {@arm_right}, доки він не зникне.",
         },
     };
     pub const freed: T = .{ .en = "Take a breath. She's better than she was.", .uk = "Переведіть подих. Їй уже краще, ніж було." };
@@ -708,8 +874,8 @@ pub const hint = struct {
             .uk = "Рухайтеся вздовж перетинки вниз і праворуч, доки не знайдете вмурований у неї блідий камінь.",
         },
         .{
-            .en = "Fly downstream to the scar wall, find the chalk-white boulder in it, aim at it and press T.",
-            .uk = "Летіть за течією до рубцевої стіни, знайдіть у ній крейдяно-білу брилу, наведіть на неї приціл і натисніть T.",
+            .en = "Fly downstream to the scar wall, find the chalk-white boulder in it, aim at it and press {@examine}.",
+            .uk = "Летіть за течією до рубцевої стіни, знайдіть у ній крейдяно-білу брилу, наведіть на неї приціл і натисніть {@examine}.",
         },
     };
     pub const septum_break = [3]T{
@@ -718,12 +884,12 @@ pub const hint = struct {
             .uk = "Крихке ламається від удару. Однієї руки для такого удару замало.",
         },
         .{
-            .en = "Both arms on Punch. Get within arm's reach of the stone and press Q and E at the same instant.",
-            .uk = "Обидві руки — на «Удар». Підлетіть до каменя на відстань руки й натисніть Q та E в одну мить.",
+            .en = "Both arms on Punch. Get within arm's reach of the stone and press {@arm_left} and {@arm_right} at the same instant.",
+            .uk = "Обидві руки — на «Удар». Підлетіть до каменя на відстань руки й натисніть {@arm_left} та {@arm_right} в одну мить.",
         },
         .{
-            .en = "Z and X until both panels read PUNCH. Fly until the stone fills the view, then tap Q and E together. SYNC flashes when you get it. Five of those.",
-            .uk = "Z і X, доки на обох панелях не буде УДАР. Підлетіть, щоб камінь заповнив поле зору, і натисніть Q та E разом. Коли вийде, спалахне СИНХРО. Таких ударів треба п’ять.",
+            .en = "{@tool_left} and {@tool_right} until both panels read PUNCH. Fly until the stone fills the view, then tap {@arm_left} and {@arm_right} together. SYNC flashes when you get it. Five of those.",
+            .uk = "{@tool_left} і {@tool_right}, доки на обох панелях не буде УДАР. Підлетіть, щоб камінь заповнив поле зору, і натисніть {@arm_left} та {@arm_right} разом. Коли вийде, спалахне СИНХРО. Таких ударів треба п’ять.",
         },
     };
     pub const exit: T = .{ .en = "Let the channel take you, then keep going downstream.", .uk = "Дайте каналу пронести вас, а далі рухайтеся за течією." };
@@ -731,42 +897,54 @@ pub const hint = struct {
     pub const g_villus = [3]T{
         .{ .en = "Anything tall and cobbled is a villus.", .uk = "Усе високе й бруковане — це ворсинка." },
         .{
-            .en = "Turn until one of the fingers is under the reticle, then press T.",
-            .uk = "Повертайтеся, доки один із пальців не опиниться під прицілом, і натисніть T.",
+            .en = "Turn until one of the fingers is under the reticle, then press {@examine}.",
+            .uk = "Повертайтеся, доки один із пальців не опиниться під прицілом, і натисніть {@examine}.",
         },
         .{
-            .en = "Look down and to the side with the mouse or arrow keys until the reticle label appears on a villus. Press T.",
-            .uk = "Мишею або стрілками подивіться вниз і вбік, доки на ворсинці не з’явиться напис під прицілом. Натисніть T.",
+            .en = "Look down and to the side with the mouse or arrow keys until the reticle label appears on a villus. Press {@examine}.",
+            .uk = "Мишею або стрілками подивіться вниз і вбік, доки на ворсинці не з’явиться напис під прицілом. Натисніть {@examine}.",
+            .pad = &.{
+                .en = "Look down and to the side with the right stick until the reticle label appears on a villus. Press {@examine}.",
+                .uk = "Правим стіком подивіться вниз і вбік, доки на ворсинці не з’явиться напис під прицілом. Натисніть {@examine}.",
+            },
         },
     };
     pub const g_descend = [3]T{
         .{ .en = "The stream is fast above the tips and still below them.", .uk = "Над верхівками течія швидка, а під ними її майже немає." },
         .{
-            .en = "Follow the marker down into the gap between three villi. C descends.",
-            .uk = "Спускайтеся за маркером у проміжок між трьома ворсинками. Клавіша C — униз.",
+            .en = "Follow the marker down into the gap between three villi. {@down} descends.",
+            .uk = "Спускайтеся за маркером у проміжок між трьома ворсинками. Клавіша {@down} — униз.",
+            .pad = &.{
+                .en = "Follow the marker down into the gap between three villi. {@down} descends.",
+                .uk = "Спускайтеся за маркером у проміжок між трьома ворсинками. Кнопка {@down} — униз.",
+            },
         },
         .{
-            .en = "Hold C until the flow readout on the top right drops under 20 and the floor of pits is right below you.",
-            .uk = "Утримуйте C, доки показник течії вгорі праворуч не впаде нижче 20, а дно з ямками не опиниться просто під вами.",
+            .en = "Hold {@down} until the flow readout on the top right drops under 20 and the floor of pits is right below you.",
+            .uk = "Утримуйте {@down}, доки показник течії вгорі праворуч не впаде нижче 20, а дно з ямками не опиниться просто під вами.",
         },
     };
     pub const g_wave = [3]T{
         .{ .en = "The ring only closes the lumen down to the tips.", .uk = "Кільце змикає просвіт лише до верхівок." },
         .{ .en = "Stay near the floor. Do not sit on top of a villus.", .uk = "Тримайтеся біля дна. Не сидіть на верхівці ворсинки." },
         .{
-            .en = "Hold C to stay on the crypt floor and wait. The roof comes down, passes over you and lifts again.",
-            .uk = "Утримуйте C, щоб лишатися на дні з криптами, і чекайте. Стеля опуститься, пройде над вами й підніметься знову.",
+            .en = "Hold {@down} to stay on the crypt floor and wait. The roof comes down, passes over you and lifts again.",
+            .uk = "Утримуйте {@down}, щоб лишатися на дні з криптами, і чекайте. Стеля опуститься, пройде над вами й підніметься знову.",
         },
     };
     pub const g_scan = [3]T{
         .{ .en = "Infected cells do not show until the scan reads them.", .uk = "Заражених клітин не видно, доки їх не зчитає скан." },
         .{
-            .en = "Go to the marker, climb until you are level with the villus tips and press T. The pulse reaches 0.7 mm.",
-            .uk = "Летіть до маркера, підніміться на рівень верхівок ворсинок і натисніть T. Імпульс сягає 0,7 мм.",
+            .en = "Go to the marker, climb until you are level with the villus tips and press {@examine}. The pulse reaches 0.7 mm.",
+            .uk = "Летіть до маркера, підніміться на рівень верхівок ворсинок і натисніть {@examine}. Імпульс сягає 0,7 мм.",
         },
         .{
-            .en = "Fly to the diamond marker, hold Space until you are just above the tops of the villi, press T. Swollen magenta cells appear on the infected tips.",
-            .uk = "Летіть до ромбового маркера, утримуйте пробіл, доки не опинитеся трохи вище від верхівок ворсинок, і натисніть T. На заражених верхівках проявляться набряклі пурпурові клітини.",
+            .en = "Fly to the diamond marker, hold Space until you are just above the tops of the villi, press {@examine}. Swollen magenta cells appear on the infected tips.",
+            .uk = "Летіть до ромбового маркера, утримуйте пробіл, доки не опинитеся трохи вище від верхівок ворсинок, і натисніть {@examine}. На заражених верхівках проявляться набряклі пурпурові клітини.",
+            .pad = &.{
+                .en = "Fly to the diamond marker, hold {@up} until you are just above the tops of the villi, press {@examine}. Swollen magenta cells appear on the infected tips.",
+                .uk = "Летіть до ромбового маркера, утримуйте {@up}, доки не опинитеся трохи вище від верхівок ворсинок, і натисніть {@examine}. На заражених верхівках проявляться набряклі пурпурові клітини.",
+            },
         },
     };
     pub const g_extrude = [3]T{
@@ -779,8 +957,12 @@ pub const hint = struct {
             .uk = "Підлетіть до набряклої клітини на відстань руки й ударте її. Вона попливе, блимаючи: всадіть у неї заряди, поки не луснула. Якщо лічильник не повний, проскануйте іншу верхівку.",
         },
         .{
-            .en = "Z and X until one panel reads PUNCH and the other SHOOT. Hover over a magenta cell, hit the Punch key, then hold the Shoot key on the cell that floats away. Press T near small organisms first: green are hers, magenta are virus.",
-            .uk = "Z і X, доки на одній панелі не буде УДАР, а на другій — ПОСТРІЛ. Зависніть над пурпуровою клітиною, натисніть клавішу удару, потім утримуйте клавішу пострілу, цілячись у клітину, що відпливає. Біля дрібних організмів спершу натискайте T: зелені — її власні, пурпурові — вірус.",
+            .en = "{@tool_left} and {@tool_right} until one panel reads PUNCH and the other SHOOT. Hover over a magenta cell, hit the Punch key, then hold the Shoot key on the cell that floats away. Press {@examine} near small organisms first: green are hers, magenta are virus.",
+            .uk = "{@tool_left} і {@tool_right}, доки на одній панелі не буде УДАР, а на другій — ПОСТРІЛ. Зависніть над пурпуровою клітиною, натисніть клавішу удару, потім утримуйте клавішу пострілу, цілячись у клітину, що відпливає. Біля дрібних організмів спершу натискайте {@examine}: зелені — її власні, пурпурові — вірус.",
+            .pad = &.{
+                .en = "{@tool_left} and {@tool_right} until one panel reads PUNCH and the other SHOOT. Hover over a magenta cell, pull the Punch trigger, then hold the Shoot trigger on the cell that floats away. Press {@examine} near small organisms first: green are hers, magenta are virus.",
+                .uk = "{@tool_left} і {@tool_right}, доки на одній панелі не буде УДАР, а на другій — ПОСТРІЛ. Зависніть над пурпуровою клітиною, натисніть тригер удару, потім утримуйте тригер пострілу, цілячись у клітину, що відпливає. Біля дрібних організмів спершу натискайте {@examine}: зелені — її власні, пурпурові — вірус.",
+            },
         },
     };
     pub const g_factory = [3]T{
@@ -792,25 +974,29 @@ pub const hint = struct {
         .{
             .en = "Fly up to the mucus dome on the marked villus. Hold the Drill key with the bit in it; when Marín calls it open, hold the Shoot key as well. Blebs will come at you: the drill holds its place if you look away to shoot them.",
             .uk = "Підлетіть до слизового купола на позначеній ворсинці. Утримуйте клавішу свердла, щоб воно працювало в куполі; коли я скажу, що він відкритий, утримуйте ще й клавішу пострілу. На вас полетять везикули: свердло лишиться на місці, якщо ви відвернетеся, щоб їх збити.",
+            .pad = &.{
+                .en = "Fly up to the mucus dome on the marked villus. Hold the Drill trigger with the bit in it; when Marín calls it open, hold the Shoot trigger as well. Blebs will come at you: the drill holds its place if you look away to shoot them.",
+                .uk = "Підлетіть до слизового купола на позначеній ворсинці. Утримуйте тригер свердла, щоб воно працювало в куполі; коли я скажу, що він відкритий, утримуйте ще й тригер пострілу. На вас полетять везикули: свердло лишиться на місці, якщо ви відвернетеся, щоб їх збити.",
+            },
         },
     };
     pub const g_tether = [3]T{
         .{ .en = "The tether needs tissue to hold and it reaches 0.4 mm.", .uk = "Тросу потрібна тканина, щоб зачепитися, і сягає він на 0,4 мм." },
-        .{ .en = "Put the reticle on a villus close by and press G.", .uk = "Наведіть приціл на ближню ворсинку й натисніть G." },
+        .{ .en = "Put the reticle on a villus close by and press {@tether}.", .uk = "Наведіть приціл на ближню ворсинку й натисніть {@tether}." },
         .{
-            .en = "Fly to within a couple of villus widths of any villus, aim at it, press G. Do it twice.",
-            .uk = "Підлетіть до будь-якої ворсинки на відстань двох-трьох її ширин, наведіть приціл і натисніть G. Зробіть це двічі.",
+            .en = "Fly to within a couple of villus widths of any villus, aim at it, press {@tether}. Do it twice.",
+            .uk = "Підлетіть до будь-якої ворсинки на відстань двох-трьох її ширин, наведіть приціл і натисніть {@tether}. Зробіть це двічі.",
         },
     };
     pub const g_flume = [3]T{
         .{ .en = "You cannot out-fly this stream. You can out-pull it.", .uk = "Цю течію не перелетіти. А от перетягнути її можна." },
         .{
-            .en = "Aim at the floor ahead of you, upstream, and press G. When it has reeled you in, aim further on and press G again.",
-            .uk = "Наведіть приціл на дно попереду, вище за течією, і натисніть G. Коли трос вас підтягне, наведіть далі й натисніть G знову.",
+            .en = "Aim at the floor ahead of you, upstream, and press {@tether}. When it has reeled you in, aim further on and press {@tether} again.",
+            .uk = "Наведіть приціл на дно попереду, вище за течією, і натисніть {@tether}. Коли трос вас підтягне, наведіть далі й натисніть {@tether} знову.",
         },
         .{
-            .en = "Face the marker. Look slightly down at the stubs about a third of a millimetre ahead, press G, wait until you stop, repeat. Do not release with nothing new to hold: the stream takes you straight back.",
-            .uk = "Станьте лицем до маркера. Подивіться трохи вниз, на пеньки приблизно за третину міліметра попереду, натисніть G, дочекайтеся зупинки й повторіть. Не відпускайте трос, якщо нема за що зачепитися знову: течія одразу віднесе вас назад.",
+            .en = "Face the marker. Look slightly down at the stubs about a third of a millimetre ahead, press {@tether}, wait until you stop, repeat. Do not release with nothing new to hold: the stream takes you straight back.",
+            .uk = "Станьте лицем до маркера. Подивіться трохи вниз, на пеньки приблизно за третину міліметра попереду, натисніть {@tether}, дочекайтеся зупинки й повторіть. Не відпускайте трос, якщо нема за що зачепитися знову: течія одразу віднесе вас назад.",
         },
     };
     pub const g_exit: T = .{ .en = "Fly through the ring ahead of you.", .uk = "Пролетіть крізь кільце попереду." };
@@ -823,11 +1009,11 @@ pub const objective = struct {
     pub const flow_wall: T = .{ .en = "Reach the vessel wall", .uk = "Дістаньтеся стінки судини" };
     pub const flow_core: T = .{ .en = "Return to the core of the stream", .uk = "Поверніться в середину потоку" };
     pub const to_valve1: T = .{ .en = "Follow the flow to the first valve", .uk = "Рухайтеся за течією до першого клапана" };
-    pub const valve1_identify: T = .{ .en = "Identify the valve cusp — aim at it and press T", .uk = "Розпізнайте стулку клапана — наведіть приціл і натисніть T" };
+    pub const valve1_identify: T = .{ .en = "Identify the valve cusp — aim at it and press {@examine}", .uk = "Розпізнайте стулку клапана — наведіть приціл і натисніть {@examine}" };
     pub const valve1_pass: T = .{ .en = "Pass the valve while it is open", .uk = "Пройдіть клапан, поки він відкритий" };
-    pub const neutrophil: T = .{ .en = "Identify a cell rolling on the wall — T", .uk = "Розпізнайте клітину, що котиться по стінці, — T" };
+    pub const neutrophil: T = .{ .en = "Identify a cell rolling on the wall — {@examine}", .uk = "Розпізнайте клітину, що котиться по стінці, — {@examine}" };
     pub const staph: T = .{ .en = "Destroy the bacteria — {0} left", .uk = "Знищте бактерії — ще {0} {0|скупчення|скупчення|скупчень}" };
-    pub const tools: T = .{ .en = "Fit DRILL on one arm and SHOOT on the other — Z / X", .uk = "Поставте СВЕРДЛО на одну руку, а ПОСТРІЛ на другу — Z / X" };
+    pub const tools: T = .{ .en = "Fit DRILL on one arm and SHOOT on the other — {@tool_left} / {@tool_right}", .uk = "Поставте СВЕРДЛО на одну руку, а ПОСТРІЛ на другу — {@tool_left} / {@tool_right}" };
     pub const transit_marker: T = .{ .en = "Fly through the transit marker", .uk = "Пролетіть крізь транзитний маркер" };
     pub const transit: T = .{ .en = "Transit", .uk = "Транзит" };
     pub const v2_approach: T = .{ .en = "Enter the pocket behind the pinned cusp", .uk = "Увійдіть у кишеню за затиснутою стулкою" };
@@ -841,15 +1027,15 @@ pub const objective = struct {
         .en = "Fly through the transit marker — try a Sync Strike on the way",
         .uk = "Пролетіть крізь транзитний маркер — дорогою спробуйте синхроудар",
     };
-    pub const septum_find: T = .{ .en = "Find what is blocking the vein and identify it — T", .uk = "Знайдіть і розпізнайте те, що перекриває вену, — T" };
+    pub const septum_find: T = .{ .en = "Find what is blocking the vein and identify it — {@examine}", .uk = "Знайдіть і розпізнайте те, що перекриває вену, — {@examine}" };
     pub const septum_break: T = .{ .en = "Shatter the phlebolith with Sync punches — {0}%", .uk = "Розбийте флеболіт синхроударами — {0}%" };
     pub const exit: T = .{ .en = "Ride the flow into the femoral vein", .uk = "Пливіть за течією до стегнової вени" };
     pub const done: T = .{ .en = "Chapter complete", .uk = "Розділ завершено" };
     pub const g_arrive: T = .{ .en = "Arrival — proximal jejunum", .uk = "Прибуття — проксимальний відділ порожньої кишки" };
-    pub const g_villus: T = .{ .en = "Identify a villus — aim at one and press T", .uk = "Розпізнайте ворсинку — наведіть приціл і натисніть T" };
+    pub const g_villus: T = .{ .en = "Identify a villus — aim at one and press {@examine}", .uk = "Розпізнайте ворсинку — наведіть приціл і натисніть {@examine}" };
     pub const g_descend: T = .{ .en = "Descend to the crypt floor, out of the stream", .uk = "Спустіться на дно, до крипт, подалі від течії" };
     pub const g_wave: T = .{ .en = "Stay below the villus tips until the ring has passed", .uk = "Залишайтеся нижче від верхівок ворсинок, доки кільце не пройде" };
-    pub const g_scan: T = .{ .en = "Scan the villus tips at the marker — T", .uk = "Проскануйте верхівки ворсинок біля маркера — T" };
+    pub const g_scan: T = .{ .en = "Scan the villus tips at the marker — {@examine}", .uk = "Проскануйте верхівки ворсинок біля маркера — {@examine}" };
     pub const g_extrude: T = .{
         .en = "Infected cells cleared {0}/{1}  ·  Virus spread {2}  ·  Loose {3}",
         .uk = "Видалено заражених клітин: {0}/{1}  ·  Випадків поширення: {2}  ·  На волі: {3}",
@@ -857,8 +1043,8 @@ pub const objective = struct {
     pub const g_factory: T = .{ .en = "Drill the dome open and fire into it — {0}%", .uk = "Розсвердліть купол і стріляйте всередину — {0}%" };
     pub const g_factory_done: T = .{ .en = "Dome destroyed", .uk = "Купол знищено" };
     pub const g_tether: T = .{
-        .en = "Tether to a villus — aim within 0.4 mm and press G",
-        .uk = "Причепіться тросом до ворсинки — наведіть приціл із відстані до 0,4 мм і натисніть G",
+        .en = "Tether to a villus — aim within 0.4 mm and press {@tether}",
+        .uk = "Причепіться тросом до ворсинки — наведіть приціл із відстані до 0,4 мм і натисніть {@tether}",
     };
     pub const g_flume: T = .{ .en = "Cross the blunted stretch upstream on the tether", .uk = "Подолайте ділянку сплощених ворсинок проти течії на тросі" };
 };

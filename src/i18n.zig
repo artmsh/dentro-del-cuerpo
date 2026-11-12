@@ -75,12 +75,33 @@ pub const Lang = enum(u8) {
     }
 };
 
-/// One piece of text in every language. The fields have no defaults, so leaving a language out of a literal
-/// does not compile.
-pub const Text = struct {
+/// One wording of a piece of text, in every language. The fields have no defaults, so leaving a language
+/// out of a literal does not compile.
+pub const Wording = struct {
     en: []const u8,
     uk: []const u8,
 
+    pub fn get(w: Wording, lang: Lang) []const u8 {
+        return switch (lang) {
+            .en => w.en,
+            .uk => w.uk,
+        };
+    }
+};
+
+/// One piece of text in every language. `en` and `uk` are required, so a translation cannot be left out.
+///
+/// Text may name a control with a reference, `{@examine}`, which stands for whatever that action is bound
+/// to on the device the player is holding (see `bindings.zig`); a reference passes through `expand`
+/// untouched unless the caller supplies the names. Where a keyboard and a game controller need different
+/// sentences, not only different button names ("hold W" against "push the left stick forward"), `pad` holds
+/// the wording for a controller, again in every language.
+pub const Text = struct {
+    en: []const u8,
+    uk: []const u8,
+    pad: ?*const Wording = null,
+
+    /// The wording for keyboard and mouse, with any references unresolved.
     pub fn get(t: Text, lang: Lang) []const u8 {
         return switch (lang) {
             .en => t.en,
@@ -88,12 +109,10 @@ pub const Text = struct {
         };
     }
 
-    /// Length in code points of the longest version: reading time that does not depend on the language
-    /// in use, so the simulation runs identically in each.
-    pub fn longest(t: Text) usize {
-        var n: usize = 0;
-        for (Lang.all) |l| n = @max(n, utf8.count(t.get(l)));
-        return n;
+    /// The wording for a game controller if `for_pad`, otherwise the one for keyboard and mouse.
+    pub fn wording(t: Text, for_pad: bool) Wording {
+        if (for_pad) if (t.pad) |w| return w.*;
+        return .{ .en = t.en, .uk = t.uk };
     }
 };
 
@@ -175,10 +194,12 @@ const Writer = struct {
     }
 };
 
-/// One `{…}` of a template: an argument index and, for a plural selector, the forms after the first bar.
+/// One `{…}` of a template: an argument index and, for a plural selector, the forms after the first bar;
+/// or a reference by name, `{@name}`.
 const Hole = struct {
-    index: usize,
-    forms: ?[]const u8,
+    index: usize = 0,
+    forms: ?[]const u8 = null,
+    ref: ?[]const u8 = null,
     /// Bytes of the template the hole occupies, braces included.
     len: usize,
 };
@@ -187,6 +208,13 @@ fn parseHole(tpl: []const u8) ?Hole {
     if (tpl.len < 3 or tpl[0] != '{') return null;
     const close = std.mem.indexOfScalar(u8, tpl, '}') orelse return null;
     const body = tpl[1..close];
+    if (body[0] == '@') {
+        if (body.len < 2) return null;
+        for (body[1..]) |c| {
+            if (!((c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_')) return null;
+        }
+        return .{ .ref = body[1..], .len = close + 1 };
+    }
     const bar = std.mem.indexOfScalar(u8, body, '|');
     const num = body[0 .. bar orelse body.len];
     if (num.len == 0) return null;
@@ -198,10 +226,22 @@ fn parseHole(tpl: []const u8) ?Hole {
     return .{ .index = index, .forms = if (bar) |b| body[b + 1 ..] else null, .len = close + 1 };
 }
 
+/// Supplies the text a `{@name}` reference stands for.
+pub const Refs = struct {
+    ctx: *const anyopaque,
+    lookup: *const fn (ctx: *const anyopaque, name: []const u8) ?[]const u8,
+};
+
 /// Expands a template in `lang`. `{0}` inserts argument 0; `{0|form|form|…}` inserts the plural form that
-/// argument 0, a whole number, takes in `lang` (see `Lang.pluralForms`). Output that does not fit in `buf`
-/// is cut on a code point boundary.
+/// argument 0, a whole number, takes in `lang` (see `Lang.pluralForms`). A reference `{@name}` is copied
+/// as it stands. Output that does not fit in `buf` is cut on a code point boundary.
 pub fn expand(buf: []u8, lang: Lang, tpl: []const u8, args: []const Arg) []const u8 {
+    return expandRefs(buf, lang, tpl, args, null);
+}
+
+/// As `expand`, with each `{@name}` replaced by what `refs` gives for the name, or by a question mark if
+/// it knows none.
+pub fn expandRefs(buf: []u8, lang: Lang, tpl: []const u8, args: []const Arg, refs: ?Refs) []const u8 {
     var w: Writer = .{ .buf = buf };
     var i: usize = 0;
     while (i < tpl.len) {
@@ -211,6 +251,11 @@ pub fn expand(buf: []u8, lang: Lang, tpl: []const u8, args: []const Arg) []const
             i = next;
             continue;
         };
+        if (hole.ref) |name| {
+            if (refs) |r| w.put(r.lookup(r.ctx, name) orelse "?") else w.put(tpl[i..][0..hole.len]);
+            i += hole.len;
+            continue;
+        }
         i += hole.len;
         if (hole.index >= args.len) {
             w.put("?");
@@ -245,6 +290,45 @@ pub fn expand(buf: []u8, lang: Lang, tpl: []const u8, args: []const Arg) []const
     return buf[0..w.n];
 }
 
+/// Walks the `{@name}` references of a template in order.
+pub const RefIterator = struct {
+    tpl: []const u8,
+    i: usize = 0,
+
+    pub fn next(it: *RefIterator) ?[]const u8 {
+        while (std.mem.indexOfScalarPos(u8, it.tpl, it.i, '{')) |at| {
+            const hole = parseHole(it.tpl[at..]) orelse {
+                it.i = at + 1;
+                continue;
+            };
+            it.i = at + hole.len;
+            if (hole.ref) |name| return name;
+        }
+        it.i = it.tpl.len;
+        return null;
+    }
+};
+
+pub fn refsOf(tpl: []const u8) RefIterator {
+    return .{ .tpl = tpl };
+}
+
+/// The template with its references taken out of the way: calls `sink.literal(bytes)` for each stretch of
+/// text between holes and `sink.ref(name)` for each reference; numbered holes are passed as literal text.
+pub fn walk(tpl: []const u8, sink: anytype) void {
+    var i: usize = 0;
+    while (i < tpl.len) {
+        if (parseHole(tpl[i..])) |hole| {
+            if (hole.ref) |name| sink.ref(name) else sink.literal(tpl[i..][0..hole.len]);
+            i += hole.len;
+            continue;
+        }
+        const next = std.mem.indexOfScalarPos(u8, tpl, i + 1, '{') orelse tpl.len;
+        sink.literal(tpl[i..next]);
+        i = next;
+    }
+}
+
 /// What is wrong with a template for `lang`, or null: an unclosed or malformed hole, a plural selector with
 /// the wrong number of forms.
 pub fn templateError(lang: Lang, tpl: []const u8) ?[]const u8 {
@@ -266,19 +350,53 @@ pub fn holes(tpl: []const u8) u32 {
     var i: usize = 0;
     while (std.mem.indexOfScalarPos(u8, tpl, i, '{')) |at| {
         const hole = parseHole(tpl[at..]) orelse break;
-        if (hole.index < 32) set |= @as(u32, 1) << @intCast(hole.index);
+        if (hole.ref == null and hole.index < 32) set |= @as(u32, 1) << @intCast(hole.index);
         i = at + hole.len;
     }
     return set;
 }
 
-/// What is wrong with a bilingual template, or null. Both languages must be well formed and use the same
-/// arguments, with no gaps in the numbering.
+/// Bit set of the references a template makes, by position in `names`; a name not in the list sets the
+/// top bit.
+fn refSet(tpl: []const u8, names: *[31][]const u8, count: *usize) u32 {
+    var set: u32 = 0;
+    var it = refsOf(tpl);
+    outer: while (it.next()) |name| {
+        for (names[0..count.*], 0..) |known, k| {
+            if (std.mem.eql(u8, known, name)) {
+                set |= @as(u32, 1) << @intCast(k);
+                continue :outer;
+            }
+        }
+        if (count.* == names.len) {
+            set |= 1 << 31;
+            continue;
+        }
+        names[count.*] = name;
+        set |= @as(u32, 1) << @intCast(count.*);
+        count.* += 1;
+    }
+    return set;
+}
+
+/// What is wrong with a bilingual template, or null. Every wording must be well formed in both languages;
+/// all of them must use the same arguments, with no gaps in the numbering; and the two languages of one
+/// wording must refer to the same controls.
 pub fn textError(t: Text) ?[]const u8 {
-    for (Lang.all) |l| if (templateError(l, t.get(l))) |e| return e;
     const want = holes(t.en);
     if (want & (want +% 1) != 0) return "placeholder numbers skip a value";
-    for (Lang.all) |l| if (holes(t.get(l)) != want) return "languages use different placeholders";
+    for ([_]bool{ false, true }) |for_pad| {
+        if (for_pad and t.pad == null) break;
+        const w = t.wording(for_pad);
+        var names: [31][]const u8 = undefined;
+        var count: usize = 0;
+        const refs = refSet(w.en, &names, &count);
+        for (Lang.all) |l| {
+            if (templateError(l, w.get(l))) |e| return e;
+            if (holes(w.get(l)) != want) return "languages or wordings use different placeholders";
+            if (refSet(w.get(l), &names, &count) != refs) return "languages refer to different controls";
+        }
+    }
     return null;
 }
 
@@ -286,7 +404,7 @@ pub fn textError(t: Text) ?[]const u8 {
 /// uses different arguments from the others, or a call that passes the wrong number of them does not build.
 pub fn format(buf: []u8, lang: Lang, comptime t: Text, args: anytype) []const u8 {
     comptime {
-        @setEvalBranchQuota(20_000);
+        @setEvalBranchQuota(200_000);
         if (textError(t)) |e| @compileError("\"" ++ t.en ++ "\": " ++ e);
         if (@popCount(holes(t.en)) != args.len) @compileError("\"" ++ t.en ++ "\": wrong number of arguments");
     }
@@ -358,7 +476,40 @@ test "malformed and mismatched templates are reported" {
     try std.testing.expect(textError(.{ .en = "{x}", .uk = "{x}" }) != null);
 }
 
-test "reading length is the longest language's, in code points" {
-    const t: Text = .{ .en = "Hold on!", .uk = "Тримайтеся!" };
-    try std.testing.expectEqual(@as(usize, 11), t.longest());
+test "references pass through expansion, are replaced when named, and are checked like placeholders" {
+    var buf: [96]u8 = undefined;
+    try std.testing.expectEqualStrings("press {@examine} 2 times", expand(&buf, .en, "press {@examine} {0} times", &.{int(2)}));
+    const Names = struct {
+        fn lookup(_: *const anyopaque, name: []const u8) ?[]const u8 {
+            return if (std.mem.eql(u8, name, "examine")) "T" else null;
+        }
+    };
+    const refs: Refs = .{ .ctx = &buf, .lookup = &Names.lookup };
+    try std.testing.expectEqualStrings("press T 2 times, or ?", expandRefs(&buf, .en, "press {@examine} {0} times, or {@nothing}", &.{int(2)}, refs));
+    try std.testing.expectEqual(@as(u32, 0b11), holes("{@a} {0} {@b} {1}"));
+
+    var it = refsOf("a {@one} b {0} c {@two}{@one}");
+    try std.testing.expectEqualStrings("one", it.next().?);
+    try std.testing.expectEqualStrings("two", it.next().?);
+    try std.testing.expectEqualStrings("one", it.next().?);
+    try std.testing.expectEqual(@as(?[]const u8, null), it.next());
+
+    try std.testing.expect(textError(.{ .en = "press {@examine}", .uk = "натисніть {@examine}" }) == null);
+    try std.testing.expect(textError(.{ .en = "press {@examine}", .uk = "натисніть {@hint}" }) != null);
+    try std.testing.expect(textError(.{ .en = "press {@examine}", .uk = "натисніть T" }) != null);
+    try std.testing.expect(textError(.{ .en = "press {@Examine}", .uk = "натисніть {@Examine}" }) != null);
+    try std.testing.expect(textError(.{ .en = "press {@}", .uk = "натисніть {@}" }) != null);
+    // a controller wording is held to the same rules, and to the same arguments as the keyboard wording
+    try std.testing.expect(textError(.{ .en = "{0} with W", .uk = "{0} на W", .pad = &.{ .en = "{0} with {@move}", .uk = "{0} на {@move}" } }) == null);
+    try std.testing.expect(textError(.{ .en = "{0} with W", .uk = "{0} на W", .pad = &.{ .en = "with {@move}", .uk = "на {@move}" } }) != null);
+    try std.testing.expect(textError(.{ .en = "with W", .uk = "на W", .pad = &.{ .en = "with {@move}", .uk = "на стік" } }) != null);
+}
+
+test "a text without a controller wording uses the one it has" {
+    const plain: Text = .{ .en = "Go", .uk = "Уперед" };
+    try std.testing.expectEqualStrings("Уперед", plain.wording(true).uk);
+    const both: Text = .{ .en = "Hold W", .uk = "Утримуйте W", .pad = &.{ .en = "Push the stick", .uk = "Відхиліть стік" } };
+    try std.testing.expectEqualStrings("Hold W", both.wording(false).en);
+    try std.testing.expectEqualStrings("Відхиліть стік", both.wording(true).uk);
+    try std.testing.expectEqualStrings("Утримуйте W", both.get(.uk));
 }

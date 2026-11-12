@@ -11,6 +11,7 @@ const campaign = @import("campaign.zig");
 const bot_mod = @import("bot.zig");
 const i18n = @import("i18n.zig");
 const strings = @import("strings.zig");
+const bindings = @import("bindings.zig");
 const Lang = i18n.Lang;
 
 /// The game's name. It is Spanish in every language.
@@ -23,15 +24,35 @@ pub const Screen = enum { title, briefing, play, pause, map };
 
 pub const UiInput = struct {
     confirm: bool = false,
+    /// The keyboard's Esc: back out of a menu, and pause or resume the game.
     back: bool = false,
+    /// A controller splits Esc in two, because its back button is also the one that descends: `cancel`
+    /// backs out of a menu and does nothing while flying, `pause` pauses and resumes and does nothing else.
+    cancel: bool = false,
+    pause: bool = false,
     up: bool = false,
     down: bool = false,
+    /// Change the value of the entry under the selection (the language).
+    left: bool = false,
+    right: bool = false,
     map: bool = false,
     retry: bool = false,
     restart: bool = false,
     quit_to_title: bool = false,
     /// Switch to the next language (title and pause screens).
     language: bool = false,
+};
+
+/// The entries of the pause menu, top to bottom. Each has a key of its own on the keyboard; all of them
+/// can be selected with up and down and chosen with confirm, which is how a controller reaches them.
+pub const PauseItem = enum(u8) {
+    resume_game,
+    retry,
+    restart,
+    leave,
+    language,
+
+    pub const count = @typeInfo(PauseItem).@"enum".field_names.len;
 };
 
 pub const Save = struct {
@@ -112,7 +133,10 @@ pub const App = struct {
     save: Save = .{},
     /// Language everything is drawn in. Changing it takes effect on the next frame.
     lang: Lang = .en,
+    /// Device the prompts are written for: the one the player last used, or the one `--prompts` names.
+    prompts: bindings.Device = .kbm,
     map_sel: usize = 0,
+    pause_sel: PauseItem = .resume_game,
     briefing_page: usize = 0,
     sway: [2]f32 = .{ 0, 0 },
     bob: f32 = 0,
@@ -335,6 +359,13 @@ pub const App = struct {
         if (app.bot != null) app.bot = .{};
     }
 
+    /// Stop the game on the pause menu, with Resume selected.
+    pub fn openPause(app: *App) void {
+        app.screen = .pause;
+        app.pause_sel = .resume_game;
+        app.want_capture = false;
+    }
+
     fn toTitle(app: *App) void {
         app.sim = game.Sim.init();
         app.parkForTitle();
@@ -357,7 +388,7 @@ pub const App = struct {
                 app.sim.yaw = -0.16 + 0.05 * @sin(app.time * 0.21);
                 app.sim.pitch = -0.1 + 0.03 * @sin(app.time * 0.17);
                 app.updateCells(dt);
-                if (ui.language) app.cycleLanguage();
+                if (ui.language or ui.left or ui.right) app.cycleLanguage();
                 if (ui.confirm) {
                     app.chapter = 0;
                     app.screen = .briefing;
@@ -376,7 +407,7 @@ pub const App = struct {
                     app.briefing_page += 1;
                     app.screen_t = 0;
                     if (app.briefing_page >= strings.briefing.pages.len) app.startChapter(0);
-                } else if (ui.back) {
+                } else if (ui.back or ui.cancel) {
                     app.screen = .title;
                 }
             },
@@ -394,30 +425,48 @@ pub const App = struct {
                     } else {
                         app.startChapter(0);
                     }
-                } else if (ui.back) {
+                } else if (ui.back or ui.cancel) {
                     app.toTitle();
                 }
             },
             .pause => {
-                if (ui.language) app.cycleLanguage();
-                if (ui.back or ui.confirm) {
-                    app.screen = .play;
-                    app.want_capture = true;
-                } else if (ui.retry) {
-                    app.restoreCheckpoint();
-                    app.screen = .play;
-                    app.want_capture = true;
-                } else if (ui.restart) {
-                    app.startChapter(app.sim.stats.retries + 1);
-                } else if (ui.quit_to_title) {
-                    app.toTitle();
-                }
+                const n = PauseItem.count;
+                const at = @intFromEnum(app.pause_sel);
+                if (ui.down) app.pause_sel = @enumFromInt((at + 1) % n);
+                if (ui.up) app.pause_sel = @enumFromInt((at + n - 1) % n);
+                if (ui.language or ((ui.left or ui.right) and app.pause_sel == .language)) app.cycleLanguage();
+                // A key of its own first, then whatever is selected.
+                const choice: ?PauseItem = if (ui.back or ui.cancel or ui.pause)
+                    .resume_game
+                else if (ui.retry)
+                    .retry
+                else if (ui.restart)
+                    .restart
+                else if (ui.quit_to_title)
+                    .leave
+                else if (ui.confirm)
+                    app.pause_sel
+                else
+                    null;
+                if (choice) |item| switch (item) {
+                    .resume_game => {
+                        app.screen = .play;
+                        app.want_capture = true;
+                    },
+                    .retry => {
+                        app.restoreCheckpoint();
+                        app.screen = .play;
+                        app.want_capture = true;
+                    },
+                    .restart => app.startChapter(app.sim.stats.retries + 1),
+                    .leave => app.toTitle(),
+                    .language => app.cycleLanguage(),
+                };
             },
             .play => {
                 const s = &app.sim;
-                if (ui.back and s.mode != .complete) {
-                    app.screen = .pause;
-                    app.want_capture = false;
+                if ((ui.back or ui.pause) and s.mode != .complete) {
+                    app.openPause();
                     return;
                 }
                 if (app.bot) |*b| controls = b.think(s, dt);
@@ -627,4 +676,110 @@ test "the chosen language survives a relaunch, in a real save file under a scrat
     try std.testing.expect(app.save.ch1_done and app.save.ch2_done and app.save.lang == null);
     app.writeSave();
     try std.testing.expectEqualStrings("1 66 2 81.5 1 9 312.4 1 65\n", util.readFile(save_path, &file).?);
+}
+
+test "every entry of the pause menu can be selected and chosen without a key of its own" {
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+    const Case = struct { item: PauseItem, downs: usize };
+    for ([_]Case{
+        .{ .item = .resume_game, .downs = 0 },
+        .{ .item = .retry, .downs = 1 },
+        .{ .item = .restart, .downs = 2 },
+        .{ .item = .leave, .downs = 3 },
+        .{ .item = .language, .downs = 4 },
+    }) |case| {
+        app.init(false, .en);
+        app.chapter = 1;
+        app.startChapter(0);
+        for (0..20) |_| app.step(.{}, .{}, dt);
+        // A controller pauses with `pause`; the selection starts on Resume every time.
+        app.step(.{}, .{ .pause = true }, dt);
+        try std.testing.expectEqual(Screen.pause, app.screen);
+        try std.testing.expectEqual(PauseItem.resume_game, app.pause_sel);
+        for (0..case.downs) |_| app.step(.{}, .{ .down = true }, dt);
+        try std.testing.expectEqual(case.item, app.pause_sel);
+        app.step(.{}, .{ .confirm = true }, dt);
+        switch (case.item) {
+            .resume_game => {
+                try std.testing.expectEqual(Screen.play, app.screen);
+                try std.testing.expectEqual(@as(u32, 0), app.sim.stats.retries);
+            },
+            .retry => {
+                try std.testing.expectEqual(Screen.play, app.screen);
+                try std.testing.expectEqual(@as(u32, 1), app.sim.stats.retries);
+                try std.testing.expect(app.sim.voice.current != null);
+            },
+            .restart => {
+                try std.testing.expectEqual(Screen.play, app.screen);
+                try std.testing.expectEqual(@as(u32, 1), app.sim.stats.retries);
+                try std.testing.expectEqual(@as(u8, 1), app.sim.chapter);
+                try std.testing.expect(app.sim.voice.current == null or app.sim.stats.time < 0.1);
+            },
+            .leave => try std.testing.expectEqual(Screen.title, app.screen),
+            .language => {
+                try std.testing.expectEqual(Screen.pause, app.screen);
+                try std.testing.expectEqual(Lang.uk, app.lang);
+                // left and right change it too, on this entry only
+                app.step(.{}, .{ .right = true }, dt);
+                try std.testing.expectEqual(Lang.en, app.lang);
+                app.step(.{}, .{ .up = true }, dt);
+                app.step(.{}, .{ .left = true }, dt);
+                try std.testing.expectEqual(Lang.en, app.lang);
+            },
+        }
+    }
+
+    // The selection wraps, and the keys of their own still work whatever is selected.
+    app.init(false, .en);
+    app.startChapter(0);
+    app.step(.{}, .{ .back = true }, dt);
+    app.step(.{}, .{ .up = true }, dt);
+    try std.testing.expectEqual(PauseItem.language, app.pause_sel);
+    app.step(.{}, .{ .down = true }, dt);
+    try std.testing.expectEqual(PauseItem.resume_game, app.pause_sel);
+    app.step(.{}, .{ .down = true }, dt);
+    app.step(.{}, .{ .down = true }, dt);
+    app.step(.{}, .{ .cancel = true }, dt);
+    try std.testing.expectEqual(Screen.play, app.screen);
+    try std.testing.expectEqual(@as(u32, 0), app.sim.stats.retries);
+    app.step(.{}, .{ .pause = true }, dt);
+    app.step(.{}, .{ .down = true }, dt);
+    app.step(.{}, .{ .quit_to_title = true }, dt);
+    try std.testing.expectEqual(Screen.title, app.screen);
+}
+
+test "a controller's cancel backs out of menus and does nothing in flight; its pause only pauses" {
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+    app.init(false, .en);
+    // title: left and right switch the language, cancel and pause do nothing
+    app.step(.{}, .{ .right = true }, dt);
+    try std.testing.expectEqual(Lang.uk, app.lang);
+    app.step(.{}, .{ .left = true }, dt);
+    try std.testing.expectEqual(Lang.en, app.lang);
+    app.step(.{}, .{ .cancel = true, .pause = true }, dt);
+    try std.testing.expectEqual(Screen.title, app.screen);
+    // map and back
+    app.step(.{}, .{ .map = true }, dt);
+    try std.testing.expectEqual(Screen.map, app.screen);
+    app.step(.{}, .{ .pause = true }, dt);
+    try std.testing.expectEqual(Screen.map, app.screen);
+    app.step(.{}, .{ .cancel = true }, dt);
+    try std.testing.expectEqual(Screen.title, app.screen);
+    // briefing and back
+    app.step(.{}, .{ .confirm = true }, dt);
+    try std.testing.expectEqual(Screen.briefing, app.screen);
+    app.step(.{}, .{ .cancel = true }, dt);
+    try std.testing.expectEqual(Screen.title, app.screen);
+    // in flight the cancel button is the one that descends: it must not open the pause menu
+    app.startChapter(0);
+    app.step(.{}, .{ .cancel = true }, dt);
+    try std.testing.expectEqual(Screen.play, app.screen);
+    app.step(.{}, .{ .pause = true }, dt);
+    try std.testing.expectEqual(Screen.pause, app.screen);
+    app.step(.{}, .{ .pause = true }, dt);
+    try std.testing.expectEqual(Screen.play, app.screen);
 }

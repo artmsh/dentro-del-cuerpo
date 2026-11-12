@@ -9,6 +9,7 @@ const guide = @import("guide.zig");
 const gut_mod = @import("gut.zig");
 const ch2 = @import("ch2.zig");
 const i18n = @import("i18n.zig");
+const bindings = @import("bindings.zig");
 const strings = @import("strings.zig");
 const Text = i18n.Text;
 const Lang = i18n.Lang;
@@ -1941,10 +1942,11 @@ pub const Sim = struct {
         return @abs(s.pos.z - e.pos.z) < 60 and s.pos.dist(e.pos) < e.radius * 0.95;
     }
 
-    /// One-line objective for the HUD, in `lang`. `buf` holds the result where it has numbers in it.
-    pub fn objective(s: *const Sim, lang: Lang, buf: []u8) []const u8 {
+    /// One-line objective for the HUD, as the player `p` describes reads it. `buf` holds the result where it
+    /// has numbers or control names in it.
+    pub fn objective(s: *const Sim, p: bindings.Prompt, buf: []u8) []const u8 {
         const text: Text = switch (s.stage) {
-            .g_arrive, .g_villus, .g_descend, .g_wave, .g_scan, .g_extrude, .g_factory, .g_tether, .g_flume, .g_exit => return ch2.objective(s, lang, buf),
+            .g_arrive, .g_villus, .g_descend, .g_wave, .g_scan, .g_extrude, .g_factory, .g_tether, .g_flume, .g_exit => return ch2.objective(s, p, buf),
             .needle => O.needle,
             .flow_wall => O.flow_wall,
             .flow_core => O.flow_core,
@@ -1952,20 +1954,20 @@ pub const Sim = struct {
             .valve1_identify => O.valve1_identify,
             .valve1_pass => O.valve1_pass,
             .neutrophil => O.neutrophil,
-            .staph => return i18n.format(buf, lang, O.staph, .{i18n.int(s.count(.cocci))}),
+            .staph => return bindings.format(buf, p, O.staph, .{i18n.int(s.count(.cocci))}),
             .tools => if (s.waypoint == null) O.tools else O.transit_marker,
             .transit1, .transit2 => O.transit,
             .v2_approach => O.v2_approach,
-            .treat => return i18n.format(buf, lang, O.treat, .{ i18n.int(3 - @as(i32, @intCast(s.count(.nest)))), i18n.int(4 - @as(i32, @intCast(s.count(.anchor)))), i18n.int(s.count(.embolus)) }),
+            .treat => return bindings.format(buf, p, O.treat, .{ i18n.int(3 - @as(i32, @intCast(s.count(.nest)))), i18n.int(4 - @as(i32, @intCast(s.count(.anchor)))), i18n.int(s.count(.embolus)) }),
             .lyse_core => O.lyse_core,
             .freed => O.freed,
             .to_ring2 => O.to_ring2,
             .septum_find => O.septum_find,
-            .septum_break => return i18n.format(buf, lang, O.septum_break, .{i18n.int(@as(i32, @intFromFloat(100 * (1 - (if (s.findConst(.phlebolith)) |e| e.hp / e.max_hp else 0)))))}),
+            .septum_break => return bindings.format(buf, p, O.septum_break, .{i18n.int(@as(i32, @intFromFloat(100 * (1 - (if (s.findConst(.phlebolith)) |e| e.hp / e.max_hp else 0)))))}),
             .exit => O.exit,
             .done => O.done,
         };
-        return text.get(lang);
+        return bindings.resolve(buf, text, p);
     }
 
     pub fn grade(s: *const Sim) u8 {

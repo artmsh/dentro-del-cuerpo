@@ -32,6 +32,11 @@ pub fn class(name: [*:0]const u8) id {
     return objc_getClass(name) orelse @panic("objc class not found");
 }
 
+/// The class, or null if no loaded framework has it.
+pub fn classOpt(name: [*:0]const u8) id {
+    return objc_getClass(name);
+}
+
 pub fn new(class_name: [*:0]const u8) id {
     return send(fn (id, SEL) callconv(.c) id, alloc(class_name), "init", .{});
 }

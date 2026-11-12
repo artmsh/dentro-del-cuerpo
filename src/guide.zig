@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const Text = @import("i18n.zig").Text;
+const bindings = @import("bindings.zig");
 
 pub const Topic = enum(u8) {
     red_cell,
@@ -469,11 +470,12 @@ pub const Voice = struct {
         v.serial +%= 1;
     }
 
-    /// Time a line stays up: a base plus reading time per character of its longest translation, so the
-    /// simulation's timing is the same whichever language is shown.
+    /// Time a line stays up: a base plus reading time per character of the longest version of it any
+    /// player can be shown, so the simulation's timing is the same whichever language is in use and
+    /// whichever device the prompts are for.
     pub fn holdTime(text: Text, urgent: bool) f32 {
         const base: f32 = if (urgent) 1.6 else 2.2;
-        return base + @as(f32, @floatFromInt(text.longest())) * 0.052;
+        return base + @as(f32, @floatFromInt(bindings.readingLength(text))) * 0.052;
     }
 
     pub fn update(v: *Voice, dt: f32) void {

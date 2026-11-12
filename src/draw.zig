@@ -13,6 +13,7 @@ const gut = @import("gut.zig");
 const ch2 = @import("ch2.zig");
 const i18n = @import("i18n.zig");
 const strings = @import("strings.zig");
+const bindings = @import("bindings.zig");
 const utf8 = @import("utf8.zig");
 const font = @import("font.zig");
 const Text = i18n.Text;
@@ -45,15 +46,30 @@ fn mixc(a: Color, b: Color, t: f32) Color {
     return .{ m.lerp(a[0], b[0], t), m.lerp(a[1], b[1], t), m.lerp(a[2], b[2], t), m.lerp(a[3], b[3], t) };
 }
 
-/// Language of the frame being drawn; set once at the top of `frame`.
+/// Language of the frame being drawn, and the device its prompts are written for; set once at the top of
+/// `frame`.
 var lang: Lang = .en;
+var device: bindings.Device = .kbm;
 
+fn prompt() bindings.Prompt {
+    return .{ .lang = lang, .device = device };
+}
+
+/// Text that names a control is written out afresh for the device each frame; it lives here until the
+/// next frame begins.
+var scratch: [48 * 1024]u8 = undefined;
+var scratch_len: usize = 0;
+
+/// `text` as this frame's player reads it. Everything the HUD shows goes through here or through `tf`.
 fn tr(text: Text) []const u8 {
-    return text.get(lang);
+    const free = scratch[scratch_len..];
+    const out = bindings.resolve(free, text, prompt());
+    if (out.ptr == free.ptr) scratch_len += out.len;
+    return out;
 }
 
 fn tf(buf: []u8, comptime text: Text, args: anytype) []const u8 {
-    return i18n.format(buf, lang, text, args);
+    return bindings.format(buf, prompt(), text, args);
 }
 
 fn number(buf: []u8, v: anytype) []const u8 {
@@ -127,6 +143,8 @@ var bore_mix: f32 = 1;
 pub fn frame(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, dt: f32) Out {
     const s = &app.sim;
     lang = app.lang;
+    device = app.prompts;
+    scratch_len = 0;
     const aspect = r.ui_w / r.ui_h;
 
     // Camera.
@@ -760,7 +778,7 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
     // --- objective, top centre
     {
         var obuf: [240]u8 = undefined;
-        const text = s.objective(lang, &obuf);
+        const text = s.objective(prompt(), &obuf);
         // between the two top panels, with a margin
         const size = fitSize(r, .bold, 18, W - 2 * 366 - 36, text);
         const tw = r.textWidth(.bold, size, text);
@@ -993,29 +1011,52 @@ fn drawModeOverlay(app: *App, r: *Renderer) void {
 }
 
 fn drawPause(app: *App, r: *Renderer) void {
-    _ = app;
+    const P = strings.pause;
     const cx = r.ui_w * 0.5;
     const o = card(r, 760, 630, cyan);
-    r.textCentered(.bold, cx, o[1] + 28, 46, white, tr(strings.pause.heading));
+    r.textCentered(.bold, cx, o[1] + 28, 46, white, tr(P.heading));
     var y = o[1] + 104;
-    for (strings.pause.options) |op| {
-        r.textRight(.bold, cx - 20, y, 20, cyan, tr(op[0]));
-        _ = r.text(.regular, cx + 10, y, 20, white, tr(op[1]));
+    // The options. The one under the selection is lit; an option with a key of its own shows it.
+    for (0..app_mod.PauseItem.count) |i| {
+        const item: app_mod.PauseItem = @enumFromInt(i);
+        const selected = app.pause_sel == item;
+        if (selected) {
+            r.rect(o[0] + 60, y - 4, 640, 30, alpha(cyan, 0.16));
+            r.rect(o[0] + 60, y - 4, 3, 30, cyan);
+        }
+        const key = switch (item) {
+            .resume_game => tr(P.resume_keys),
+            .retry => bindings.label(.retry, prompt()),
+            .restart => bindings.label(.restart, prompt()),
+            .leave => bindings.label(.leave, prompt()),
+            .language => tr(strings.language.key),
+        };
+        r.textRight(.bold, cx - 20, y, 20, cyan, key);
+        if (item == .language) {
+            var runs: [4 + 2 * Lang.count]Run = undefined;
+            drawRuns(r, cx + 10, y, 20, languageRuns(&runs, cyan, 1, false));
+        } else {
+            _ = r.text(if (selected) .bold else .regular, cx + 10, y, 20, white, tr(P.options[i]));
+        }
         y += 30;
     }
-    // the language switch, laid out as one more option
-    var runs: [4 + 2 * Lang.count]Run = undefined;
-    r.textRight(.bold, cx - 20, y, 20, cyan, tr(strings.language.key));
-    drawRuns(r, cx + 10, y, 20, languageRuns(&runs, cyan, 1, false));
+    y += 4;
+    r.textCentered(.regular, cx, y, 14, alpha(dim, 0.9), tr(P.choose));
     y += 30;
-    y += 16;
     r.rect(o[0] + 60, y, 640, 1, alpha(dim, 0.4));
-    y += 16;
-    for (strings.pause.controls) |cc| {
-        r.textRight(.bold, cx - 20, y, 16, dim, tr(cc[0]));
-        _ = r.text(.regular, cx + 10, y, 16, white, tr(cc[1]));
+    y += 14;
+    const row = struct {
+        fn draw(rr: *Renderer, x: f32, yy: f32, pair: [2]Text) void {
+            const what = tr(pair[1]);
+            rr.textRight(.bold, x - 20, yy, 16, dim, tr(pair[0]));
+            _ = rr.text(.regular, x + 10, yy, fitSize(rr, .regular, 16, 350, what), white, what);
+        }
+    }.draw;
+    for (P.controls) |cc| {
+        row(r, cx, y, cc);
         y += 23;
     }
+    if (device == .kbm) row(r, cx, y, P.fullscreen);
 }
 
 /// The app icon: the split reticle (left arm cyan, right arm amber) over the blood stream.

@@ -562,6 +562,18 @@ pub fn runHeadless(sim: *Sim, checkpoint: *Sim, max_seconds: f32, log: bool) Res
 pub var trace: bool = false;
 
 pub fn runHeadlessChapter(sim: *Sim, checkpoint: *Sim, chapter: u8, max_seconds: f32, log: bool) Result {
+    const Direct = struct {
+        pub fn pass(_: *@This(), c: Controls, _: *const Sim, _: f32) Controls {
+            return c;
+        }
+    };
+    var direct: Direct = .{};
+    return runHeadlessVia(sim, checkpoint, chapter, max_seconds, log, &direct);
+}
+
+/// As `runHeadlessChapter`, with the pilot's controls handed to `via.pass(controls, sim, dt)` on their way
+/// to the simulation. The tests use it to route them through a game controller and back.
+pub fn runHeadlessVia(sim: *Sim, checkpoint: *Sim, chapter: u8, max_seconds: f32, log: bool, via: anytype) Result {
     sim.* = Sim.initChapter(chapter);
     checkpoint.* = sim.*;
     var bot: Bot = .{};
@@ -571,7 +583,7 @@ pub fn runHeadlessChapter(sim: *Sim, checkpoint: *Sim, chapter: u8, max_seconds:
     var last = sim.stage;
     if (log) std.debug.print("[{d:7.1}s] start: stage {s}\n", .{ t, @tagName(sim.stage) });
     while (t < max_seconds and sim.mode != .complete and sim.mode != .lost) : (t += dt) {
-        const c = bot.think(sim, dt);
+        const c = via.pass(bot.think(sim, dt), sim, dt);
         sim.update(c, dt);
         if (sim.want_checkpoint) {
             sim.want_checkpoint = false;

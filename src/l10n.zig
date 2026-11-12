@@ -11,6 +11,9 @@ const game = @import("game.zig");
 const font = @import("font.zig");
 const utf8 = @import("utf8.zig");
 const app = @import("app.zig");
+const bindings = @import("bindings.zig");
+const Prompt = bindings.Prompt;
+const Device = bindings.Device;
 const Text = i18n.Text;
 const Lang = i18n.Lang;
 
@@ -90,8 +93,32 @@ fn hasEnglishWord(s: []const u8) bool {
 }
 
 /// Text that is deliberately the same in every language although it contains Latin words: the binomial,
-/// and names printed on the keyboard.
-const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Esc / Enter", "Shift", "Tab", "Cmd+F" };
+/// names printed on the keyboard, and the two PlayStation buttons that go by their product names.
+const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Esc", "Enter", "Shift", "Tab", "Cmd+F", "Create", "Options" };
+
+/// The wordings of a text: the one for keyboard and mouse, then the one for a controller if it has its own.
+fn wordingsOf(t: Text) struct { list: [2]i18n.Wording, len: usize } {
+    return .{ .list = .{ t.wording(false), t.wording(true) }, .len = if (t.pad == null) 1 else 2 };
+}
+
+/// True if every `{…}` of `s` is a reference to a control: the text is then made of names that
+/// `bindings.zig` supplies, and has no words of its own to translate.
+fn onlyReferences(s: []const u8) bool {
+    const Sink = struct {
+        words: bool = false,
+        pub fn literal(k: *@This(), part: []const u8) void {
+            var i: usize = 0;
+            while (i < part.len) {
+                const cp = utf8.next(part, &i);
+                if (isLatin(cp) or isCyrillic(cp)) k.words = true;
+            }
+        }
+        pub fn ref(_: *@This(), _: []const u8) void {}
+    };
+    var sink: Sink = .{};
+    i18n.walk(s, &sink);
+    return !sink.words and std.mem.indexOf(u8, s, "{@") != null;
+}
 
 fn fail(where: []const u8, text: []const u8, comptime what: []const u8) error{Localisation} {
     std.debug.print("{s}: " ++ what ++ "\n    {s}\n", .{ where, text });
@@ -103,11 +130,16 @@ test "every string has a Ukrainian translation" {
         count: usize = 0,
         pub fn text(c: *@This(), where: []const u8, t: Text) !void {
             c.count += 1;
+            const ws = wordingsOf(t);
+            for (ws.list[0..ws.len]) |w| try one(where, w);
+        }
+        fn one(where: []const u8, t: i18n.Wording) !void {
             if (t.en.len == 0) return fail(where, t.uk, "the English is empty");
             if (t.uk.len == 0) return fail(where, t.en, "the Ukrainian is empty");
             if (hasCyrillic(t.uk)) return;
             // No Cyrillic at all is right only for text that is not words: a key, a number, a unit, a name.
             if (!std.mem.eql(u8, t.en, t.uk)) return fail(where, t.uk, "the Ukrainian has no Cyrillic and differs from the English");
+            if (onlyReferences(t.en)) return;
             if (!hasEnglishWord(t.en)) return;
             for (same_everywhere) |s| if (std.mem.eql(u8, s, t.en)) return;
             return fail(where, t.uk, "the Ukrainian is a copy of the English");
@@ -134,8 +166,11 @@ test "placeholders are well formed and the same in both languages" {
 
 test "Ukrainian text follows Ukrainian typography" {
     const Check = struct {
-        pub fn text(_: *@This(), where: []const u8, t: Text) !void {
-            const s = t.uk;
+        pub fn text(c: *@This(), where: []const u8, t: Text) !void {
+            const ws = wordingsOf(t);
+            for (ws.list[0..ws.len]) |w| try c.one(where, w.uk);
+        }
+        fn one(_: *@This(), where: []const u8, s: []const u8) !void {
             if (std.mem.indexOfAny(u8, s, "'\"`") != null) return fail(where, s, "straight quote or apostrophe; use « », “ ” and ’");
             if (std.mem.indexOf(u8, s, "...") != null) return fail(where, s, "three full stops; use …");
             if (std.mem.indexOf(u8, s, " - ") != null) return fail(where, s, "hyphen used as a dash; use —");
@@ -174,7 +209,11 @@ test "every character of every string has a glyph in both faces" {
     const Check = struct {
         f: *const font.Font,
         pub fn text(c: *@This(), where: []const u8, t: Text) !void {
-            for (Lang.all) |l| try c.plain(where, t.get(l));
+            // As each player reads it: the names of the controls are part of the text.
+            var buf: [2048]u8 = undefined;
+            for (Lang.all) |l| for (Device.all) |d| {
+                try c.plain(where, bindings.resolve(&buf, t, .{ .lang = l, .device = d }));
+            };
         }
         fn plain(c: *@This(), where: []const u8, s: []const u8) !void {
             var i: usize = 0;
@@ -198,26 +237,161 @@ test "every character of every string has a glyph in both faces" {
     try check.plain("formatter", "0123456789.,-?ABCD✓?◆ —·:");
 }
 
-test "every stage has an objective and a hint in each language" {
+test "every stage has an objective and a hint in each language, for each device" {
     const sim = try std.testing.allocator.create(game.Sim);
     defer std.testing.allocator.destroy(sim);
     var buf_en: [240]u8 = undefined;
     var buf_uk: [240]u8 = undefined;
+    var hint_buf: [1024]u8 = undefined;
     for (0..2) |chapter| {
         sim.* = game.Sim.initChapter(@intCast(chapter));
         inline for (comptime std.meta.fieldNames(game.Stage)) |name| {
             sim.stage = @field(game.Stage, name);
-            const en = sim.objective(.en, &buf_en);
-            const uk = sim.objective(.uk, &buf_uk);
-            try std.testing.expect(en.len > 0 and uk.len > 0);
-            try std.testing.expect(hasCyrillic(uk) and !hasCyrillic(en));
-            // formatted objectives fit their buffer with room to spare
-            try std.testing.expect(en.len < buf_en.len - 40 and uk.len < buf_uk.len - 40);
-            for (0..3) |level| {
-                sim.hint_level = @intCast(level);
-                const hint = sim.hintText();
-                try std.testing.expect(hint.en.len > 0 and hasCyrillic(hint.uk));
+            for (Device.all) |d| {
+                const en = sim.objective(.{ .lang = .en, .device = d }, &buf_en);
+                const uk = sim.objective(.{ .lang = .uk, .device = d }, &buf_uk);
+                try std.testing.expect(en.len > 0 and uk.len > 0);
+                try std.testing.expect(hasCyrillic(uk) and !hasCyrillic(en));
+                // every control is named, none is left as a reference
+                try std.testing.expect(std.mem.indexOfScalar(u8, en, '{') == null and std.mem.indexOfScalar(u8, uk, '{') == null);
+                // formatted objectives fit their buffer with room to spare
+                try std.testing.expect(en.len < buf_en.len - 40 and uk.len < buf_uk.len - 40);
+                for (0..3) |level| {
+                    sim.hint_level = @intCast(level);
+                    const hint = sim.hintText();
+                    try std.testing.expect(hint.en.len > 0 and hasCyrillic(hint.uk));
+                    for (Lang.all) |l| {
+                        const shown = bindings.resolve(&hint_buf, hint, .{ .lang = l, .device = d });
+                        try std.testing.expect(shown.len > 0 and shown.len < hint_buf.len - 100);
+                        try std.testing.expect(std.mem.indexOfScalar(u8, shown, '{') == null);
+                    }
+                }
             }
         }
     }
+}
+
+test "every reference names an action, and none names one a controller has no button for" {
+    const Check = struct {
+        refs: usize = 0,
+        pub fn text(c: *@This(), where: []const u8, t: Text) !void {
+            const ws = wordingsOf(t);
+            for (ws.list[0..ws.len], 0..) |w, k| for (Lang.all) |l| {
+                var it = i18n.refsOf(w.get(l));
+                while (it.next()) |name| {
+                    c.refs += 1;
+                    const action = std.meta.stringToEnum(bindings.Action, name) orelse {
+                        std.debug.print("{s}: {{@{s}}} is not an action\n    {s}\n", .{ where, name, w.get(l) });
+                        return error.Localisation;
+                    };
+                    // The wording a controller player reads: the controller's own, or the only one.
+                    const for_pad = k == 1 or t.pad == null;
+                    if (for_pad and bindings.binding(action).pad == .menu) {
+                        std.debug.print("{s}: {{@{s}}} has no button on a controller, so the text would name nothing\n    {s}\n", .{ where, name, w.get(l) });
+                        return error.Localisation;
+                    }
+                }
+            };
+        }
+    };
+    var check: Check = .{};
+    try forEach(&check);
+    try std.testing.expect(check.refs > 150);
+}
+
+/// Words that name a key or the mouse. A text a controller player can be shown must not contain one: it
+/// has to name the action (`{@examine}`) or carry a wording of its own for the controller.
+const key_words = [_][]const u8{
+    "WASD",       "Tab",         "Esc", "Enter", "Shift",  "Space",  "Cmd",    "Пробіл", "пробіл", "Mouse", "mouse",
+    "left click", "right click", "Миш", "миш",   "стрілк", "Стрілк", "клавіш", "Клавіш", "key",    "keys",  "keyboard",
+    "arrow keys",
+};
+/// Keys that are single letters. A is left out: it is also the English article, and the strafe keys are
+/// never named without D.
+const key_letters = "QEZXTFGHMRNLCWSD";
+
+/// Text that trips the check without naming a key: the start of its path, and the word that does it (or
+/// none, for any word).
+const not_keys = [_][2][]const u8{
+    .{ "strings.hud.site_vein", "R" }, // R. GREAT SAPHENOUS VEIN: "right"
+    .{ "strings.objective.v2_approach", "Enter" }, // "Enter the pocket": the verb
+    .{ "strings.title.tagline", "" }, // letter-spaced: I N S I D E
+};
+/// Parts of the catalogue the check does not apply to: the names of the keys themselves and the one control
+/// that exists only on the keyboard, which only a keyboard player is shown; and the names of a controller's
+/// buttons, where X is not a key.
+const exempt_from_key_check = [_][]const u8{ "strings.keys.", "strings.pause.fullscreen", "strings.pad." };
+
+fn isWordChar(cp: u21) bool {
+    return isLatin(cp) or isCyrillic(cp) or (cp >= '0' and cp <= '9');
+}
+
+/// The key `s` names, if it names one: a key word standing on its own or beginning a word, or a single
+/// key letter standing on its own.
+fn namedKey(s: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    var prev: u21 = ' ';
+    var prev2: u21 = ' ';
+    while (i < s.len) {
+        const start = i;
+        const cp = utf8.next(s, &i);
+        defer {
+            prev2 = prev;
+            prev = cp;
+        }
+        if (isWordChar(prev) or !isWordChar(cp)) continue;
+        // at the start of a word
+        for (key_words) |w| {
+            if (!std.mem.startsWith(u8, s[start..], w)) continue;
+            // Latin key names are whole words ("Tab", not "Table"); the Cyrillic entries are stems.
+            var j = start + w.len;
+            const after: u21 = if (j < s.len) utf8.next(s, &j) else ' ';
+            if (w[0] >= 0x80 or !isLatin(after)) return s[start..][0..w.len];
+        }
+        // A letter after a number is a unit: 22 G is the needle's gauge.
+        const unit = prev == ' ' and prev2 >= '0' and prev2 <= '9';
+        if (!unit and cp < 0x80 and std.mem.indexOfScalar(u8, key_letters, @intCast(cp)) != null) {
+            var j = i;
+            const after: u21 = if (j < s.len) utf8.next(s, &j) else ' ';
+            // A letter joined to a word by a hyphen is part of a term, not a key: T-shaped.
+            if (!isWordChar(after) and after != '-') return s[start..i];
+        }
+    }
+    return null;
+}
+
+test "nothing a controller player is shown names a key" {
+    const Check = struct {
+        pub fn text(_: *@This(), where: []const u8, t: Text) !void {
+            for (exempt_from_key_check) |prefix| if (std.mem.startsWith(u8, where, prefix)) return;
+            const Sink = struct {
+                found: ?[]const u8 = null,
+                pub fn literal(k: *@This(), part: []const u8) void {
+                    if (k.found == null) k.found = namedKey(part);
+                }
+                pub fn ref(_: *@This(), _: []const u8) void {}
+            };
+            const w = t.wording(true);
+            for (Lang.all) |l| {
+                var sink: Sink = .{};
+                i18n.walk(w.get(l), &sink);
+                const key = sink.found orelse continue;
+                const excused = for (not_keys) |n| {
+                    if (std.mem.startsWith(u8, where, n[0]) and (n[1].len == 0 or std.mem.eql(u8, n[1], key))) break true;
+                } else false;
+                if (excused) continue;
+                std.debug.print("{s}: names the key \"{s}\" in text a controller player sees; use a {{@action}} reference or add a .pad wording\n    {s}\n", .{ where, key, w.get(l) });
+                return error.Localisation;
+            }
+        }
+    };
+    try std.testing.expectEqualStrings("T", namedKey("aim at it and press T.").?);
+    try std.testing.expectEqualStrings("Shift", namedKey("hold Shift+W for five seconds").?);
+    try std.testing.expectEqualStrings("клавіш", namedKey("утримуйте обидві клавіші").?);
+    try std.testing.expectEqualStrings("миш", namedKey("Керуйте мишею або стрілками.").?);
+    try std.testing.expectEqualStrings("D", namedKey("Strafe with A or D").?);
+    try std.testing.expectEqual(@as(?[]const u8, null), namedKey("A stone. The T-shaped Table, DRILL and SHOOT; vitamin K; Tabs; 22 G."));
+    try std.testing.expectEqual(@as(?[]const u8, null), namedKey("Не бийте по тромбу — він кришиться!"));
+    var check: Check = .{};
+    try forEach(&check);
 }

@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
         mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
     }
     mod.linkSystemLibrary("objc", .{});
-    for ([_][]const u8{ "AppKit", "Foundation", "QuartzCore", "Metal", "CoreGraphics", "CoreFoundation", "AudioToolbox", "ImageIO" }) |fw| mod.linkFramework(fw, .{});
+    for ([_][]const u8{ "AppKit", "Foundation", "QuartzCore", "Metal", "CoreGraphics", "CoreFoundation", "AudioToolbox", "ImageIO", "GameController" }) |fw| mod.linkFramework(fw, .{});
 
     // Text: the vendored rasteriser as one C translation unit, and the fonts it reads, embedded by name
     // because they live outside the module's source directory. UBSan is off for the C file: it is third-party
