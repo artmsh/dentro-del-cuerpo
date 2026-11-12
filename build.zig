@@ -3,7 +3,14 @@ const std = @import("std");
 const app_dir = "Dentro del cuerpo.app/Contents/";
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    // A native macOS build would stamp the host's OS version as the minimum and refuse to launch on anything
+    // older, so the deployment target is pinned. Pinning it makes the target non-native to the build system,
+    // which then no longer searches the SDK on its own; the SDK paths are added below.
+    var query = b.standardTargetOptionsQueryOnly(.{});
+    const host_is_mac = b.graph.host.result.os.tag == .macos;
+    if (host_is_mac and (query.os_tag == null or query.os_tag == .macos) and query.os_version_min == null)
+        query.os_version_min = .{ .semver = .{ .major = 14, .minor = 0, .patch = 0 } };
+    const target = b.resolveTargetQuery(query);
     const optimize = b.standardOptimizeOption(.{});
 
     const mod = b.createModule(.{
@@ -11,6 +18,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    if (host_is_mac and target.result.os.tag == .macos) {
+        const sdk = std.mem.trim(u8, b.run(&.{ "xcrun", "--sdk", "macosx", "--show-sdk-path" }), " \r\n");
+        mod.addSystemFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "System/Library/Frameworks" }) });
+        mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
+    }
     mod.linkSystemLibrary("objc", .{});
     for ([_][]const u8{ "AppKit", "Foundation", "QuartzCore", "Metal", "CoreGraphics", "CoreText", "CoreFoundation", "AudioToolbox", "ImageIO" }) |fw| mod.linkFramework(fw, .{});
 

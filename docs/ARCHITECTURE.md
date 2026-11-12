@@ -81,3 +81,15 @@ itself (`dentro --icon`) and checked in as `res/AppIcon.icns`. The save file is
 Quitting needs one piece of care: AppKit's `terminate:` calls `exit()` from inside the event pump, so the
 cleanup that must precede exit (stopping the audio thread, re-associating the mouse) runs from
 `applicationShouldTerminate:` rather than after the main loop.
+
+## Source layout
+
+| | |
+|---|---|
+| `src/vein.zig`, `src/gut.zig` | anatomy of chapters 1 and 2 as analytic functions: shape, flow, collision, ray casts |
+| `src/game.zig` | shared rules: drone, arms and tools, entities, guide triggers; chapter 1's script |
+| `src/ch2.zig` | chapter 2: state, stage script, organisms, tether |
+| `src/guide.zig`, `src/campaign.zig` | the atlas and comms queue; the chapter table |
+| `src/bot.zig` | scripted pilot used by the tests and `--demo` |
+| `src/draw.zig`, `src/render.zig`, `src/gpu.zig`, `src/shaders/` | scene, arms and HUD; batching; Metal |
+| `src/platform.zig`, `src/audio.zig`, `src/font.zig`, `src/objc.zig` | window and input, synthesiser, glyph atlas, runtime bridge |
