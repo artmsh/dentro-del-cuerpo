@@ -2,9 +2,11 @@ name: ci
 
 on:
   push:
-    branches: [main, windows-port] # TEMPORARY while the Windows port is brought up; remove windows-port
+    branches: [main]
     paths-ignore: ["**.md", "docs/**", "LICENSE*"]
   pull_request:
+  # To run the jobs on a branch that has no pull request. It never publishes: see the release job's condition.
+  workflow_dispatch:
 
 permissions:
   contents: read
