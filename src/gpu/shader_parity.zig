@@ -24,6 +24,11 @@ const line_exceptions = [_][2][]const u8{
     // The two hashes take the sine of a large argument. Metal's sin is accurate there and Direct3D's need
     // not be, so the HLSL file calls its own (see `sinExact` there).
     .{ "return fract(sin(p) * 43758.5453);", "return frac(sinExact(p) * 43758.5453);" },
+    // The argument of the cell hash, with the rounding Metal's compiler gives it (see `dotFused` there).
+    .{
+        "p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));",
+        "p = float2(dotFused(p.x, 127.1, p.y, float3(310.0, 1.6953125, 0.00469970703125)), dotFused(p.x, 269.5, p.y, float3(183.0, 0.296875, 0.0031280517578125)));",
+    },
     .{
         "float g = fract(sin(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);",
         "float g = frac(sinExact(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);",
@@ -31,7 +36,7 @@ const line_exceptions = [_][2][]const u8{
 };
 
 /// Functions only the HLSL file has, standing in for something Metal provides.
-const hlsl_only = [_][]const u8{"sinExact"};
+const hlsl_only = [_][]const u8{ "sinExact", "twoSum", "dotFused" };
 
 const Function = struct {
     name: []const u8,
@@ -270,4 +275,48 @@ test "the HLSL file's sine is the true sine for arguments of any size the hashes
     // The arguments the cell hash meets on a villus, and the film grain's a minute into a chapter.
     for ([_]f32{ 27_431.7, 149_873.3, 443_219.25, -31_005.1 }) |x|
         try std.testing.expectApproxEqAbs(@as(f32, @floatCast(@sin(@as(f64, x)))), sinExact(x), 2.5e-7);
+}
+
+fn twoSum(a: f32, b: f32) [2]f32 {
+    const s = a + b;
+    const v = s - a;
+    return .{ s, (a - (s - v)) + (b - v) };
+}
+
+/// `dotFused` in the HLSL file, step for step.
+fn dotFused(x: f32, a: f32, y: f32, b: [3]f32) f32 {
+    var t = twoSum(x * a, y * b[0]);
+    var lost = t[1];
+    t = twoSum(t[0], y * b[1]);
+    lost += t[1];
+    t = twoSum(t[0], y * b[2]);
+    lost += t[1];
+    return t[0] + lost;
+}
+
+test "the HLSL file's dot product is a fused multiply-add, bit for bit" {
+    // The pieces in the shader add up to the single-precision constants of the Metal file.
+    const b1 = [3]f32{ 310.0, 1.6953125, 0.00469970703125 };
+    const b2 = [3]f32{ 183.0, 0.296875, 0.0031280517578125 };
+    try std.testing.expectEqual(@as(f32, 311.7), b1[0] + b1[1] + b1[2]);
+    try std.testing.expectEqual(@as(f32, 183.3), b2[0] + b2[1] + b2[2]);
+    try std.testing.expect(std.mem.indexOf(u8, hlsl, "float3(310.0, 1.6953125, 0.00469970703125)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hlsl, "float3(183.0, 0.296875, 0.0031280517578125)") != null);
+    // Cell coordinates are whole numbers. Metal computes fma(y, b, x * a), which is what the bundle's
+    // frames are made of: writing it out as that in the Metal file leaves every frame as it was.
+    var prng = std.Random.DefaultPrng.init(11);
+    const rnd = prng.random();
+    var unfused_differs: usize = 0;
+    for (0..400_000) |i| {
+        const range: i32 = if (i % 2 == 0) 600 else 65_000;
+        const x: f32 = @floatFromInt(rnd.intRangeAtMost(i32, -range, range));
+        const y: f32 = @floatFromInt(rnd.intRangeAtMost(i32, -range, range));
+        const want1 = @mulAdd(f32, y, 311.7, x * @as(f32, 127.1));
+        const want2 = @mulAdd(f32, y, 183.3, x * @as(f32, 269.5));
+        try std.testing.expectEqual(@as(u32, @bitCast(want1)), @as(u32, @bitCast(dotFused(x, 127.1, y, b1))));
+        try std.testing.expectEqual(@as(u32, @bitCast(want2)), @as(u32, @bitCast(dotFused(x, 269.5, y, b2))));
+        if (x * @as(f32, 127.1) + y * @as(f32, 311.7) != want1) unfused_differs += 1;
+    }
+    // The plain product-and-sum is a different number often enough to matter, which is why this exists.
+    try std.testing.expect(unfused_differs > 10_000);
 }

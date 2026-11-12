@@ -79,7 +79,7 @@ float fbm(float3 p) {
 // keep the fraction, with arguments in the tens and hundreds of thousands, so they need the sine to its
 // last bits. Metal on Apple's GPUs returns it; Direct3D defines sin only between -100 pi and 100 pi and
 // leaves the rest to the implementation, and WARP's answers out there turned the film grain into diagonal
-// stripes and laid the epithelial cells out differently from the Mac's. So the reduction to one turn is
+// stripes and gave the epithelial cells a different and uneven layout. So the reduction to one turn is
 // done here in integers, where every Direct3D device computes the same thing: the fraction of x / 2 pi is
 // the low 32 bits of floor(x) * 0x28BE60DB (1 / 2 pi is 0x0.28BE60DB9391054A... in binary) plus what
 // carries in from the next 32 bits of that constant, plus the share of x's own fraction. The sine of the
@@ -102,8 +102,35 @@ float2 sinExact(float2 p) {
     return float2(sinExact(p.x), sinExact(p.y));
 }
 
+// a + b as rounded, and what the rounding took away: the two together are the sum exactly.
+float2 twoSum(float a, float b) {
+    precise float s = a + b;
+    precise float v = s - a;
+    precise float lost = (a - (s - v)) + (b - v);
+    return float2(s, lost);
+}
+// dot(float2(x, y), float2(a, b)) to the bit as Metal's compiler computes it for Apple's GPUs: x * a rounded,
+// then y * b added to that with a single rounding (a fused multiply-add). The argument of the cell hash is
+// such a product, and a difference in its last bit gives a different cell. Direct3D leaves it to the
+// driver whether a multiply-add is fused, so the single rounding is built here from operations it does
+// define. b comes as three pieces of eight bits each, which makes every y * piece exact for a whole y
+// below 65536; the pieces are added to the running sum one at a time with their rounding errors kept,
+// and the last addition, of the sum and the collected errors, is the one rounding.
+float dotFused(float x, float a, float y, float3 b) {
+    precise float acc = x * a;
+    precise float2 t = twoSum(acc, y * b.x);
+    precise float lost = t.y;
+    t = twoSum(t.x, y * b.y);
+    lost += t.y;
+    t = twoSum(t.x, y * b.z);
+    lost += t.y;
+    precise float sum = t.x + lost;
+    return sum;
+}
+
 float2 hash2(float2 p) {
-    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
+    // 311.7 and 183.3 as single-precision numbers, each in three pieces
+    p = float2(dotFused(p.x, 127.1, p.y, float3(310.0, 1.6953125, 0.00469970703125)), dotFused(p.x, 269.5, p.y, float3(183.0, 0.296875, 0.0031280517578125)));
     return frac(sinExact(p) * 43758.5453);
 }
 
