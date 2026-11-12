@@ -21,7 +21,17 @@ const shared_bodies = [_][]const u8{ "hash1", "vnoise", "fbm", "hash2", "cellHas
 const line_exceptions = [_][2][]const u8{
     // HLSL has no one-argument vector constructor; a scalar exponent is applied to each component.
     .{ "col = pow(saturate(col), float3(1.0 / 2.2));", "col = pow(saturate(col), 1.0 / 2.2);" },
+    // The two hashes take the sine of a large argument. Metal's sin is accurate there and Direct3D's need
+    // not be, so the HLSL file calls its own (see `sinExact` there).
+    .{ "return fract(sin(p) * 43758.5453);", "return frac(sinExact(p) * 43758.5453);" },
+    .{
+        "float g = fract(sin(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);",
+        "float g = frac(sinExact(dot(uv * float2(1920.0, 1080.0) + po.b.x * 61.0, float2(12.9898, 78.233))) * 43758.5453);",
+    },
 };
+
+/// Functions only the HLSL file has, standing in for something Metal provides.
+const hlsl_only = [_][]const u8{"sinExact"};
 
 const Function = struct {
     name: []const u8,
@@ -161,7 +171,14 @@ test "both shader files declare the same functions in the same order" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const m = try parse(arena, metal);
-    const h = try parse(arena, hlsl);
+    var shared: std.ArrayList(Function) = .empty;
+    for (try parse(arena, hlsl)) |f| {
+        const own = for (hlsl_only) |name| {
+            if (std.mem.eql(u8, f.name, name)) break true;
+        } else false;
+        if (!own) try shared.append(arena, f);
+    }
+    const h = shared.items;
     const want = [_][]const u8{ "hash1", "vnoise", "fbm", "hash2", "cellHash", "voronoi", "scene_vs", "scene_fs", "part_vs", "part_fs", "post_vs", "aces", "post_fs", "hud_vs", "hud_fs" };
     try std.testing.expectEqual(want.len, m.len);
     try std.testing.expectEqual(want.len, h.len);
@@ -214,4 +231,43 @@ test "the spelling rules do what they say" {
     try std.testing.expectEqualStrings("col += hdr.SampleLevel(smp, 0.5 + c * k, 0.0).rgb * w;", try toHlsl(arena, "col += hdr.sample(smp, 0.5 + c * k).rgb * w;"));
     try std.testing.expectEqualStrings("bloom += hdr.SampleLevel(smp, uv, 3.5).rgb * 0.3;", try toHlsl(arena, "bloom += hdr.sample(smp, uv, level(3.5)).rgb * 0.3;"));
     try std.testing.expectEqualStrings("float mainline = margin.x;", try toHlsl(arena, "float mainline = margin.x;"));
+}
+
+/// `sinExact` in the HLSL file, step for step, in the same single-precision arithmetic.
+fn sinExact(x: f32) f32 {
+    const ax: f32 = @min(@abs(x), 4.0e9);
+    const whole: f32 = @floor(ax);
+    const xi: u32 = @intFromFloat(whole);
+    const a = xi >> 16;
+    const b = xi & 0xFFFF;
+    const carry = a * 0x9391 + ((a * 0x054A + b * 0x9391 + ((b * 0x054A) >> 16)) >> 16);
+    const phase = xi *% 0x28BE60DB +% carry +% @as(u32, @intFromFloat((ax - whole) * 683565275.6));
+    var turn: f32 = @as(f32, @floatFromInt(@as(i32, @bitCast(phase)))) * 2.3283064365386963e-10;
+    if (@abs(turn) > 0.25) turn = (if (turn > 0.0) @as(f32, 0.5) else -0.5) - turn;
+    const r: f32 = turn * 6.283185307179586;
+    const r2 = r * r;
+    const s = r * (1.0 + r2 * (-1.0 / 6.0 + r2 * (1.0 / 120.0 + r2 * (-1.0 / 5040.0 + r2 * (1.0 / 362880.0 + r2 * (-1.0 / 39916800.0 + r2 * (1.0 / 6227020800.0)))))));
+    return if (x < 0.0) -s else s;
+}
+
+test "the HLSL file's sine is the true sine for arguments of any size the hashes use" {
+    // The constants are in the shader as written here: 1 / 2 pi to 64 binary places, in two halves and
+    // the second half again in two.
+    const inv_two_pi: u64 = @intFromFloat(@floor((1.0 / (2.0 * std.math.pi)) * @as(f128, 1 << 64)));
+    try std.testing.expectEqual(@as(u64, 0x28BE60DB9391054A) >> 12, inv_two_pi >> 12);
+    for ([_][]const u8{ "0x28BE60DBu", "0x9391u", "0x054Au", "683565275.6", "2.3283064365386963e-10" }) |c|
+        try std.testing.expect(std.mem.indexOf(u8, hlsl, c) != null);
+    // A hash keeps the fraction of 43758 times the sine, so an error of 2e-7 moves it by under a hundredth.
+    var prng = std.Random.DefaultPrng.init(7);
+    const rnd = prng.random();
+    var worst: f64 = 0;
+    for (0..200_000) |_| {
+        const magnitude = std.math.pow(f32, 10.0, rnd.float(f32) * 6.5);
+        const x: f32 = (rnd.float(f32) * 2.0 - 1.0) * magnitude;
+        worst = @max(worst, @abs(@as(f64, sinExact(x)) - @sin(@as(f64, x))));
+    }
+    try std.testing.expect(worst < 2.5e-7);
+    // The arguments the cell hash meets on a villus, and the film grain's a minute into a chapter.
+    for ([_]f32{ 27_431.7, 149_873.3, 443_219.25, -31_005.1 }) |x|
+        try std.testing.expectApproxEqAbs(@as(f32, @floatCast(@sin(@as(f64, x)))), sinExact(x), 2.5e-7);
 }
