@@ -1365,9 +1365,16 @@ const PadTest = struct {
             pt.check(InputTest.aim(s, true), "a villus is within tether range of the arrival point");
             pt.next();
         }
-        if (pt.at(&k) and pt.tap(.rs)) {
-            pt.check(s.tether != null and s.g.tether_uses == 1, "a click of the right stick fires the tether at the tissue under the reticle");
-            pt.next();
+        if (pt.at(&k)) {
+            // The reticle is held on the villus until the click lands, as a hand would hold it. The drone
+            // drifts with the chyme between the frame that aimed and the frame that reads the click, and
+            // at a low frame rate (a software renderer draws a few frames a second) it drifts far enough
+            // for an aim taken once to miss.
+            if (s.tether == null) _ = InputTest.aim(s, true);
+            if (pt.tap(.rs)) {
+                pt.check(s.tether != null and s.g.tether_uses == 1, "a click of the right stick fires the tether at the tissue under the reticle");
+                pt.next();
+            }
         }
         if (pt.at(&k) and (pt.t >= 4 or (s.tether != null and s.pos.dist(s.tether_hold) < 30))) {
             pt.check(s.tether != null and s.pos.dist(s.tether_hold) < 30, "the line reels the drone in and holds it with no thrust");

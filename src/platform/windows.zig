@@ -656,14 +656,14 @@ fn windowProc(hwnd: w.HWND, msg: u32, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WIN
                 if (p) |plat| plat.toggleFullscreen();
                 return 0;
             }
-            // Alt on its own would otherwise put the window into menu mode, which freezes the game.
+            // A tap of Alt or F10 would otherwise put the window into menu mode, which freezes the game.
             if (command == w.SC_KEYMENU and lp != ' ') return 0;
         },
         w.WM_KEYDOWN, w.WM_KEYUP, w.WM_SYSKEYDOWN, w.WM_SYSKEYUP => {
             if (p) |plat| {
                 plat.onKey(msg, wp, lp);
                 // Alt+Space opens the system menu, where the window's commands are, except in flight,
-                // where Alt and Space are both controls.
+                // where Space is the climb key and a menu must not open under the pilot's thumb.
                 const bits: usize = @bitCast(lp);
                 if (msg == w.WM_SYSKEYDOWN and !plat.captured and (bits >> 16) & 0xFF == 0x39 and bits & (1 << 29) != 0)
                     return w.DefWindowProcW(hwnd, w.WM_SYSCOMMAND, w.SC_KEYMENU, ' ');
