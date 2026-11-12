@@ -1,72 +1,73 @@
-//! Small libc-backed file helpers (screenshots, save file, logs).
+//! Small file and environment helpers (screenshots, save file, logs). Paths are UTF-8 on every platform;
+//! the implementation is picked at compile time, libc's stdio on POSIX systems and the wide-character
+//! Win32 calls on Windows, where stdio would read a path in the legacy code page and fail on a user
+//! name outside it.
 
 const std = @import("std");
+const builtin = @import("builtin");
+const paths = @import("os/paths.zig");
 
-const FILE = opaque {};
-extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*FILE;
-extern "c" fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: *FILE) usize;
-extern "c" fn fread(ptr: [*]u8, size: usize, n: usize, f: *FILE) usize;
-extern "c" fn fclose(f: *FILE) c_int;
-extern "c" fn mkdir(path: [*:0]const u8, mode: c_uint) c_int;
-extern "c" fn getenv(name: [*:0]const u8) ?[*:0]const u8;
+const impl = switch (builtin.os.tag) {
+    .windows => @import("os/windows_files.zig"),
+    else => @import("os/posix_files.zig"),
+};
+
+/// Write the parts one after another as the whole content of the file at `path`.
+pub fn writeFileParts(path: [*:0]const u8, parts: []const []const u8) bool {
+    return impl.writeFileParts(path, parts);
+}
 
 pub fn writeFile(path: [*:0]const u8, bytes: []const u8) bool {
-    const f = fopen(path, "wb") orelse return false;
-    defer _ = fclose(f);
-    return fwrite(bytes.ptr, 1, bytes.len, f) == bytes.len;
+    return impl.writeFileParts(path, &.{bytes});
 }
 
 /// Read up to `buf.len` bytes; returns the slice read or null if the file cannot be opened.
 pub fn readFile(path: [*:0]const u8, buf: []u8) ?[]u8 {
-    const f = fopen(path, "rb") orelse return null;
-    defer _ = fclose(f);
-    const n = fread(buf.ptr, 1, buf.len, f);
-    return buf[0..n];
+    return impl.readFile(path, buf);
 }
 
+/// Create one directory; its parent must exist. An existing directory is not an error.
 pub fn makeDir(path: [*:0]const u8) void {
-    _ = mkdir(path, 0o755);
+    impl.makeDir(path);
 }
 
-pub fn env(name: [*:0]const u8) ?[]const u8 {
-    const p = getenv(name) orelse return null;
-    return std.mem.span(p);
+pub fn removeFile(path: [*:0]const u8) void {
+    impl.removeFile(path);
 }
 
-extern fn CGColorSpaceCreateDeviceRGB() ?*anyopaque;
-extern fn CGDataProviderCreateWithData(info: ?*anyopaque, data: [*]const u8, size: usize, release: ?*anyopaque) ?*anyopaque;
-extern fn CGImageCreate(w: usize, h: usize, bpc: usize, bpp: usize, bpr: usize, space: ?*anyopaque, info: u32, provider: ?*anyopaque, decode: ?*anyopaque, interpolate: bool, intent: i32) ?*anyopaque;
-extern fn CGImageDestinationCreateWithURL(url: ?*anyopaque, uti: ?*anyopaque, count: usize, opts: ?*anyopaque) ?*anyopaque;
-extern fn CGImageDestinationAddImage(dest: ?*anyopaque, image: ?*anyopaque, props: ?*anyopaque) void;
-extern fn CGImageDestinationFinalize(dest: ?*anyopaque) bool;
-
-/// Write top-down premultiplied BGRA8 pixels as a PNG (ImageIO).
-pub fn writePng(path: [*:0]const u8, bgra: []const u8, w: u32, h: u32) bool {
-    const objc = @import("objc.zig");
-    const space = CGColorSpaceCreateDeviceRGB();
-    const provider = CGDataProviderCreateWithData(null, bgra.ptr, bgra.len, null);
-    const image = CGImageCreate(w, h, 8, 32, @as(usize, w) * 4, space, (2 << 12) | 2, provider, null, false, 0) orelse return false;
-    const url = objc.send(fn (objc.id, objc.SEL, objc.id) callconv(.c) objc.id, objc.class("NSURL"), "fileURLWithPath:", .{objc.nsString(std.mem.span(path))});
-    const dest = CGImageDestinationCreateWithURL(url, objc.nsString("public.png"), 1, null) orelse return false;
-    CGImageDestinationAddImage(dest, image, null);
-    return CGImageDestinationFinalize(dest);
+pub fn removeDir(path: [*:0]const u8) void {
+    impl.removeDir(path);
 }
 
-/// Write top-down BGRA8 pixels as a 32-bit BMP.
-pub fn writeBmp(path: [*:0]const u8, bgra: []const u8, w: u32, h: u32) bool {
-    var hdr: [54]u8 = @splat(0);
-    const size: u32 = 54 + w * h * 4;
-    hdr[0] = 'B';
-    hdr[1] = 'M';
-    std.mem.writeInt(u32, hdr[2..6], size, .little);
-    std.mem.writeInt(u32, hdr[10..14], 54, .little);
-    std.mem.writeInt(u32, hdr[14..18], 40, .little);
-    std.mem.writeInt(i32, hdr[18..22], @intCast(w), .little);
-    std.mem.writeInt(i32, hdr[22..26], -@as(i32, @intCast(h)), .little);
-    std.mem.writeInt(u16, hdr[26..28], 1, .little);
-    std.mem.writeInt(u16, hdr[28..30], 32, .little);
-    const f = fopen(path, "wb") orelse return false;
-    defer _ = fclose(f);
-    if (fwrite(&hdr, 1, 54, f) != 54) return false;
-    return fwrite(bgra.ptr, 1, bgra.len, f) == bgra.len;
+/// The value of an environment variable, copied into `buf` as UTF-8; null if it is unset, empty or does
+/// not fit.
+pub fn env(name: [*:0]const u8, buf: []u8) ?[]const u8 {
+    return impl.env(name, buf);
+}
+
+/// True if the variable exists, even with an empty value.
+pub fn envIsSet(name: [*:0]const u8) bool {
+    return impl.envIsSet(name);
+}
+
+/// The directory the save file lives in, created if it was missing: under Application Support in the
+/// user's Library on macOS, under %APPDATA% on Windows. Null if the system will not say where that is.
+pub fn saveDir(buf: []u8) ?[:0]const u8 {
+    var root_buf: [paths.max_path]u8 = undefined;
+    const root = impl.profileRoot(&root_buf) orelse return null;
+    const dir = impl.saveDirIn(buf, root) orelse return null;
+    makeDir(dir.ptr);
+    return dir;
+}
+
+/// Path separator of the target.
+pub const sep: u8 = if (builtin.os.tag == .windows) '\\' else '/';
+
+/// A throwaway user profile for tests of the save file: while it is in place `saveDir` answers with a
+/// directory under a fresh temporary one, and `end` puts the real profile back and removes what the test
+/// left behind.
+pub const ScratchProfile = impl.ScratchProfile;
+
+test {
+    _ = paths;
 }

@@ -1,13 +1,18 @@
-//! Metal through the Objective-C runtime. One HDR scene pass (4x MSAA, resolved and mip-chained for bloom)
-//! and one post pass that tonemaps to the drawable and draws the HUD.
+//! What the renderer asks of a graphics API: the vertex and uniform layouts shared with the shaders, the
+//! frame description, and the `Gpu` that turns one into pixels. The layouts and limits are the same on
+//! every platform; the implementation is picked at compile time (`gpu/metal.zig`, `gpu/d3d11.zig`), and
+//! both draw the same frame: an HDR scene pass (4x MSAA, resolved and mip-chained for bloom) and a post
+//! pass that tonemaps to the target and draws the HUD.
+//!
+//! A backend's `Gpu` has: `init(shader_src)`, `attach(surface)` for a window, `resizeSurface(w, h, scale)`
+//! and `resize(w, h, with_offscreen)`, `uploadMeshes`, `uploadFont`, `submit(desc, wait)`, `readback`,
+//! `describe`, the fields `width` and `height`, and the CPU-side arrays `instances`, `dyn_verts`,
+//! `part_verts` and `hud_verts` that the next frame is written into.
 
 const std = @import("std");
-const objc = @import("objc.zig");
-const id = objc.id;
-const SEL = objc.SEL;
+const builtin = @import("builtin");
 
-extern fn MTLCreateSystemDefaultDevice() id;
-
+// Layouts mirror the shader files (src/shaders/shaders.metal, shaders.hlsl), byte for byte.
 pub const Vertex = extern struct { pos: [3]f32, nrm: [3]f32, uv: [2]f32 };
 pub const Instance = extern struct { model: [16]f32, color: [4]f32, params: [4]f32 };
 pub const PVertex = extern struct { pos: [3]f32, uv: [2]f32, color: [4]f32 };
@@ -49,210 +54,52 @@ pub const max_dyn_verts = 48000;
 pub const max_part_verts = 96000;
 pub const max_hud_verts = 96000;
 pub const max_batches = 2048;
-const frames_in_flight = 3;
 
-const fmt_bgra8: u64 = 80;
-const fmt_rgba16f: u64 = 115;
-const fmt_depth32f: u64 = 252;
-const fmt_r8: u64 = 10;
-const samples: u64 = 4;
-
-const ClearColor = extern struct { r: f64, g: f64, b: f64, a: f64 };
-const Viewport = extern struct { x: f64, y: f64, w: f64, h: f64, znear: f64, zfar: f64 };
-const Region = extern struct { x: u64, y: u64, z: u64, w: u64, h: u64, d: u64 };
-
-const BufferSet = struct {
-    inst: id,
-    dyn: id,
-    part: id,
-    hud: id,
+/// One frame, as `render.zig` assembled it. The counts say how much of each CPU-side array is in use.
+pub const FrameDesc = struct {
+    scene: Frame,
+    arm: Frame,
+    post: Post,
+    batches: []const Batch,
+    instance_count: u32,
+    dyn_count: u32,
+    part_count: u32,
+    hud_count: u32,
 };
 
-const Blend = enum { none, alpha, additive };
+/// A box-filtered mip chain of an 8-bit single-channel image, down to the last level that still has two
+/// rows and two columns to average. Both backends upload the glyph atlas this way, so text is filtered
+/// from the same texels on every platform.
+pub const MipChain = struct {
+    pub const Level = struct { pixels: []const u8, w: u32, h: u32 };
+    levels: [16]Level = undefined,
+    count: usize = 0,
+    storage: []u8 = &.{},
 
-pub const Gpu = struct {
-    device: id,
-    queue: id,
-    layer: id = null,
-    pipe_solid: id = null,
-    pipe_blend: id = null,
-    pipe_part: id = null,
-    pipe_post: id = null,
-    pipe_hud: id = null,
-    ds_rw: id = null,
-    ds_ro: id = null,
-    sampler: id = null,
-    hdr_ms: id = null,
-    depth_ms: id = null,
-    hdr: id = null,
-    offscreen: id = null,
-    font_tex: id = null,
-    mesh_vb: id = null,
-    mesh_ib: id = null,
-    sets: [frames_in_flight]BufferSet = undefined,
-    frame_idx: usize = 0,
-    width: u32 = 0,
-    height: u32 = 0,
-
-    // CPU-side views of the current frame's buffers.
-    instances: [*]Instance = undefined,
-    dyn_verts: [*]Vertex = undefined,
-    part_verts: [*]PVertex = undefined,
-    hud_verts: [*]HVertex = undefined,
-
-    pub fn init(shader_src: [*:0]const u8) !Gpu {
-        const device = MTLCreateSystemDefaultDevice() orelse return error.NoMetalDevice;
-        var g: Gpu = .{ .device = device, .queue = objc.get(device, "newCommandQueue") };
-
-        var err: id = null;
-        const lib = objc.send(fn (id, SEL, id, id, *id) callconv(.c) id, device, "newLibraryWithSource:options:error:", .{ objc.nsString(shader_src), null, &err }) orelse {
-            std.debug.print("shader compile failed: {s}\n", .{objc.cString(objc.get(err, "localizedDescription"))});
-            return error.ShaderCompileFailed;
-        };
-        g.pipe_solid = try g.pipeline(lib, "scene_vs", "scene_fs", fmt_rgba16f, true, samples, .none);
-        g.pipe_blend = try g.pipeline(lib, "scene_vs", "scene_fs", fmt_rgba16f, true, samples, .alpha);
-        g.pipe_part = try g.pipeline(lib, "part_vs", "part_fs", fmt_rgba16f, true, samples, .additive);
-        g.pipe_post = try g.pipeline(lib, "post_vs", "post_fs", fmt_bgra8, false, 1, .none);
-        g.pipe_hud = try g.pipeline(lib, "hud_vs", "hud_fs", fmt_bgra8, false, 1, .alpha);
-
-        g.ds_rw = g.depthState(true);
-        g.ds_ro = g.depthState(false);
-
-        const sd = objc.new("MTLSamplerDescriptor");
-        objc.setU(sd, "setMinFilter:", 1);
-        objc.setU(sd, "setMagFilter:", 1);
-        objc.setU(sd, "setMipFilter:", 2);
-        g.sampler = objc.send(fn (id, SEL, id) callconv(.c) id, device, "newSamplerStateWithDescriptor:", .{sd});
-
-        for (&g.sets) |*s| {
-            s.inst = g.buffer(max_instances * @sizeOf(Instance));
-            s.dyn = g.buffer(max_dyn_verts * @sizeOf(Vertex));
-            s.part = g.buffer(max_part_verts * @sizeOf(PVertex));
-            s.hud = g.buffer(max_hud_verts * @sizeOf(HVertex));
-        }
-        g.mapFrame();
-        return g;
-    }
-
-    fn buffer(g: *Gpu, len: usize) id {
-        return objc.send(fn (id, SEL, u64, u64) callconv(.c) id, g.device, "newBufferWithLength:options:", .{ len, 0 });
-    }
-
-    fn mapFrame(g: *Gpu) void {
-        const s = g.sets[g.frame_idx];
-        g.instances = @ptrCast(@alignCast(objc.send(fn (id, SEL) callconv(.c) ?*anyopaque, s.inst, "contents", .{})));
-        g.dyn_verts = @ptrCast(@alignCast(objc.send(fn (id, SEL) callconv(.c) ?*anyopaque, s.dyn, "contents", .{})));
-        g.part_verts = @ptrCast(@alignCast(objc.send(fn (id, SEL) callconv(.c) ?*anyopaque, s.part, "contents", .{})));
-        g.hud_verts = @ptrCast(@alignCast(objc.send(fn (id, SEL) callconv(.c) ?*anyopaque, s.hud, "contents", .{})));
-    }
-
-    fn depthState(g: *Gpu, write: bool) id {
-        const d = objc.new("MTLDepthStencilDescriptor");
-        objc.setU(d, "setDepthCompareFunction:", 3); // less-equal
-        objc.setB(d, "setDepthWriteEnabled:", write);
-        return objc.send(fn (id, SEL, id) callconv(.c) id, g.device, "newDepthStencilStateWithDescriptor:", .{d});
-    }
-
-    fn pipeline(g: *Gpu, lib: id, vs: [*:0]const u8, fs: [*:0]const u8, color_fmt: u64, depth: bool, sample_count: u64, blend: Blend) !id {
-        const vf = objc.send(fn (id, SEL, id) callconv(.c) id, lib, "newFunctionWithName:", .{objc.nsString(vs)}) orelse return error.MissingShaderFunction;
-        const ff = objc.send(fn (id, SEL, id) callconv(.c) id, lib, "newFunctionWithName:", .{objc.nsString(fs)}) orelse return error.MissingShaderFunction;
-        const d = objc.new("MTLRenderPipelineDescriptor");
-        objc.setObj(d, "setVertexFunction:", vf);
-        objc.setObj(d, "setFragmentFunction:", ff);
-        objc.setU(d, "setRasterSampleCount:", sample_count);
-        if (depth) objc.setU(d, "setDepthAttachmentPixelFormat:", fmt_depth32f);
-        const c0 = objc.send(fn (id, SEL, u64) callconv(.c) id, objc.get(d, "colorAttachments"), "objectAtIndexedSubscript:", .{0});
-        objc.setU(c0, "setPixelFormat:", color_fmt);
-        switch (blend) {
-            .none => {},
-            .alpha => {
-                objc.setB(c0, "setBlendingEnabled:", true);
-                objc.setU(c0, "setSourceRGBBlendFactor:", 4);
-                objc.setU(c0, "setDestinationRGBBlendFactor:", 5);
-                objc.setU(c0, "setSourceAlphaBlendFactor:", 1);
-                objc.setU(c0, "setDestinationAlphaBlendFactor:", 5);
-            },
-            .additive => {
-                objc.setB(c0, "setBlendingEnabled:", true);
-                objc.setU(c0, "setSourceRGBBlendFactor:", 1);
-                objc.setU(c0, "setDestinationRGBBlendFactor:", 1);
-                objc.setU(c0, "setSourceAlphaBlendFactor:", 0);
-                objc.setU(c0, "setDestinationAlphaBlendFactor:", 1);
-            },
-        }
-        var err: id = null;
-        return objc.send(fn (id, SEL, id, *id) callconv(.c) id, g.device, "newRenderPipelineStateWithDescriptor:error:", .{ d, &err }) orelse {
-            std.debug.print("pipeline {s}/{s} failed: {s}\n", .{ vs, fs, objc.cString(objc.get(err, "localizedDescription")) });
-            return error.PipelineFailed;
-        };
-    }
-
-    /// Create the CAMetalLayer the window's view hosts.
-    pub fn makeLayer(g: *Gpu) id {
-        const layer = objc.new("CAMetalLayer");
-        objc.setObj(layer, "setDevice:", g.device);
-        objc.setU(layer, "setPixelFormat:", fmt_bgra8);
-        objc.setB(layer, "setFramebufferOnly:", true);
-        g.layer = layer;
-        return layer;
-    }
-
-    fn texture(g: *Gpu, format: u64, w: u32, h: u32, mipmapped: bool, sample_count: u64, usage: u64) id {
-        const d = objc.send(fn (id, SEL, u64, u64, u64, bool) callconv(.c) id, objc.class("MTLTextureDescriptor"), "texture2DDescriptorWithPixelFormat:width:height:mipmapped:", .{ format, w, h, mipmapped });
-        objc.setU(d, "setUsage:", usage);
-        objc.setU(d, "setStorageMode:", if (sample_count > 1 or format == fmt_depth32f) 2 else 0);
-        if (sample_count > 1) {
-            objc.setU(d, "setTextureType:", 4);
-            objc.setU(d, "setSampleCount:", sample_count);
-        }
-        return objc.send(fn (id, SEL, id) callconv(.c) id, g.device, "newTextureWithDescriptor:", .{d});
-    }
-
-    /// (Re)create the render targets for a drawable of `w` x `h` pixels.
-    pub fn resize(g: *Gpu, w: u32, h: u32, with_offscreen: bool) void {
-        if (w == g.width and h == g.height and g.hdr != null) return;
-        objc.release(g.hdr_ms);
-        objc.release(g.depth_ms);
-        objc.release(g.hdr);
-        g.width = @max(w, 8);
-        g.height = @max(h, 8);
-        g.hdr_ms = g.texture(fmt_rgba16f, g.width, g.height, false, samples, 4);
-        g.depth_ms = g.texture(fmt_depth32f, g.width, g.height, false, samples, 4);
-        g.hdr = g.texture(fmt_rgba16f, g.width, g.height, true, 1, 5);
-        if (with_offscreen) {
-            objc.release(g.offscreen);
-            g.offscreen = g.texture(fmt_bgra8, g.width, g.height, false, 1, 5);
-        }
-        if (g.layer != null) {
-            objc.send(fn (id, SEL, objc.Size) callconv(.c) void, g.layer, "setDrawableSize:", .{objc.Size{ .w = @floatFromInt(g.width), .h = @floatFromInt(g.height) }});
-        }
-    }
-
-    pub fn uploadMeshes(g: *Gpu, verts: []const Vertex, indices: []const u32) void {
-        g.mesh_vb = objc.send(fn (id, SEL, *const anyopaque, u64, u64) callconv(.c) id, g.device, "newBufferWithBytes:length:options:", .{ verts.ptr, verts.len * @sizeOf(Vertex), 0 });
-        g.mesh_ib = objc.send(fn (id, SEL, *const anyopaque, u64, u64) callconv(.c) id, g.device, "newBufferWithBytes:length:options:", .{ indices.ptr, indices.len * 4, 0 });
-    }
-
-    /// Upload the glyph atlas with a box-filtered mip chain, so text stays clean at every HUD size.
-    pub fn uploadFont(g: *Gpu, gpa: std.mem.Allocator, pixels: []const u8, w: u32, h: u32) !void {
-        g.font_tex = g.texture(fmt_r8, w, h, true, 1, 1);
-        const put = struct {
-            fn f(tex: id, level: u64, bytes: []const u8, lw: u32, lh: u32) void {
-                objc.send(fn (id, SEL, Region, u64, *const anyopaque, u64) callconv(.c) void, tex, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", .{ Region{ .x = 0, .y = 0, .z = 0, .w = lw, .h = lh, .d = 1 }, level, bytes.ptr, lw });
+    /// Level 0 is `pixels` itself, not a copy; it must outlive the chain.
+    pub fn build(gpa: std.mem.Allocator, pixels: []const u8, w: u32, h: u32) !MipChain {
+        var total: usize = 0;
+        {
+            var sw = w;
+            var sh = h;
+            while (sw > 1 and sh > 1) {
+                sw /= 2;
+                sh /= 2;
+                total += @as(usize, sw) * sh;
             }
-        }.f;
-        put(g.font_tex, 0, pixels, w, h);
+        }
+        var chain: MipChain = .{ .storage = try gpa.alloc(u8, total) };
+        chain.levels[0] = .{ .pixels = pixels, .w = w, .h = h };
+        chain.count = 1;
         var src = pixels;
         var sw = w;
         var sh = h;
-        var level: u64 = 1;
-        var bufs = [2][]u8{ try gpa.alloc(u8, (w / 2) * (h / 2)), try gpa.alloc(u8, (w / 4) * (h / 4)) };
-        defer for (bufs) |b| gpa.free(b);
-        _ = &bufs;
-        while (sw > 1 and sh > 1) : (level += 1) {
+        var used: usize = 0;
+        while (sw > 1 and sh > 1) {
             const dw = sw / 2;
             const dh = sh / 2;
-            const dst = bufs[(level - 1) & 1][0 .. dw * dh];
+            const dst = chain.storage[used..][0 .. @as(usize, dw) * dh];
+            used += dst.len;
             for (0..dh) |y| for (0..dw) |x| {
                 const a: u32 = src[(2 * y) * sw + 2 * x];
                 const b: u32 = src[(2 * y) * sw + 2 * x + 1];
@@ -260,157 +107,38 @@ pub const Gpu = struct {
                 const d: u32 = src[(2 * y + 1) * sw + 2 * x + 1];
                 dst[y * dw + x] = @intCast((a + b + c + d + 2) / 4);
             };
-            put(g.font_tex, level, dst, dw, dh);
+            chain.levels[chain.count] = .{ .pixels = dst, .w = dw, .h = dh };
+            chain.count += 1;
             src = dst;
             sw = dw;
             sh = dh;
         }
+        return chain;
     }
 
-    pub const FrameDesc = struct {
-        scene: Frame,
-        arm: Frame,
-        post: Post,
-        batches: []const Batch,
-        part_count: u32,
-        hud_count: u32,
-    };
-
-    /// Encode and submit one frame. Returns false when no drawable was available.
-    pub fn submit(g: *Gpu, d: *const FrameDesc, wait: bool) bool {
-        var drawable: id = null;
-        var target: id = g.offscreen;
-        if (g.layer != null) {
-            drawable = objc.get(g.layer, "nextDrawable") orelse return false;
-            target = objc.get(drawable, "texture");
-        }
-        const set = g.sets[g.frame_idx];
-        const cmd = objc.get(g.queue, "commandBuffer");
-
-        // Scene.
-        {
-            const pass = objc.get(objc.class("MTLRenderPassDescriptor"), "renderPassDescriptor");
-            const c0 = objc.send(fn (id, SEL, u64) callconv(.c) id, objc.get(pass, "colorAttachments"), "objectAtIndexedSubscript:", .{0});
-            objc.setObj(c0, "setTexture:", g.hdr_ms);
-            objc.setObj(c0, "setResolveTexture:", g.hdr);
-            objc.setU(c0, "setLoadAction:", 2);
-            objc.setU(c0, "setStoreAction:", 2);
-            const fc = d.scene.fog_color;
-            objc.send(fn (id, SEL, ClearColor) callconv(.c) void, c0, "setClearColor:", .{ClearColor{ .r = fc[0], .g = fc[1], .b = fc[2], .a = 1 }});
-            const da = objc.get(pass, "depthAttachment");
-            objc.setObj(da, "setTexture:", g.depth_ms);
-            objc.setU(da, "setLoadAction:", 2);
-            objc.setU(da, "setStoreAction:", 0);
-            objc.send(fn (id, SEL, f64) callconv(.c) void, da, "setClearDepth:", .{1.0});
-
-            const enc = objc.send(fn (id, SEL, id) callconv(.c) id, cmd, "renderCommandEncoderWithDescriptor:", .{pass});
-            const fw: f64 = @floatFromInt(g.width);
-            const fh: f64 = @floatFromInt(g.height);
-            setViewport(enc, fw, fh, 0.1, 1.0);
-            setBuffer(enc, true, set.inst, 1);
-            setBytes(enc, true, &d.scene, @sizeOf(Frame), 2);
-            setBytes(enc, false, &d.scene, @sizeOf(Frame), 2);
-
-            objc.setObj(enc, "setRenderPipelineState:", g.pipe_solid);
-            objc.setObj(enc, "setDepthStencilState:", g.ds_rw);
-            g.drawPass(enc, set, d.batches, .solid);
-
-            objc.setObj(enc, "setRenderPipelineState:", g.pipe_blend);
-            objc.setObj(enc, "setDepthStencilState:", g.ds_ro);
-            g.drawPass(enc, set, d.batches, .blend);
-
-            if (d.part_count > 0) {
-                objc.setObj(enc, "setRenderPipelineState:", g.pipe_part);
-                setBuffer(enc, true, set.part, 0);
-                objc.send(fn (id, SEL, u64, u64, u64) callconv(.c) void, enc, "drawPrimitives:vertexStart:vertexCount:", .{ 3, 0, d.part_count });
-            }
-
-            // First-person arms: own projection, front slice of the depth range so the world never clips them.
-            setViewport(enc, fw, fh, 0.0, 0.1);
-            setBytes(enc, true, &d.arm, @sizeOf(Frame), 2);
-            setBytes(enc, false, &d.arm, @sizeOf(Frame), 2);
-            objc.setObj(enc, "setRenderPipelineState:", g.pipe_solid);
-            objc.setObj(enc, "setDepthStencilState:", g.ds_rw);
-            g.drawPass(enc, set, d.batches, .arm);
-            objc.call(enc, "endEncoding");
-        }
-
-        // Mip chain of the resolved HDR image feeds the bloom taps.
-        {
-            const blit = objc.get(cmd, "blitCommandEncoder");
-            objc.setObj(blit, "generateMipmapsForTexture:", g.hdr);
-            objc.call(blit, "endEncoding");
-        }
-
-        // Tonemap + HUD.
-        {
-            const pass = objc.get(objc.class("MTLRenderPassDescriptor"), "renderPassDescriptor");
-            const c0 = objc.send(fn (id, SEL, u64) callconv(.c) id, objc.get(pass, "colorAttachments"), "objectAtIndexedSubscript:", .{0});
-            objc.setObj(c0, "setTexture:", target);
-            objc.setU(c0, "setLoadAction:", 0);
-            objc.setU(c0, "setStoreAction:", 1);
-            const enc = objc.send(fn (id, SEL, id) callconv(.c) id, cmd, "renderCommandEncoderWithDescriptor:", .{pass});
-            var post = d.post;
-            post.c[0] = 1.0 / @as(f32, @floatFromInt(g.width));
-            post.c[1] = 1.0 / @as(f32, @floatFromInt(g.height));
-            objc.setObj(enc, "setRenderPipelineState:", g.pipe_post);
-            setBytes(enc, false, &post, @sizeOf(Post), 0);
-            objc.send(fn (id, SEL, id, u64) callconv(.c) void, enc, "setFragmentTexture:atIndex:", .{ g.hdr, 0 });
-            objc.send(fn (id, SEL, id, u64) callconv(.c) void, enc, "setFragmentSamplerState:atIndex:", .{ g.sampler, 0 });
-            objc.send(fn (id, SEL, u64, u64, u64) callconv(.c) void, enc, "drawPrimitives:vertexStart:vertexCount:", .{ 3, 0, 3 });
-            if (d.hud_count > 0 and g.font_tex != null) {
-                objc.setObj(enc, "setRenderPipelineState:", g.pipe_hud);
-                setBuffer(enc, true, set.hud, 0);
-                setBytes(enc, true, &post, @sizeOf(Post), 1);
-                objc.send(fn (id, SEL, id, u64) callconv(.c) void, enc, "setFragmentTexture:atIndex:", .{ g.font_tex, 0 });
-                objc.send(fn (id, SEL, u64, u64, u64) callconv(.c) void, enc, "drawPrimitives:vertexStart:vertexCount:", .{ 3, 0, d.hud_count });
-            }
-            objc.call(enc, "endEncoding");
-        }
-
-        if (drawable != null) objc.setObj(cmd, "presentDrawable:", drawable);
-        objc.call(cmd, "commit");
-        if (wait) objc.call(cmd, "waitUntilCompleted");
-
-        g.frame_idx = (g.frame_idx + 1) % frames_in_flight;
-        g.mapFrame();
-        return true;
-    }
-
-    fn drawPass(g: *Gpu, enc: id, set: BufferSet, batches: []const Batch, pass: Pass) void {
-        var bound_dynamic: ?bool = null;
-        for (batches) |b| {
-            if (b.pass != pass or b.instance_count == 0) continue;
-            if (bound_dynamic == null or bound_dynamic.? != b.dynamic) {
-                setBuffer(enc, true, if (b.dynamic) set.dyn else g.mesh_vb, 0);
-                bound_dynamic = b.dynamic;
-            }
-            if (b.dynamic) {
-                objc.send(fn (id, SEL, u64, u64, u64, u64, u64) callconv(.c) void, enc, "drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:", .{ 3, b.vertex_start, b.vertex_count, b.instance_count, b.first_instance });
-            } else {
-                objc.send(fn (id, SEL, u64, u64, u64, id, u64, u64, i64, u64) callconv(.c) void, enc, "drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:", .{ 3, b.mesh.index_count, 1, g.mesh_ib, @as(u64, b.mesh.index_start) * 4, b.instance_count, @as(i64, b.mesh.base_vertex), b.first_instance });
-            }
-        }
-    }
-
-    /// Copy the offscreen target out as tightly packed BGRA8 rows.
-    pub fn readback(g: *Gpu, out: []u8) void {
-        std.debug.assert(out.len >= @as(usize, g.width) * g.height * 4);
-        objc.send(fn (id, SEL, [*]u8, u64, Region, u64) callconv(.c) void, g.offscreen, "getBytes:bytesPerRow:fromRegion:mipmapLevel:", .{ out.ptr, @as(u64, g.width) * 4, Region{ .x = 0, .y = 0, .z = 0, .w = g.width, .h = g.height, .d = 1 }, 0 });
+    pub fn deinit(chain: *MipChain, gpa: std.mem.Allocator) void {
+        gpa.free(chain.storage);
     }
 };
 
-fn setViewport(enc: id, w: f64, h: f64, znear: f64, zfar: f64) void {
-    objc.send(fn (id, SEL, Viewport) callconv(.c) void, enc, "setViewport:", .{Viewport{ .x = 0, .y = 0, .w = w, .h = h, .znear = znear, .zfar = zfar }});
-}
+/// Choices made on the command line that a backend may honour.
+pub const Options = struct {
+    /// Render on the system's software rasteriser instead of a GPU, where the API has one (WARP for
+    /// Direct3D). Metal has none and ignores it.
+    software: bool = false,
+};
 
-fn setBuffer(enc: id, vertex: bool, buf: id, index: u64) void {
-    objc.send(fn (id, SEL, id, u64, u64) callconv(.c) void, enc, if (vertex) "setVertexBuffer:offset:atIndex:" else "setFragmentBuffer:offset:atIndex:", .{ buf, 0, index });
-}
+/// The implementation for the target.
+pub const backend = switch (builtin.os.tag) {
+    .macos => @import("gpu/metal.zig"),
+    .windows => @import("gpu/d3d11.zig"),
+    else => @compileError("no GPU backend for this operating system"),
+};
 
-fn setBytes(enc: id, vertex: bool, ptr: *const anyopaque, len: u64, index: u64) void {
-    objc.send(fn (id, SEL, *const anyopaque, u64, u64) callconv(.c) void, enc, if (vertex) "setVertexBytes:length:atIndex:" else "setFragmentBytes:length:atIndex:", .{ ptr, len, index });
-}
+pub const Gpu = backend.Gpu;
+/// The shader source compiled into the binary, and the file name of the editable copy shipped beside it.
+pub const embedded_shaders: [:0]const u8 = backend.embedded_shaders;
+pub const shader_file: []const u8 = backend.shader_file;
 
 comptime {
     std.debug.assert(@sizeOf(Vertex) == 32);
@@ -418,4 +146,23 @@ comptime {
     std.debug.assert(@sizeOf(PVertex) == 36);
     std.debug.assert(@sizeOf(HVertex) == 32);
     std.debug.assert(@sizeOf(Frame) == 160);
+    std.debug.assert(@sizeOf(Post) == 64);
+}
+
+test "the mip chain halves down to the last level with two rows, averaging with rounding" {
+    const px = [_]u8{
+        0,   255, 10, 20, 1, 1, 1, 2,
+        255, 255, 30, 40, 1, 1, 2, 2,
+        0,   0,   0,  0,  9, 9, 9, 9,
+        0,   0,   0,  1,  9, 9, 9, 9,
+    };
+    var chain = try MipChain.build(std.testing.allocator, &px, 8, 4);
+    defer chain.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 3), chain.count);
+    try std.testing.expectEqual(@as(u32, 4), chain.levels[1].w);
+    try std.testing.expectEqual(@as(u32, 2), chain.levels[1].h);
+    try std.testing.expectEqualSlices(u8, &.{ 191, 25, 1, 2, 0, 0, 9, 9 }, chain.levels[1].pixels);
+    try std.testing.expectEqual(@as(u32, 2), chain.levels[2].w);
+    try std.testing.expectEqual(@as(u32, 1), chain.levels[2].h);
+    try std.testing.expectEqualSlices(u8, &.{ 54, 5 }, chain.levels[2].pixels);
 }

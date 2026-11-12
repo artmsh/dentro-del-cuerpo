@@ -1,39 +1,33 @@
-//! Procedural audio through an AudioQueue. No samples on disk: every sound is a few oscillators and noise.
-//! Each arm's sounds are panned to its side so the two can be told apart by ear.
+//! Procedural audio. No samples on disk: every sound is a few oscillators and noise, rendered as
+//! interleaved float stereo at 48 kHz. Each arm's sounds are panned to its side so the two can be told
+//! apart by ear. The synthesiser is the same on every platform; what plays its output is picked at compile
+//! time (`audio/audioqueue.zig` on macOS, `audio/wasapi.zig` on Windows) and calls back into it from the
+//! system's audio thread.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const game = @import("game.zig");
 
-const Asbd = extern struct {
-    sample_rate: f64,
-    format_id: u32,
-    format_flags: u32,
-    bytes_per_packet: u32,
-    frames_per_packet: u32,
-    bytes_per_frame: u32,
-    channels: u32,
-    bits_per_channel: u32,
-    reserved: u32,
-};
-const AqBuffer = extern struct {
-    capacity: u32,
-    data: ?[*]f32,
-    byte_size: u32,
-    user: ?*anyopaque,
-    pd_cap: u32,
-    pd: ?*anyopaque,
-    pd_count: u32,
-};
-const Callback = *const fn (?*anyopaque, ?*anyopaque, *AqBuffer) callconv(.c) void;
-extern fn AudioQueueNewOutput(fmt: *const Asbd, cb: Callback, user: ?*anyopaque, runloop: ?*anyopaque, mode: ?*anyopaque, flags: u32, out: *?*anyopaque) i32;
-extern fn AudioQueueAllocateBuffer(q: ?*anyopaque, bytes: u32, out: *?*AqBuffer) i32;
-extern fn AudioQueueEnqueueBuffer(q: ?*anyopaque, buf: *AqBuffer, n: u32, pd: ?*anyopaque) i32;
-extern fn AudioQueueStart(q: ?*anyopaque, t: ?*anyopaque) i32;
-extern fn AudioQueueStop(q: ?*anyopaque, immediate: bool) i32;
-extern fn AudioQueueDispose(q: ?*anyopaque, immediate: bool) i32;
+/// Sample rate the synthesiser renders at. An output asks the system for this rate.
+pub const rate: f32 = 48000;
 
-const rate: f32 = 48000;
-const frames_per_buffer = 512;
+/// What an output pulls from: `frames` frames of interleaved stereo written to `out`, on the output's thread.
+pub const Source = struct {
+    ctx: *anyopaque,
+    render: *const fn (ctx: *anyopaque, out: [*]f32, frames: usize) void,
+
+    pub fn fill(s: Source, out: [*]f32, frames: usize) void {
+        s.render(s.ctx, out, frames);
+    }
+};
+
+/// The system output for the target: `start(source) bool` begins pulling, `stop()` ends it and returns
+/// only when the audio thread no longer touches the source.
+const Output = switch (builtin.os.tag) {
+    .macos => @import("audio/audioqueue.zig").Output,
+    .windows => @import("audio/wasapi.zig").Output,
+    else => @compileError("no audio output for this operating system"),
+};
 
 const Wave = enum(u8) { sine, saw, square, noise };
 
@@ -70,7 +64,7 @@ pub const Event = struct { id: u8, pan: f32, gain: f32 };
 pub const comm_chirp: u8 = 200;
 
 pub const Audio = struct {
-    queue: ?*anyopaque = null,
+    output: Output = .{},
     params: Params = .{},
     events: [64]Event = undefined,
     head: std.atomic.Value(u32) = .init(0),
@@ -91,34 +85,20 @@ pub const Audio = struct {
     warp_amp: f32 = 0,
     warp_phase: f32 = 0,
 
-    /// Start the output queue. `a` must not move afterwards.
+    /// Start the system output. `a` must not move afterwards. False if there is nothing to play through;
+    /// the game then runs silent.
     pub fn start(a: *Audio) bool {
-        const fmt: Asbd = .{
-            .sample_rate = rate,
-            .format_id = 0x6C70636D, // 'lpcm'
-            .format_flags = 1 | 8, // float, packed
-            .bytes_per_packet = 8,
-            .frames_per_packet = 1,
-            .bytes_per_frame = 8,
-            .channels = 2,
-            .bits_per_channel = 32,
-            .reserved = 0,
-        };
-        if (AudioQueueNewOutput(&fmt, &callback, a, null, null, 0, &a.queue) != 0) return false;
-        for (0..3) |_| {
-            var buf: ?*AqBuffer = null;
-            if (AudioQueueAllocateBuffer(a.queue, frames_per_buffer * 8, &buf) != 0) return false;
-            callback(a, a.queue, buf.?);
-        }
-        return AudioQueueStart(a.queue, null) == 0;
+        return a.output.start(.{ .ctx = a, .render = &pull });
     }
 
     /// Stop the render thread. Must run before the memory behind `a` goes away.
     pub fn stop(a: *Audio) void {
-        if (a.queue == null) return;
-        _ = AudioQueueStop(a.queue, true);
-        _ = AudioQueueDispose(a.queue, true);
-        a.queue = null;
+        a.output.stop();
+    }
+
+    fn pull(ctx: *anyopaque, out: [*]f32, frames: usize) void {
+        const a: *Audio = @ptrCast(@alignCast(ctx));
+        a.render(out, frames);
     }
 
     pub fn play(a: *Audio, id: u8, pan: f32, gain: f32) void {
@@ -347,13 +327,6 @@ pub const Audio = struct {
             out[i * 2] = std.math.clamp(l * m, -1, 1);
             out[i * 2 + 1] = std.math.clamp(r * m, -1, 1);
         }
-    }
-
-    fn callback(user: ?*anyopaque, q: ?*anyopaque, buf: *AqBuffer) callconv(.c) void {
-        const a: *Audio = @ptrCast(@alignCast(user.?));
-        a.render(buf.data.?, frames_per_buffer);
-        buf.byte_size = frames_per_buffer * 8;
-        _ = AudioQueueEnqueueBuffer(q, buf, 0, null);
     }
 
     /// Render offline into `out` (interleaved stereo); used by the tests.

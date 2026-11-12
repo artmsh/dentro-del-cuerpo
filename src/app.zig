@@ -7,6 +7,7 @@ const game = @import("game.zig");
 const guide = @import("guide.zig");
 const vein_mod = @import("vein.zig");
 const util = @import("util.zig");
+const paths = @import("os/paths.zig");
 const campaign = @import("campaign.zig");
 const bot_mod = @import("bot.zig");
 const i18n = @import("i18n.zig");
@@ -152,7 +153,10 @@ pub const App = struct {
     want_capture: bool = false,
     last_voice_serial: u32 = 0,
     comm_chirp: bool = false,
-    save_path: [512]u8 = undefined,
+    /// The keyboard shortcut for full screen as this platform's window has it, where that is not the one
+    /// the string catalogue names; the pause screen prints it. Set once at startup.
+    fullscreen_key: ?[]const u8 = null,
+    save_path: [paths.max_path]u8 = undefined,
     save_path_len: usize = 0,
 
     /// `persist` is false for bot-driven and scripted runs, which must never touch the player's save.
@@ -188,10 +192,9 @@ pub const App = struct {
     }
 
     fn locateSave(app: *App) void {
-        const home = util.env("HOME") orelse return;
-        const dir = std.fmt.bufPrintSentinel(&app.save_path, "{s}/Library/Application Support/Dentro del cuerpo", .{home}, 0) catch return;
-        util.makeDir(dir.ptr);
-        const full = std.fmt.bufPrintSentinel(&app.save_path, "{s}/Library/Application Support/Dentro del cuerpo/save.txt", .{home}, 0) catch return;
+        var dir_buf: [paths.max_path]u8 = undefined;
+        const dir = util.saveDir(&dir_buf) orelse return;
+        const full = paths.saveFile(&app.save_path, dir, util.sep) orelse return;
         app.save_path_len = full.len;
     }
 
@@ -614,29 +617,10 @@ test "the language switch works on the title and pause screens and never writes 
     try std.testing.expectEqual(Screen.pause, app.screen);
 }
 
-extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-extern "c" fn mkdtemp(template: [*:0]u8) ?[*:0]u8;
-extern "c" fn unlink(path: [*:0]const u8) c_int;
-extern "c" fn rmdir(path: [*:0]const u8) c_int;
-
-test "the chosen language survives a relaunch, in a real save file under a scratch home" {
-    var home_buf = "/tmp/dentro-test-XXXXXX".*;
-    const home = std.mem.span(mkdtemp(&home_buf) orelse return error.SkipZigTest);
-    var paths: [3][256]u8 = undefined;
-    const lib = try std.fmt.bufPrintSentinel(&paths[0], "{s}/Library", .{home}, 0);
-    const support = try std.fmt.bufPrintSentinel(&paths[1], "{s}/Library/Application Support", .{home}, 0);
-    util.makeDir(lib.ptr);
-    util.makeDir(support.ptr);
-    var old_home: [512:0]u8 = undefined;
-    const had_home = util.env("HOME");
-    if (had_home) |h| {
-        @memcpy(old_home[0..h.len], h);
-        old_home[h.len] = 0;
-    }
-    _ = setenv("HOME", home.ptr, 1);
-    defer if (had_home != null) {
-        _ = setenv("HOME", &old_home, 1);
-    };
+test "the chosen language survives a relaunch, in a real save file under a scratch profile" {
+    var profile: util.ScratchProfile = .{};
+    profile.begin() orelse return error.SkipZigTest;
+    defer profile.end();
 
     const app = try std.testing.allocator.create(App);
     defer std.testing.allocator.destroy(app);
@@ -646,16 +630,8 @@ test "the chosen language survives a relaunch, in a real save file under a scrat
     // First launch on a Ukrainian system: no save, so the system's language applies and nothing is written.
     app.init(true, .uk);
     const save_path: [*:0]const u8 = @ptrCast(&app.save_path);
-    var path_copy: [512:0]u8 = undefined;
-    @memcpy(path_copy[0 .. app.save_path_len + 1], app.save_path[0 .. app.save_path_len + 1]);
-    defer {
-        _ = unlink(&path_copy);
-        path_copy[std.mem.lastIndexOfScalar(u8, path_copy[0..app.save_path_len], '/').?] = 0;
-        _ = rmdir(&path_copy);
-        _ = rmdir(support.ptr);
-        _ = rmdir(lib.ptr);
-        _ = rmdir(home.ptr);
-    }
+    try std.testing.expect(app.save_path_len > 0);
+    try std.testing.expect(std.mem.endsWith(u8, app.save_path[0..app.save_path_len], paths.app_dir_name ++ [_]u8{util.sep} ++ paths.save_file_name));
     try std.testing.expectEqual(Lang.uk, app.lang);
     try std.testing.expectEqual(@as(?[]u8, null), util.readFile(save_path, &file));
 

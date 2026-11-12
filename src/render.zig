@@ -354,6 +354,6 @@ pub const Renderer = struct {
     }
 
     pub fn end(r: *Renderer, scene: gpu.Frame, arm: gpu.Frame, post: gpu.Post, wait: bool) bool {
-        return r.g.submit(&.{ .scene = scene, .arm = arm, .post = post, .batches = r.batches[0..r.nb], .part_count = r.npart, .hud_count = r.nhud }, wait);
+        return r.g.submit(&.{ .scene = scene, .arm = arm, .post = post, .batches = r.batches[0..r.nb], .instance_count = r.ninst, .dyn_count = r.ndyn, .part_count = r.npart, .hud_count = r.nhud }, wait);
     }
 };

@@ -7,6 +7,7 @@
 //!   dentro --padtest           windowed, plays from the title screen with a synthetic game controller
 //!   dentro --selftest          headless: scripted pilot plays chapter 1, prints the timeline
 //!   dentro --shots <dir>       headless GPU: renders every screen offscreen and writes BMP frames
+//!   dentro --icon <file>       headless GPU: renders the app icon as a .png master or a Windows .ico
 //!
 //! `--prompts kbm|xbox|ps` fixes the device the on-screen prompts are written for; without it they follow
 //! the device last used. `--lang en|uk` picks the language for the run. Without it the game uses the language the player chose in
@@ -14,7 +15,6 @@
 //! output is compared between runs, use English.
 
 const std = @import("std");
-const objc = @import("objc.zig");
 const m = @import("math.zig");
 const gpu = @import("gpu.zig");
 const mesh = @import("mesh.zig");
@@ -22,6 +22,7 @@ const render = @import("render.zig");
 const font = @import("font.zig");
 const platform = @import("platform.zig");
 const util = @import("util.zig");
+const image = @import("image.zig");
 const game = @import("game.zig");
 const ch2 = @import("ch2.zig");
 const bot = @import("bot.zig");
@@ -40,14 +41,12 @@ const input = @import("input.zig");
 const Lang = i18n.Lang;
 const Text = i18n.Text;
 
-const embedded_shaders = @embedFile("shaders/shaders.metal");
-extern "c" fn _NSGetExecutablePath(buf: [*]u8, size: *u32) c_int;
-
 const Mode = enum { play, demo, inputtest, padtest, selftest, shots, icon };
 
-const usage = "usage: dentro [--fullscreen] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2] [--demo [--pad] | --inputtest | --padtest | --selftest | --shots <dir> | --icon <png>]\n";
+const usage = "usage: dentro [--fullscreen] [--software] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2] [--demo [--pad] | --inputtest | --padtest | --selftest | --shots <dir> | --icon <png|ico>]\n";
 
 pub fn main(init: std.process.Init) !void {
+    platform.initProcess();
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
     var mode: Mode = .play;
@@ -57,10 +56,11 @@ pub fn main(init: std.process.Init) !void {
     var lang_arg: ?Lang = null;
     var prompts_arg: ?bindings.Device = null;
     var via_pad = false;
+    var software = false;
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const a = args[i];
-        const known = [_][]const u8{ "--selftest", "--demo", "--inputtest", "--padtest", "--pad", "--fullscreen", "--icon", "--shots", "--chapter", "--lang", "--prompts" };
+        const known = [_][]const u8{ "--selftest", "--demo", "--inputtest", "--padtest", "--pad", "--fullscreen", "--software", "--icon", "--shots", "--chapter", "--lang", "--prompts" };
         var ok = false;
         for (known) |k| ok = ok or std.mem.eql(u8, a, k);
         // Cocoa reads "-AppleLanguages (uk)" and its kin from the command line as user defaults; they come
@@ -89,6 +89,7 @@ pub fn main(init: std.process.Init) !void {
             continue;
         }
         if (std.mem.eql(u8, a, "--fullscreen")) fullscreen = true;
+        if (std.mem.eql(u8, a, "--software")) software = true;
         if (std.mem.eql(u8, a, "--chapter") and i + 1 < args.len) {
             const n = std.fmt.parseInt(u8, args[i + 1], 10) catch 0;
             if (n < 1 or n > 2) {
@@ -119,12 +120,18 @@ pub fn main(init: std.process.Init) !void {
             i += 1;
         }
     }
-    switch (mode) {
-        .selftest => return runSelftest(arena),
-        .shots => return runShots(arena, shots_dir, start_chapter, lang_arg, prompts_arg orelse .kbm),
-        .icon => return runIcon(arena, shots_dir),
-        else => return runWindow(arena, mode, .{ .fullscreen = fullscreen, .start_chapter = start_chapter, .lang = lang_arg, .prompts = prompts_arg, .via_pad = via_pad }),
-    }
+    const gpu_options: gpu.Options = .{ .software = software };
+    const result = switch (mode) {
+        .selftest => runSelftest(arena),
+        .shots => runShots(arena, gpu_options, shots_dir, start_chapter, lang_arg, prompts_arg orelse .kbm),
+        .icon => runIcon(arena, gpu_options, shots_dir),
+        else => runWindow(arena, mode, .{ .fullscreen = fullscreen, .start_chapter = start_chapter, .lang = lang_arg, .prompts = prompts_arg, .via_pad = via_pad, .gpu = gpu_options }),
+    };
+    result catch |err| {
+        // A player who double-clicked the game has no terminal to read the error from.
+        if (mode == .play) platform.reportFatal(@errorName(err));
+        return err;
+    };
 }
 
 /// The language the system would like, for a first launch: the first supported one in its preference list.
@@ -158,7 +165,7 @@ fn runSelftest(arena: std.mem.Allocator) !void {
     const cp = try arena.create(game.Sim);
     {
         std.debug.print("--- chapter 2: intestines\n", .{});
-        bot.trace = util.env("DENTRO_TRACE") != null;
+        bot.trace = util.envIsSet("DENTRO_TRACE");
         const r2 = bot.runHeadlessChapter(sim, cp, 1, 1500, true);
         const g = &sim.g;
         std.debug.print("selftest ch2: completed={} stage={s} sim_time={d:.1}s deaths={d} stability={d:.1} grade={c} atlas={d}\n  cleared={d}/{d} extruded={d} spread={d} bursts={d} commensals_lost={d} tissue_hits={d} crush_hits={d} waves_survived={d} tether_uses={d} dual_arm_time={d:.1}s\n", .{ r2.completed, @tagName(r2.stage), r2.sim_seconds, r2.deaths, r2.stability, r2.grade, r2.atlas, g.cleared, g.total, g.extruded, g.spread, g.bursts, g.commensals_lost, r2.stats.tissue_hits, g.crush_hits, g.waves_survived, g.tether_uses, r2.stats.dual_time });
@@ -175,27 +182,16 @@ fn runSelftest(arena: std.mem.Allocator) !void {
     if (!r.completed) std.process.exit(1);
 }
 
-/// Shader source: the copy in the bundle's Resources if present (so it can be edited without rebuilding),
-/// otherwise the one compiled into the binary.
-fn shaderSource(arena: std.mem.Allocator) [*:0]const u8 {
-    var path_buf: [1024]u8 = undefined;
-    var size: u32 = path_buf.len;
-    if (_NSGetExecutablePath(&path_buf, &size) == 0) {
-        const exe = std.mem.span(@as([*:0]u8, @ptrCast(&path_buf)));
-        if (std.mem.lastIndexOfScalar(u8, exe, '/')) |slash| {
-            var full: [1200]u8 = undefined;
-            if (std.fmt.bufPrintSentinel(&full, "{s}/../Resources/shaders/shaders.metal", .{exe[0..slash]}, 0)) |p| {
-                const buf = arena.alloc(u8, 256 * 1024) catch return embedded_shaders;
-                if (util.readFile(p.ptr, buf[0 .. buf.len - 1])) |data| {
-                    if (data.len > 100) {
-                        buf[data.len] = 0;
-                        return @ptrCast(buf.ptr);
-                    }
-                }
-            } else |_| {}
-        }
-    }
-    return embedded_shaders;
+/// Shader source: the copy shipped beside the executable if present (so it can be edited without
+/// rebuilding), otherwise the one compiled into the binary.
+fn shaderSource(arena: std.mem.Allocator) [:0]const u8 {
+    var path_buf: [1200]u8 = undefined;
+    const path = platform.shaderPath(&path_buf, gpu.shader_file) orelse return gpu.embedded_shaders;
+    const buf = arena.alloc(u8, 256 * 1024) catch return gpu.embedded_shaders;
+    const data = util.readFile(path.ptr, buf[0 .. buf.len - 1]) orelse return gpu.embedded_shaders;
+    if (data.len <= 100) return gpu.embedded_shaders;
+    buf[data.len] = 0;
+    return buf[0..data.len :0];
 }
 
 const Engine = struct {
@@ -206,10 +202,11 @@ const Engine = struct {
 
     /// `lang` is the language asked for on the command line; `fallback` applies when neither it nor the
     /// save file names one.
-    fn init(e: *Engine, arena: std.mem.Allocator, persist: bool, lang: ?Lang, fallback: Lang) !void {
-        e.g = try gpu.Gpu.init(shaderSource(arena));
+    fn init(e: *Engine, arena: std.mem.Allocator, options: gpu.Options, persist: bool, lang: ?Lang, fallback: Lang) !void {
+        e.g = try gpu.Gpu.init(shaderSource(arena), options);
         e.app = try arena.create(app_mod.App);
         e.app.init(persist, fallback);
+        e.app.fullscreen_key = platform.fullscreen_key;
         if (lang) |l| e.app.lang = l;
         var b = mesh.Builder.init(arena);
         const meshes = render.Meshes.build(&b);
@@ -239,15 +236,19 @@ fn longestDeep(lang: Lang) Text {
     return best;
 }
 
-fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8, lang: ?Lang, prompts: bindings.Device) !void {
-    const pool = objc.poolPush();
-    defer objc.poolPop(pool);
+fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, only: ?u8, lang: ?Lang, prompts: bindings.Device) !void {
+    const pool = platform.scopeBegin();
+    defer platform.scopeEnd(pool);
     const e = try arena.create(Engine);
-    try e.init(arena, false, lang, .en);
+    try e.init(arena, options, false, lang, .en);
     e.app.prompts = prompts;
     const w: u32 = 1600;
     const h: u32 = 1000;
     e.g.resize(w, h, true);
+    {
+        var name: [256]u8 = undefined;
+        std.debug.print("shots: rendering with {s}\n", .{e.g.describe(&name)});
+    }
     const px = try arena.alloc(u8, w * h * 4);
     const app = e.app;
     const dt: f32 = 1.0 / 60.0;
@@ -257,14 +258,20 @@ fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8, lang: ?Lang, p
         px: []u8,
         dir: []const u8,
         n: u32 = 0,
+        failed: bool = false,
         fn snap(sh: *@This(), name: []const u8) void {
-            const p2 = objc.poolPush();
-            defer objc.poolPop(p2);
+            const p2 = platform.scopeBegin();
+            defer platform.scopeEnd(p2);
             _ = sh.e.renderFrame(1.0 / 60.0, true);
             sh.e.g.readback(sh.px);
             var path: [600]u8 = undefined;
             const full = std.fmt.bufPrintSentinel(&path, "{s}/{d:0>2}-{s}.bmp", .{ sh.dir, sh.n, name }, 0) catch return;
-            _ = util.writeBmp(full.ptr, sh.px, sh.e.g.width, sh.e.g.height);
+            const hdr = image.bmpHeader(sh.e.g.width, sh.e.g.height);
+            if (!util.writeFileParts(full.ptr, &.{ &hdr, sh.px })) {
+                std.debug.print("could not write {s}\n", .{full});
+                sh.failed = true;
+                return;
+            }
             std.debug.print("wrote {s}\n", .{full});
             sh.n += 1;
         }
@@ -441,14 +448,17 @@ fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8, lang: ?Lang, p
     for (1..app_mod.PauseItem.count) |_| app.step(.{}, .{ .down = true }, dt);
     sh.snap("pause-language-selected");
     std.debug.print("shots: {d} frames, chapters complete = {}\n", .{ sh.n, all_done });
+    if (sh.failed) return error.ShotWriteFailed;
 }
 
-/// Render the app icon: 2048 px, the title backdrop and the reticle mark, clipped to the macOS icon shape.
-fn runIcon(arena: std.mem.Allocator, path: []const u8) !void {
-    const pool = objc.poolPush();
-    defer objc.poolPop(pool);
+/// Render the app icon from the title backdrop and the reticle mark, 2048 px and clipped to a rounded
+/// square. A path ending in .ico gets the Windows icon, every size it carries scaled down from that
+/// render; any other path gets the 2048 px PNG that the macOS iconset is made from.
+fn runIcon(arena: std.mem.Allocator, options: gpu.Options, path: []const u8) !void {
+    const pool = platform.scopeBegin();
+    defer platform.scopeEnd(pool);
     const e = try arena.create(Engine);
-    try e.init(arena, false, null, .en);
+    try e.init(arena, options, false, null, .en);
     const n: u32 = 2048; // supersampled; the iconset step scales it down
     e.g.resize(n, n, true);
     const px = try arena.alloc(u8, n * n * 4);
@@ -456,8 +466,11 @@ fn runIcon(arena: std.mem.Allocator, path: []const u8) !void {
     for (0..240) |_| e.app.step(.{}, .{}, 1.0 / 60.0);
     _ = e.renderFrame(1.0 / 60.0, true);
     e.g.readback(px);
-    // Icon grid: the shape fills 824/1024 of the canvas, as a superellipse.
-    const half: f32 = 824;
+    const ico = std.ascii.endsWithIgnoreCase(path, ".ico");
+    // The macOS icon grid leaves a margin: the shape fills 824/1024 of the canvas, as a superellipse.
+    // Windows draws an icon edge to edge, so there the same shape fills the canvas but for a pixel or
+    // two of the smallest size.
+    const half: f32 = if (ico) 992 else 824;
     for (0..n) |y| for (0..n) |x| {
         const dx = @abs(@as(f32, @floatFromInt(x)) + 0.5 - 1024) / half;
         const dy = @abs(@as(f32, @floatFromInt(y)) + 0.5 - 1024) / half;
@@ -469,7 +482,8 @@ fn runIcon(arena: std.mem.Allocator, path: []const u8) !void {
     };
     var zbuf: [1024]u8 = undefined;
     const z = try std.fmt.bufPrintSentinel(&zbuf, "{s}", .{path}, 0);
-    if (!util.writePng(z.ptr, px, n, n)) return error.IconWriteFailed;
+    const bytes = if (ico) try image.encodeIco(arena, px, n) else try image.encodePng(arena, px, n, n);
+    if (!util.writeFile(z.ptr, bytes)) return error.IconWriteFailed;
     std.debug.print("icon: {s}\n", .{path});
 }
 
@@ -534,47 +548,27 @@ const WindowOptions = struct {
     prompts: ?bindings.Device = null,
     /// `--demo --pad`: the scripted pilot holds a controller instead of handing its controls to the game.
     via_pad: bool = false,
+    gpu: gpu.Options = .{},
 };
 
-/// The controller the scripted modes hold. It is one of the GameController framework's own objects where
-/// the framework will make one, so that the state is read back through `platform.Gamepad.read`, the code
-/// that reads a real device; failing that the state is written straight into `Platform.pad`.
-const SyntheticPad = struct {
-    controller: objc.id = null,
-
-    fn attach(plat: *platform.Platform) SyntheticPad {
-        const c = platform.Gamepad.makeSnapshot();
-        plat.pad_source = if (c != null) .{ .controller = c } else .injected;
-        return .{ .controller = c };
-    }
-
-    fn set(sp: SyntheticPad, plat: *platform.Platform, st: pad.State) void {
-        switch (plat.pad_source) {
-            .controller => platform.Gamepad.write(sp.controller, st),
-            else => plat.pad = st,
-        }
-    }
-
-    fn describe(sp: SyntheticPad) []const u8 {
-        return if (sp.controller != null) "GCController snapshot, read by the device code" else "state written to Platform.pad";
-    }
-};
+const SyntheticPad = platform.SyntheticPad;
 
 fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
     const fullscreen = opts.fullscreen;
     const start_chapter = opts.start_chapter;
     const lang = opts.lang;
-    const outer = objc.poolPush();
-    defer objc.poolPop(outer);
+    const outer = platform.scopeBegin();
+    defer platform.scopeEnd(outer);
     const e = try arena.create(Engine);
     // The scripted tests assert on their output, so they do not follow the machine they run on.
-    try e.init(arena, mode == .play, lang, if (mode == .inputtest or mode == .padtest) .en else systemLanguage());
+    try e.init(arena, opts.gpu, mode == .play, lang, if (mode == .inputtest or mode == .padtest) .en else systemLanguage());
     const app = e.app;
     if (opts.prompts) |d| app.prompts = d;
-    const layer = e.g.makeLayer();
     var menu_text: MenuText = .{};
     var menu_lang = app.lang;
-    var plat = platform.Platform.init(app_mod.title, menu_text.set(menu_lang), layer, 1440, 900);
+    var plat = platform.Platform.init(app_mod.title, menu_text.set(menu_lang), 1440, 900);
+    try e.g.attach(plat.surface());
+    plat.show();
     if (fullscreen) plat.toggleFullscreen();
 
     const audio = try arena.create(audio_mod.Audio);
@@ -582,7 +576,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
     const audio_ok = audio.start();
     defer audio.stop();
     live_audio = audio;
-    platform.on_terminate = &stopAudioOnTerminate;
+    platform.setTerminateHook(&stopAudioOnTerminate);
     if (!audio_ok) std.debug.print("audio: output queue failed to start; continuing silent\n", .{});
 
     if (start_chapter) |ch| {
@@ -617,8 +611,8 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
     var demo_logged: ?game.Stage = null;
     const t_start = last;
     while (!plat.shouldQuit()) {
-        const pool = objc.poolPush();
-        defer objc.poolPop(pool);
+        const pool = platform.scopeBegin();
+        defer platform.scopeEnd(pool);
 
         const now = platform.now();
         const dt: f32 = @floatCast(@min(@max(now - last, 0.0005), 1.0 / 20.0));
@@ -644,10 +638,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
         const lost_focus = plat.pump();
         if (lost_focus and app.screen == .play and mode == .play) app.openPause();
         const size = plat.pixelSize();
-        if (size.w != e.g.width or size.h != e.g.height) {
-            objc.send(fn (objc.id, objc.SEL, f64) callconv(.c) void, layer, "setContentsScale:", .{size.scale});
-            e.g.resize(size.w, size.h, false);
-        }
+        if (size.w != e.g.width or size.h != e.g.height) e.g.resizeSurface(size.w, size.h, size.scale);
 
         // Both devices are read every frame and their input is added together; the prompts are written
         // for whichever was used last.
@@ -701,13 +692,13 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
         _ = e.renderFrame(dt, false);
         frames += 1;
         if (mode == .demo and frames == 30) {
-            std.debug.print("[demo] controller: {s}, {s}; GameController framework {s}\n", .{
+            std.debug.print("[demo] controller: {s}, {s}; {s}\n", .{
                 if (plat.pad.connected) @tagName(plat.pad.family) else "none attached",
                 switch (plat.pad_source) {
                     .system => "polled from the system",
                     else => held_pad.describe(),
                 },
-                if (platform.Gamepad.available()) "loaded" else "missing",
+                platform.padBackendStatus(),
             });
         }
 
@@ -987,10 +978,11 @@ const PadTest = struct {
         pt.st = .{ .connected = true };
     }
 
-    /// Everything a controller has, written to the framework's controller and read back by the code
-    /// that reads a device. Opposite d-pad directions cannot be down together, so it takes two states.
+    /// Everything a controller has, written to the synthetic device and read back by the code that reads
+    /// a real one. Opposite d-pad directions cannot be down together, so it takes two states.
     fn roundTrip(pt: *PadTest) bool {
-        if (pt.held.controller == null) return false;
+        if (!pt.held.real()) return false;
+        const tol = SyntheticPad.tolerance;
         var ok = true;
         for (0..2) |pass| {
             var st: pad.State = .{ .connected = true };
@@ -1005,9 +997,10 @@ const PadTest = struct {
                 // The triggers are analog here; their buttons are derived from the values further on.
                 if (b != .lt and b != .rt) st.set(b, second == (pass == 1));
             }
-            platform.Gamepad.write(pt.held.controller, st);
-            const got = platform.Gamepad.read(objc.get(pt.held.controller, "extendedGamepad"));
-            if (!std.meta.eql(got.left, st.left) or !std.meta.eql(got.right, st.right) or got.lt != st.lt or got.rt != st.rt) {
+            const got = pt.held.roundTrip(st);
+            var analog_ok = @abs(got.lt - st.lt) <= tol and @abs(got.rt - st.rt) <= tol;
+            for (0..2) |axis| analog_ok = analog_ok and @abs(got.left[axis] - st.left[axis]) <= tol and @abs(got.right[axis] - st.right[axis]) <= tol;
+            if (!analog_ok) {
                 std.debug.print("      sticks or triggers read back as {any} {any} {d} {d}\n", .{ got.left, got.right, got.lt, got.rt });
                 ok = false;
             }
@@ -1018,7 +1011,7 @@ const PadTest = struct {
                 }
             }
         }
-        platform.Gamepad.write(pt.held.controller, .{ .connected = true });
+        _ = pt.held.roundTrip(.{ .connected = true });
         return ok;
     }
 
@@ -1035,10 +1028,10 @@ const PadTest = struct {
         if (pt.at(&k) and pt.t >= 0.4) {
             pt.check(app.screen == .title, "the game opens on the title screen");
             pt.check(app.prompts == .kbm, "an attached controller that nobody has touched leaves the prompts on the keyboard");
-            if (pt.held.controller != null) {
-                pt.check(pt.roundTrip(), "every stick, trigger and button written to a GCController is read back by the device code");
+            if (pt.held.real()) {
+                pt.check(pt.roundTrip(), SyntheticPad.round_trip_name);
             } else {
-                std.debug.print("  [--] the GameController framework made no controller to write to; the state goes straight to Platform.pad\n", .{});
+                std.debug.print("  [--] " ++ SyntheticPad.no_device_note ++ "\n", .{});
             }
             pt.lang0 = app.lang;
             pt.next();
@@ -1083,7 +1076,7 @@ const PadTest = struct {
         if (pt.at(&k) and pt.tap(.x)) {
             pt.check(app.prompts == .playstation, "a press on a PlayStation controller moves the prompts to PlayStation names");
             pt.rest();
-            if (pt.held.controller != null) plat.pad_source = .{ .controller = pt.held.controller };
+            plat.pad_source = pt.held.source();
             pt.next();
         }
 
@@ -1333,7 +1326,7 @@ const PadTest = struct {
                 pt.check(app.prompts == .kbm, "and the prompts return to the keyboard");
                 pt.rest();
                 pt.unplugged = false;
-                if (pt.held.controller != null) plat.pad_source = .{ .controller = pt.held.controller };
+                plat.pad_source = pt.held.source();
                 pt.next();
             }
         }
@@ -1408,4 +1401,8 @@ test {
     _ = @import("pad.zig");
     _ = @import("bindings.zig");
     _ = @import("input.zig");
+    _ = @import("gpu.zig");
+    _ = @import("image.zig");
+    _ = @import("util.zig");
+    _ = @import("platform.zig");
 }

@@ -1056,7 +1056,14 @@ fn drawPause(app: *App, r: *Renderer) void {
         row(r, cx, y, cc);
         y += 23;
     }
-    if (device == .kbm) row(r, cx, y, P.fullscreen);
+    if (device == .kbm) {
+        if (app.fullscreen_key) |key| {
+            // The shortcut belongs to the window, which names its own where it differs from the Mac's.
+            const what = tr(P.fullscreen[1]);
+            r.textRight(.bold, cx - 20, y, 16, dim, key);
+            _ = r.text(.regular, cx + 10, y, fitSize(r, .regular, 16, 350, what), white, what);
+        } else row(r, cx, y, P.fullscreen);
+    }
 }
 
 /// The app icon: the split reticle (left arm cyan, right arm amber) over the blood stream.
