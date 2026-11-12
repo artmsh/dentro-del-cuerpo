@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows-port] # TEMPORARY while the Windows port is brought up; remove windows-port
     paths-ignore: ["**.md", "docs/**", "LICENSE*"]
   pull_request:
 
@@ -36,26 +36,128 @@ jobs:
         run: zig build -Doptimize=ReleaseFast
       - name: Check the release binary
         run: |
-          zig-out/bin/dentro --selftest
+          zig-out/bin/dentro --selftest 2>&1 | tee selftest-macos.txt
           codesign --verify --strict "zig-out/Dentro del cuerpo.app"
           otool -l zig-out/bin/dentro | grep -A3 LC_BUILD_VERSION | grep -q 'minos 14.0'
       - name: Package
         run: ditto -c -k --keepParent "zig-out/Dentro del cuerpo.app" Dentro-del-cuerpo-macos-arm64.zip
       - uses: actions/upload-artifact@v7
         with:
-          name: macos-arm64
+          name: release-macos-arm64
           path: Dentro-del-cuerpo-macos-arm64.zip
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: selftest-macos
+          path: selftest-macos.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      EXE: zig-out/Dentro del cuerpo/Dentro del cuerpo.exe
+    steps:
+      - uses: actions/checkout@v7
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Runner image
+        run: |
+          echo "image: $ImageOS $ImageVersion"
+          cmd //c ver
+      - name: Unit tests and scripted playthroughs
+        run: zig build test --summary all
+      - name: Build the package folder
+        run: zig build -Doptimize=ReleaseFast -Dversion=$VERSION
+      - name: Check the release binary
+        run: |
+          python .github/scripts/check-windows-exe.py "$EXE" "$VERSION"
+          "$EXE" --selftest 2>&1 | tee selftest-windows.txt
+      # The runner has no GPU, so the frames come from WARP, Direct3D's software rasteriser: the same
+      # shaders and the same draw calls as on a graphics card.
+      - name: Render both chapters in both languages
+        run: |
+          for lang in en uk; do
+            DENTRO_GPU_LOG=1 "$EXE" --software --lang $lang --shots shots/$lang 2>&1 | grep -v '^wrote '
+            (cd shots/$lang && sha256sum *.bmp > ../sha256-$lang.txt)
+            test "$(wc -l < shots/sha256-$lang.txt)" -ge 80
+          done
+      # The same run with the Direct3D device thrown away and rebuilt part of the way through has to
+      # produce the same frames, byte for byte.
+      - name: Render again across a lost device
+        run: |
+          DENTRO_FORCE_DEVICE_LOSS=20 "$EXE" --software --lang en --shots shots/lost 2>&1 | grep -v '^wrote '
+          (cd shots/lost && sha256sum *.bmp > ../sha256-lost.txt)
+          diff shots/sha256-en.txt shots/sha256-lost.txt
+          rm -r shots/lost
+      - name: Window, keyboard and mouse path
+        run: |
+          "$EXE" --software --inputtest
+      - name: Window and controller path
+        run: |
+          "$EXE" --software --padtest
+      - name: Convert the frames to JPEG
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+          $quality = New-Object System.Drawing.Imaging.EncoderParameters 1
+          $quality.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]88)
+          Get-ChildItem shots -Recurse -Filter *.bmp | ForEach-Object {
+            $image = [System.Drawing.Image]::FromFile($_.FullName)
+            $image.Save(($_.FullName -replace '\.bmp$', '.jpg'), $codec, $quality)
+            $image.Dispose()
+            Remove-Item $_.FullName
+          }
+      - name: Package
+        run: |
+          cd zig-out
+          7z a -tzip ../Dentro-del-cuerpo-windows-x64.zip "Dentro del cuerpo"
+          7z l ../Dentro-del-cuerpo-windows-x64.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-x64
+          path: Dentro-del-cuerpo-windows-x64.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: selftest-windows
+          path: selftest-windows.txt
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-warp-frames
+          path: shots
+          retention-days: 7
+
+  # The simulation has to play out the same on both platforms: the same stages at the same times, the
+  # same grades.
+  parity:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: selftest-*
+          merge-multiple: true
+      - run: diff selftest-macos.txt selftest-windows.txt && grep '^selftest' selftest-windows.txt
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [macos]
+    needs: [macos, windows, parity]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
+          pattern: release-*
           path: dist
           merge-multiple: true
       - name: Publish release
