@@ -140,7 +140,9 @@ float2 hash2(float2 p) {
 // the hash of that is some other cell's. Metal's fmod of whole numbers is exact, and so is integer
 // division on any Direct3D device.
 float wholeMod(float x, float m) {
-    float r = (float)((uint)abs(x) % (uint)m);
+    // The compiler also evaluates this where the caller's period is the constant 0 and the branch around
+    // it is never taken, and refuses a division by a zero it can see.
+    float r = (float)((uint)abs(x) % (uint)max(m, 1.0));
     return x < 0.0 ? -r : r;
 }
 
