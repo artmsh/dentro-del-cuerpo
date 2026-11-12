@@ -36,9 +36,9 @@ pace are fiction, and the in-game atlas labels which is which.
 
 ## Features
 
-- Two independent arms, each with its own key, tool (Punch, Drill or Shoot), HUD panel, half of the reticle,
-  colour and stereo side. A drill stays locked in its cut while its key is held, so the pilot can work the
-  other arm on something else.
+- Two independent arms, each with its own key or trigger, tool (Punch, Drill or Shoot), HUD panel, half of
+  the reticle, colour and stereo side. A drill stays locked in its cut while its key is held, so the pilot
+  can work the other arm on something else.
 - Anatomy defined as analytic functions (`src/vein.zig`, `src/gut.zig`) from which the mesh, collision,
   the flow that carries the drone and the reticle ray casts are all derived.
 - Dr. Marín on comms: `T` names what the reticle is on and files it in the atlas, `T` again gives the longer
@@ -49,10 +49,14 @@ pace are fiction, and the in-game atlas labels which is which.
 - Chapter 2, Intestines: a chyme stream fast above the villus tips and still between them, peristaltic
   contractions to wait out, a scan that separates rotavirus-infected cells from commensal bacteria, and the
   Mucus Tether upgrade.
+- Keyboard and mouse, or an Xbox, DualShock 4 or DualSense controller, over USB or Bluetooth with no
+  driver or setup. The whole game can be played on the controller alone, menus included, and the two can
+  be mixed at any moment. Every prompt on screen names the control of the device used last, in that
+  controller's own terms (`A`, `LT`, `Menu` or `✕`, `L2`, `Options`).
 - Audio synthesised at runtime, with no sample files; each arm's sounds are panned to its side.
 - English and Ukrainian throughout: HUD, menus, route map, briefing, debrief, Dr. Marín's lines, hints and
   the atlas. The language follows the system's preference list on first launch and can be switched with
-  `Tab` on the title and pause screens; the choice is saved. A string without a Ukrainian translation fails
+  `Tab` (`View` on a controller) on the title and pause screens; the choice is saved. A string without a Ukrainian translation fails
   the build or the tests, so the game never falls back to English mid-screen.
 
 <p align="center">
@@ -75,10 +79,10 @@ game found: a shooter flown inside the human body.
 | Movement | first person, two independently aimed arms | 6DoF ship, cockpit or third-person view |
 | Content | 2 chapters, about 5 minutes each | 12-mission campaign, 5 difficulty levels |
 | Platforms | macOS 14+ on Apple Silicon, built from source | Windows, macOS, Linux; $7.99 |
-| Input | keyboard and mouse | keyboard, mouse, gamepads; remappable |
+| Input | keyboard and mouse; Xbox and PlayStation controllers; fixed layout | keyboard, mouse, gamepads; remappable |
 | Engine | none: Zig on AppKit and Metal | Godot |
 
-Cell Sword is the one to play for a finished campaign, a gamepad, or a Windows or Linux machine.
+Cell Sword is the one to play for a finished campaign, remappable controls, or a Windows or Linux machine.
 
 ## Requirements
 
@@ -117,21 +121,32 @@ kept in the save file; `--lang en` or `--lang uk` sets it for one run without ch
 
 ## Controls
 
-| | |
-|---|---|
-| Move | `W A S D`, `Space` up, `C` down, `Shift` boost |
-| Look | mouse, or arrow keys |
-| Left arm | hold `Q` or left mouse button |
-| Right arm | hold `E` or right mouse button |
-| Left arm tool | `Z` cycles; `1` Punch, `2` Drill, `3` Shoot |
-| Right arm tool | `X` cycles; `8` Punch, `9` Drill, `0` Shoot |
-| Identify what the reticle is on | `T` (or `F`); again for the longer explanation. In chapter 2 it is also the scan pulse |
-| Mucus Tether (chapter 2 upgrade) | `G` on tissue within 0.4 mm attaches and reels in; `G` on nothing releases |
-| Ask Dr. Marín for a hint | `H` (three levels per objective) |
-| Skip the current comms line | `Tab` |
-| Pause | `Esc`; then `R` relaunch from checkpoint, `N` restart chapter, `L` title |
-| Switch language (English, Ukrainian) | `Tab` on the title screen or the pause screen |
-| Route map (from the title) | `M` |
+| | Keyboard and mouse | Controller |
+|---|---|---|
+| Move | `W A S D`, `Space` up, `C` down | left stick, `A` up, `B` down |
+| Boost | hold `Shift` | click `LS`; it lasts while the stick stays pushed |
+| Look | mouse, or arrow keys | right stick |
+| Left arm | hold `Q` or left mouse button | hold `LT` |
+| Right arm | hold `E` or right mouse button | hold `RT` |
+| Left arm tool | `Z` next; `1` Punch, `2` Drill, `3` Shoot | `LB` next, d-pad `←` previous |
+| Right arm tool | `X` next; `8` Punch, `9` Drill, `0` Shoot | `RB` next, d-pad `→` previous |
+| Identify what the reticle is on; again for the longer explanation. In chapter 2 it is also the scan pulse | `T` (or `F`) | `X` |
+| Mucus Tether (chapter 2 upgrade): on tissue within 0.4 mm it attaches and reels in, on nothing it releases | `G` | click `RS`, or d-pad `↑` |
+| Ask Dr. Marín for a hint (three levels per objective) | `H` | `Y` |
+| Skip the current comms line | `Tab` | `View` |
+| Pause, and resume | `Esc` | `Menu` |
+| In the pause menu: resume, relaunch from checkpoint, restart chapter, leave to title | `↑ ↓` and `Enter`, or `Esc`, `R`, `N`, `L` | d-pad or left stick and `A`; `B` resumes |
+| Menus and cards: confirm, back | `Enter`, `Esc` | `A`, `B` |
+| Switch language (English, Ukrainian) on the title screen or the pause screen | `Tab` | `View`, or d-pad `←` `→` |
+| Route map (from the title) | `M` | `Y` |
+
+The controller column uses Xbox names. On a DualShock 4 or DualSense the same positions are `✕ ○ □ △` for
+`A B X Y`, `L1 R1 L2 R2` for `LB RB LT RT`, `L3 R3` for the stick clicks, `Create` (Share on a DualShock 4)
+for `View` and `Options` for `Menu`, and the game's prompts use those names when such a controller is the
+one in use. The triggers act as buttons, pressed at 40% of their travel and released at 25%. Keyboard, mouse
+and controller are read together and their input is added, so the stick can fly while the mouse aims.
+Mouse movement alone never changes which device the prompts are written for, since on a handheld the
+gyroscope and trackpads arrive as mouse movement. `Cmd+F` and `Cmd+Q` have no controller equivalent.
 
 After the chapter 1 upgrade, triggering both arms within 0.12 s lands them as one Sync Strike.
 
@@ -145,7 +160,13 @@ vein that should not be in circulating blood) is already in chapter 1.
 ## Limitations
 
 - Apple Silicon and Metal only: there is no Intel, Windows or Linux build.
-- No gamepad support and no key remapping.
+- The control layout is fixed: there is no remapping of keys or controller buttons, no sensitivity or
+  invert-Y setting for the right stick, and no rumble.
+- The controller code has not yet been run against a physical controller. It is tested through a
+  controller object that the GameController framework itself provides and the tests write to (see
+  [ARCHITECTURE.md](docs/ARCHITECTURE.md)), which covers reading and mapping but not how macOS discovers a
+  real device, names its family, or hands over the Create and Share button.
+- A controller cannot quit the application; `Leave to title` is as far as it goes.
 
 ## Development
 
@@ -154,18 +175,23 @@ zig build test                 # unit tests, translation checks, and a scripted 
 zig-out/bin/dentro --selftest  # the same playthroughs, with a printed summary
 zig-out/bin/dentro --shots DIR # offscreen GPU render of every screen and stage, one BMP each
 zig-out/bin/dentro --lang uk --shots DIR   # the same in Ukrainian
+zig-out/bin/dentro --prompts ps --lang uk --shots DIR   # with the prompts written for kbm, xbox or ps
 zig-out/bin/dentro --inputtest # opens the window and drives it with synthetic key events
+zig-out/bin/dentro --padtest   # opens the window and plays from the title screen with a synthetic controller
 zig-out/bin/dentro --demo      # the scripted pilot flies chapter 1 in the window, with audio
 zig-out/bin/dentro --chapter 2 --demo
+zig-out/bin/dentro --demo --pad   # the same pilot, holding a controller instead of handing over its controls
 ```
 
 The scripted modes run in English unless `--lang` says otherwise, so their output does not depend on the
 machine; `--demo` follows the system like normal play. The tests fail on a string with no Ukrainian text, on
-placeholders that differ between the two languages, and on any character that has no glyph in the font
-atlas.
+placeholders that differ between the two languages, on any character that has no glyph in the font
+atlas, on an action with no controller binding, and on text shown to a controller player that names a key.
+`--prompts kbm|xbox|ps` fixes the device the prompts are written for in any mode; without it they follow
+the device last used.
 
 ```text
-Build Summary: 3/3 steps succeeded; 50/50 tests passed
+Build Summary: 3/3 steps succeeded; 84/84 tests passed
 …
 selftest ch2: completed=true stage=done sim_time=86.8s deaths=0 stability=100.0 grade=A atlas=3
 …

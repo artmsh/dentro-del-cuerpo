@@ -69,8 +69,8 @@ lines live in one catalogue, `src/strings.zig`; atlas entries and the chapter ta
 values around and never chooses a language: the guide queues a `Text`, and `src/draw.zig` picks the string
 for the current language when it draws. This keeps `game.zig` free of rendering and platform imports, and
 it means a language switch applies to the line already on screen. A line's display time is computed from
-the longer of its two translations, so the simulation, and with it the scripted pilot's run, is identical
-in both languages.
+the longest form of it any player can be shown, across both languages and all three prompt devices (see
+Input), so the simulation, and with it the scripted pilot's run, is identical whichever is in use.
 
 Strings with values in them are templates: `{0}` inserts an argument and `{0|one|few|many}` selects a
 plural form by the argument's value, with two forms in English and three in Ukrainian (1 скупчення,
@@ -84,11 +84,80 @@ Cyrillic words), and every character has a glyph.
 The language is chosen in this order: `--lang en|uk` on the command line; the language the player picked
 in the game, stored as an optional last field of the save file; the first supported language in the
 system's preference list, which the platform layer reports through `platform.preferredLanguages`; English.
-`Tab` on the title and pause screens moves to the next language and writes the save file. Scripted modes
+`Tab` on the title and pause screens (`View` or the d-pad on a controller) moves to the next language and
+writes the save file. Scripted modes
 have no save file to write and default to English, so their output is the same on every machine. Layout
 that depends on text measures it: panels and plates take their width from the string, and single-line
 slots with a fixed width shrink the type until the string fits. Paragraphs wrap on spaces but never
 directly before a dash.
+
+## Input
+
+Keyboard and mouse events arrive through the AppKit event pump in `src/platform.zig` and are turned into
+the game's actions by `gather` in `src/main.zig`. A game controller takes a different route, laid out so
+that a second platform has one small thing to supply. `src/pad.zig` defines `pad.State`: whether a
+controller is attached, its family (Xbox, PlayStation or generic), two sticks, two analog triggers and a
+set of sixteen buttons, all as the device reports them. The module imports nothing but the standard
+library. A platform backend fills that struct once a frame into `Platform.pad` and does nothing else; the
+dead zones, response curves, trigger thresholds, press edges and menu auto-repeat are all applied on the
+neutral side, so they behave identically on every platform and are unit-tested without a device.
+
+The macOS backend is the `Gamepad` struct in `src/platform.zig`, which reads the GameController framework
+through the Objective-C runtime like the rest of the platform code. The framework supports Xbox,
+DualShock 4 and DualSense controllers over USB and Bluetooth with no driver and presents each as an
+extended gamepad. Nothing is registered with it. Each frame the backend asks for `GCController.current`,
+falling back to the first entry of `controllers` that has an extended-gamepad profile, and reads every
+element's value. Polling covers a controller that was on before launch, one switched on later and one
+that goes away, without a notification that could be missed, and the framework's own bookkeeping runs on
+the main run loop that the event pump already turns. The family comes from the class of the profile
+(`GCXboxGamepad`, `GCDualShockGamepad`, `GCDualSenseGamepad`). Input counts only while the game's window
+is key: `shouldMonitorBackgroundEvents` is switched off explicitly, and independently of that the backend
+reports an attached but idle controller whenever the window is not key. On a PlayStation controller
+macOS reserves the Create button for its screenshot gestures and delays the press until it has ruled a
+gesture out, so when a controller is adopted the backend sets that button's preferred system-gesture
+state to disabled. Rumble is not implemented.
+
+`src/input.zig` turns `pad.State` into actions. `pad.Filter` first reduces the raw state to a sample:
+sticks pass through a radial dead zone and a response curve (linear for thrust, squared for look, so
+small deflections aim finely), triggers become buttons with hysteresis (pressed at 0.40, released at
+0.25), and each button gets a pressed edge. A controller that is absent or whose window lost focus
+yields an empty sample, and a button already held when it comes back is down but not pressed, which is
+what prevents both stuck inputs and phantom presses. `input.Mapper` then applies the layout in one of two
+contexts. While the drone is being flown the sticks thrust and look, the triggers work the arms and the
+face buttons climb, descend, identify and ask for a hint; on every menu and card the same buttons
+confirm, go back and move a selection. Three details follow from that sharing. A button that went down
+in a menu does nothing in flight until it has been released, so the press that launched a chapter does
+not also climb. The confirm button is ignored for half a second after flight stops, so a card that
+appears while the player is tapping the climb button is not dismissed unread. And the keyboard's Esc is
+split in two for a controller, a cancel that only backs out of menus and a pause that only pauses and
+resumes, because the cancel button is also the one that descends. Stick look is a rate (3.2 rad/s yaw,
+2.3 rad/s pitch at full deflection) multiplied by the frame time, so a turn takes the same time at any
+frame rate. Both triggers reach the simulation in the frame they are pulled, so a Sync Strike has no
+added latency. Boost is a click of the left stick that lasts while the stick stays pushed, since
+holding a stick down while steering with it for several seconds is uncomfortable.
+
+The keyboard's and the controller's output are merged every frame by `Out.merge`: held controls and look
+deltas are added, one-shot actions are taken from either, so the devices can be mixed freely. Which
+device the on-screen prompts are written for is decided by `input.Tracker`: a press on a device moves
+the prompts to it at once, and a held control (a key kept down, a stick past its dead zone) does so only
+while the other device is idle, so steering with a stick and tapping a key does not make the prompts
+flicker. Mouse movement is deliberately not an input to that decision, because a handheld delivers its
+gyroscope and trackpads as mouse movement while the player's hands are on the controller. Unplugging the
+controller returns the prompts to the keyboard; losing focus does not.
+
+The layout itself is one table in `src/bindings.zig`: each `Action` has a keyboard label and a controller
+control. Strings do not spell out controls. They refer to actions (`{@examine}`, `{@arm_left}`), and
+`bindings.resolve` substitutes the label for the device in use, with Xbox names (`A`, `LT`, `View`,
+`Menu`), PlayStation names (`✕`, `L2`, `Create`, `Options`) or key names. A controller of unknown family
+gets Xbox names, since that is the layout such controllers copy. Where a sentence cannot be the same for
+both kinds of device ("hold the key" against "hold the trigger"), the `Text` carries a second wording
+for controllers. Tests in `src/l10n.zig` check that every reference names an action a controller has a
+button for, that no text shown to a controller player names a key, and that every label has its glyphs
+in the atlas.
+
+A Windows backend has to produce the same `pad.State` from XInput and report whether the window has
+focus; everything above the seam is shared. `gather` and `platform.Key` remain specific to macOS and are
+the keyboard half of the same port.
 
 ## Simulation
 
@@ -111,21 +180,39 @@ stage.
 
 ## Verification
 
-The simulation being headless makes four layers possible.
+The simulation being headless makes five layers possible.
 
 - `zig build test` runs unit tests for the anatomy models, the rules, the guide, the audio panning, the text
-  formatter and the translations, plus a scripted pilot (`src/bot.zig`) that plays each chapter and must
-  finish it with the chapter's mechanics actually used (simultaneous dual-arm time, Sync Strikes,
-  contractions survived, tether pulls) above a floor.
+  formatter, the translations and the controller layer, plus a scripted pilot (`src/bot.zig`) that plays
+  each chapter and must finish it with the chapter's mechanics actually used (simultaneous dual-arm time,
+  Sync Strikes, contractions survived, tether pulls) above a floor. The pilot plays each chapter twice:
+  once handing its controls to the simulation, and once through `input.Puppet`, which holds a controller
+  the way those controls require, and `input.Mapper`, which reads it back. The second run shows that a
+  chapter can be finished with only what a controller can express: a turn rate with a ceiling, climb and
+  descent as buttons, tools reached by stepping.
 - `dentro --shots <dir>` renders offscreen through the real GPU pipeline and writes one image per screen:
   the title, the route map with each chapter selected, the briefing pages, every stage of both chapters,
   the upgrade, failure and debrief cards, the pause screen, the language switch, and the longest line,
-  hint and atlas entry in the subtitle box. With `--lang uk` it does so in Ukrainian, which is how text
-  fit is checked.
+  hint and atlas entry in the subtitle box. With `--lang uk` it does so in Ukrainian, and with
+  `--prompts kbm|xbox|ps` with the prompts written for that device, which is how text fit is checked for
+  each of the six combinations.
 - `dentro --inputtest` opens the window and posts synthetic `NSEvent` key events to the app's own queue, so
   the real input path is exercised without touching other applications. It includes the language key and
   reads the menu bar back to see that it followed.
+- `dentro --padtest` opens the window and plays from the title screen with a controller alone: the route
+  map, the briefing, flight in chapter 1 (both sticks, both triggers and a Sync Strike, tool stepping,
+  climb, descent, boost, identify, hint, skip), the pause menu and its language entry, a disconnection with
+  a trigger held, and the tether in chapter 2. It also checks which device the prompts follow, including
+  that posted mouse-moved events do not take them from the controller. The controller is synthetic but
+  not a stub. The GameController framework can create a controller object that belongs to no device and
+  whose elements a program may set; the test writes its script onto such an object and `Platform.pump`
+  reads it with the same code that reads a real device, so everything from the element values upward is
+  the shipping path. What this cannot cover is the part below the element values: discovery through
+  `GCController.current`, the profile class a real controller reports, and the system-gesture override
+  on Create. Those have been run only with no controller attached.
 - `dentro --demo` has the scripted pilot fly a chapter in the window with audio and reports frame rate.
+  With `--pad` the pilot holds the same framework-made controller instead of handing its controls to the
+  game.
 
 `--chapter N` selects the chapter for `--demo` and `--shots`, and opens it directly in normal play.
 `--lang` applies to every mode. Cocoa's own `-AppleLanguages "(uk)"` argument is passed through, which
@@ -138,7 +225,9 @@ Scripted and bot-driven modes never read or write the save file.
 `zig build` produces `zig-out/bin/dentro` and assembles `zig-out/Dentro del cuerpo.app` (binary, Info.plist,
 icon, shader source), then seals the bundle with an ad-hoc signature. The fonts are inside the binary, so
 the bundle carries no font files, only their licence texts under `Resources/licenses/`. `Info.plist` declares both localisations (`CFBundleLocalizations`), the
-key macOS reads to offer an application its own language setting. The icon is rendered by the game
+key macOS reads to offer an application its own language setting, and that it supports extended gamepads
+(`GCSupportedGameControllers`, `GCSupportsControllerUserInteraction`), which is how macOS knows the game
+can be driven from a controller. The icon is rendered by the game
 itself (`dentro --icon`) and checked in as `res/AppIcon.icns`. The save file is
 `~/Library/Application Support/Dentro del cuerpo/save.txt`.
 
@@ -157,5 +246,6 @@ cleanup that must precede exit (stopping the audio thread, re-associating the mo
 | `src/i18n.zig`, `src/strings.zig`, `src/l10n.zig` | languages, templates and plurals; the string catalogue; the tests that walk all text |
 | `src/bot.zig` | scripted pilot used by the tests and `--demo` |
 | `src/draw.zig`, `src/render.zig`, `src/gpu.zig`, `src/shaders/` | scene, arms and HUD; batching; Metal |
-| `src/platform.zig`, `src/audio.zig`, `src/objc.zig` | window, input and system language; synthesiser; runtime bridge |
+| `src/pad.zig`, `src/bindings.zig`, `src/input.zig` | controller state and its shaping; the layout and the names of controls per device; controller input as actions, and the device the prompts follow |
+| `src/platform.zig`, `src/audio.zig`, `src/objc.zig` | window, keyboard, mouse, game controller and system language; synthesiser; runtime bridge |
 | `src/font.zig`, `src/utf8.zig`, `src/stb_truetype.c`, `vendor/stb/`, `res/fonts/` | glyph atlas and UTF-8 decoding; the rasteriser and the fonts it reads |
