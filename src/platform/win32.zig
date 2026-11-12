@@ -19,6 +19,9 @@ pub const LPARAM = isize;
 pub const LRESULT = isize;
 pub const HRESULT = i32;
 pub const LPCWSTR = [*:0]const u16;
+/// A resource's name, or its number in the place of one (MAKEINTRESOURCE), which need not be an even
+/// address.
+pub const RESOURCE = [*:0]align(1) const u16;
 /// The Windows calling convention. On another host these declarations are only compiled for their layout
 /// checks and never called, and the host's C convention stands in for one it cannot spell.
 pub const WINAPI: std.builtin.CallingConvention = if (builtin.os.tag == .windows) .winapi else .c;
@@ -70,14 +73,14 @@ pub const Com = extern struct {
     /// Release an interface pointer of any type and clear it. Null is fine.
     pub fn release(ptr: anytype) void {
         if (ptr.*) |p| {
-            const unknown: *Com = @ptrCast(p);
+            const unknown: *Com = @ptrCast(@alignCast(p));
             _ = unknown.vtbl.Release(unknown);
             ptr.* = null;
         }
     }
 
     pub fn query(obj: anytype, iid: *const GUID, comptime T: type) ?*T {
-        const unknown: *Com = @ptrCast(obj);
+        const unknown: *Com = @ptrCast(@alignCast(obj));
         var out: ?*anyopaque = null;
         if (failed(unknown.vtbl.QueryInterface(unknown, iid, &out))) return null;
         return @ptrCast(@alignCast(out));
@@ -231,7 +234,10 @@ pub const WM_LBUTTONUP = 0x0202;
 pub const WM_RBUTTONDOWN = 0x0204;
 pub const WM_RBUTTONUP = 0x0205;
 pub const WM_CAPTURECHANGED = 0x0215;
+pub const WM_EXITMENULOOP = 0x0212;
 pub const WM_EXITSIZEMOVE = 0x0232;
+pub const WM_QUIT = 0x0012;
+pub const WM_ENDSESSION = 0x0016;
 pub const WM_DPICHANGED = 0x02E0;
 
 pub const SIZE_MINIMIZED = 1;
@@ -239,6 +245,7 @@ pub const HTCLIENT = 1;
 pub const SC_CLOSE = 0xF060;
 pub const SC_KEYMENU = 0xF100;
 pub const VK_RETURN = 0x0D;
+pub const VK_F4 = 0x73;
 pub const VK_F10 = 0x79;
 pub const VK_F11 = 0x7A;
 pub const MAPVK_VSC_TO_VK_EX = 3;
@@ -257,7 +264,7 @@ pub const SW_SHOWNORMAL = 1;
 pub const SW_SHOW = 5;
 pub const MONITOR_DEFAULTTONEAREST = 2;
 pub const PM_REMOVE = 1;
-pub const IDC_ARROW: LPCWSTR = @ptrFromInt(32512);
+pub const IDC_ARROW: RESOURCE = @ptrFromInt(32512);
 pub const IMAGE_ICON = 1;
 pub const LR_DEFAULTSIZE = 0x0040;
 pub const LR_SHARED = 0x8000;
@@ -297,6 +304,8 @@ pub const STD_ERROR_HANDLE: u32 = @bitCast(@as(i32, -12));
 pub const INFINITE: u32 = 0xFFFFFFFF;
 pub const WAIT_OBJECT_0 = 0;
 pub const MUI_LANGUAGE_NAME = 0x8;
+pub const FILE_TYPE_UNKNOWN = 0;
+pub const WAIT_TIMEOUT = 258;
 pub const COINIT_MULTITHREADED = 0x0;
 pub const COINIT_APARTMENTTHREADED = 0x2;
 pub const CLSCTX_ALL = 0x17;
@@ -352,8 +361,8 @@ pub extern "user32" fn SetWindowPlacement(hwnd: HWND, wp: *const WINDOWPLACEMENT
 pub extern "user32" fn MonitorFromWindow(hwnd: HWND, flags: u32) callconv(WINAPI) HMONITOR;
 pub extern "user32" fn GetMonitorInfoW(monitor: HMONITOR, info: *MONITORINFO) callconv(WINAPI) BOOL;
 pub extern "user32" fn IsIconic(hwnd: HWND) callconv(WINAPI) BOOL;
-pub extern "user32" fn LoadCursorW(instance: HINSTANCE, name: LPCWSTR) callconv(WINAPI) HCURSOR;
-pub extern "user32" fn LoadImageW(instance: HINSTANCE, name: LPCWSTR, kind: u32, cx: i32, cy: i32, flags: u32) callconv(WINAPI) HANDLE;
+pub extern "user32" fn LoadCursorW(instance: HINSTANCE, name: RESOURCE) callconv(WINAPI) HCURSOR;
+pub extern "user32" fn LoadImageW(instance: HINSTANCE, name: RESOURCE, kind: u32, cx: i32, cy: i32, flags: u32) callconv(WINAPI) HANDLE;
 pub extern "user32" fn SetCursor(cursor: HCURSOR) callconv(WINAPI) HCURSOR;
 pub extern "user32" fn ClipCursor(rect: ?*const RECT) callconv(WINAPI) BOOL;
 pub extern "user32" fn ClientToScreen(hwnd: HWND, pt: *POINT) callconv(WINAPI) BOOL;
@@ -381,6 +390,23 @@ pub extern "ole32" fn CoTaskMemFree(p: ?*anyopaque) callconv(WINAPI) void;
 pub extern "shell32" fn SHGetKnownFolderPath(id: *const GUID, flags: u32, token: HANDLE, path: *?[*:0]u16) callconv(WINAPI) HRESULT;
 pub const FOLDERID_RoamingAppData = GUID.parse("3EB685DB-65F9-4CF6-A03A-E3EF65729F3D");
 
+/// A list of strings as Windows returns one ("uk-UA\0en-US\0\0": each ends in a NUL and the list in an
+/// empty string), as comma-separated UTF-8 in `buf`. Entries that do not fit are left off the end.
+pub fn multiSzToList(buf: []u8, multi_sz: []const u16) []const u8 {
+    var n: usize = 0;
+    var rest = multi_sz;
+    while (rest.len > 0) {
+        const len = std.mem.indexOfScalar(u16, rest, 0) orelse rest.len;
+        if (len == 0) break;
+        const lead: usize = if (n > 0) 1 else 0;
+        const item = fromWide(buf[@min(buf.len, n + lead)..], rest[0..len]) orelse break;
+        if (lead == 1) buf[n] = ',';
+        n += lead + item.len;
+        rest = rest[@min(rest.len, len + 1)..];
+    }
+    return buf[0..n];
+}
+
 /// UTF-8 to a NUL-terminated UTF-16 string in `buf`. Null if it does not fit or is not valid UTF-8.
 pub fn toWide(buf: []u16, utf8: []const u8) ?[:0]u16 {
     if (buf.len == 0) return null;
@@ -407,6 +433,20 @@ pub fn fromWide(buf: []u8, wide: []const u16) ?[]u8 {
         n += len;
     }
     return buf[0..n];
+}
+
+test "a Windows string list becomes a comma-separated one" {
+    const L = std.unicode.utf8ToUtf16LeStringLiteral;
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("uk-UA,en-US", multiSzToList(&buf, L("uk-UA\x00en-US\x00\x00")));
+    try std.testing.expectEqualStrings("en-GB", multiSzToList(&buf, L("en-GB\x00\x00")));
+    try std.testing.expectEqualStrings("", multiSzToList(&buf, L("\x00")));
+    try std.testing.expectEqualStrings("", multiSzToList(&buf, &.{}));
+    // A list that was cut off before its terminators still yields what is there.
+    try std.testing.expectEqualStrings("uk-UA,en", multiSzToList(&buf, L("uk-UA\x00en")));
+    // No room for the second entry: it is dropped whole, with its comma.
+    var small: [8]u8 = undefined;
+    try std.testing.expectEqualStrings("uk-UA", multiSzToList(&small, L("uk-UA\x00en-US\x00\x00")));
 }
 
 test "GUIDs parse from their registry spelling" {
