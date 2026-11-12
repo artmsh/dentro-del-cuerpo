@@ -135,8 +135,17 @@ float2 hash2(float2 p) {
 }
 
 // x = distance to nearest cell centre, y = distance to the cell border, z = cell id hash.
+// fmod(x, m) of two whole numbers, as a whole number. The compiler turns fmod into a division, the
+// fraction of the quotient and a multiplication, which answers 5.9999995 where the remainder is 6, and
+// the hash of that is some other cell's. Metal's fmod of whole numbers is exact, and so is integer
+// division on any Direct3D device.
+float wholeMod(float x, float m) {
+    float r = (float)((uint)abs(x) % (uint)m);
+    return x < 0.0 ? -r : r;
+}
+
 float2 cellHash(float2 c, float period) {
-    if (period > 0.5) c.x = fmod(c.x + period * 8.0, period);
+    if (period > 0.5) c.x = wholeMod(c.x + period * 8.0, period);
     return hash2(c);
 }
 

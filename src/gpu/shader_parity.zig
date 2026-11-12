@@ -24,6 +24,8 @@ const line_exceptions = [_][2][]const u8{
     // The two hashes take the sine of a large argument. Metal's sin is accurate there and Direct3D's need
     // not be, so the HLSL file calls its own (see `sinExact` there).
     .{ "return fract(sin(p) * 43758.5453);", "return frac(sinExact(p) * 43758.5453);" },
+    // The column of a cell on a pattern that closes around a tube: a remainder that has to come out whole.
+    .{ "if (period > 0.5) c.x = fmod(c.x + period * 8.0, period);", "if (period > 0.5) c.x = wholeMod(c.x + period * 8.0, period);" },
     // The argument of the cell hash, with the rounding Metal's compiler gives it (see `dotFused` there).
     .{
         "p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));",
@@ -36,7 +38,7 @@ const line_exceptions = [_][2][]const u8{
 };
 
 /// Functions only the HLSL file has, standing in for something Metal provides.
-const hlsl_only = [_][]const u8{ "sinExact", "twoSum", "dotFused" };
+const hlsl_only = [_][]const u8{ "sinExact", "twoSum", "dotFused", "wholeMod" };
 
 const Function = struct {
     name: []const u8,
@@ -319,4 +321,22 @@ test "the HLSL file's dot product is a fused multiply-add, bit for bit" {
     }
     // The plain product-and-sum is a different number often enough to matter, which is why this exists.
     try std.testing.expect(unfused_differs > 10_000);
+}
+
+test "a remainder taken as fraction-of-quotient times divisor is not always whole" {
+    // What the HLSL compiler makes of fmod, and why the cell hash does not use it: for these whole numbers
+    // the true remainder is whole and the computed one is not, in a fair share of cases.
+    var off: usize = 0;
+    var total: usize = 0;
+    var m: f32 = 6;
+    while (m <= 60) : (m += 1) {
+        var x: f32 = 0;
+        while (x < m * 9) : (x += 1) {
+            const q = x / m;
+            const computed = (q - @floor(q)) * m;
+            if (computed != @mod(x, m)) off += 1;
+            total += 1;
+        }
+    }
+    try std.testing.expect(off * 20 > total);
 }
