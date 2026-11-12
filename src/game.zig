@@ -8,6 +8,13 @@ const vein_mod = @import("vein.zig");
 const guide = @import("guide.zig");
 const gut_mod = @import("gut.zig");
 const ch2 = @import("ch2.zig");
+const i18n = @import("i18n.zig");
+const strings = @import("strings.zig");
+const Text = i18n.Text;
+const Lang = i18n.Lang;
+const L = strings.line;
+const H = strings.hint;
+const O = strings.objective;
 const Vec3 = m.Vec3;
 const v3 = m.v3;
 const Vein = vein_mod.Vein;
@@ -27,11 +34,11 @@ pub const Tool = enum(u8) {
     drill,
     shoot,
 
-    pub fn name(t: Tool) []const u8 {
+    pub fn name(t: Tool) Text {
         return switch (t) {
-            .punch => "PUNCH",
-            .drill => "DRILL",
-            .shoot => "SHOOT",
+            .punch => strings.tool.punch,
+            .drill => strings.tool.drill,
+            .shoot => strings.tool.shoot,
         };
     }
     pub fn next(t: Tool) Tool {
@@ -428,10 +435,10 @@ pub const Sim = struct {
         }
     }
 
-    pub fn say(s: *Sim, text: []const u8) void {
+    pub fn say(s: *Sim, text: Text) void {
         s.voice.say(text, .normal);
     }
-    pub fn urgent(s: *Sim, text: []const u8) void {
+    pub fn urgent(s: *Sim, text: Text) void {
         s.voice.say(text, .urgent);
     }
 
@@ -477,7 +484,7 @@ pub const Sim = struct {
         }
         if (!s.said.wall_hit) {
             s.said.wall_hit = true;
-            s.urgent("That's healthy tissue. Every hit starts a clot.");
+            s.urgent(L.thats_healthy_tissue);
         }
     }
 
@@ -487,7 +494,7 @@ pub const Sim = struct {
         s.sound(.tissue, 0, 0.8);
         if (!s.said.friendly) {
             s.said.friendly = true;
-            s.urgent("That cell was on our side. Check before you fire.");
+            s.urgent(L.that_cell_was_on_our_side);
         }
     }
 
@@ -537,42 +544,42 @@ pub const Sim = struct {
         switch (st) {
             .g_arrive, .g_villus, .g_descend, .g_wave, .g_scan, .g_extrude, .g_factory, .g_tether, .g_flume, .g_exit => unreachable,
             .needle => {
-                s.say("Comms check. Elena Marín — I'm on your shoulder for the whole run.");
-                s.say("You're inside the cannula, in a vein of the right thigh. Mouse or arrow keys to look, W to thrust.");
+                s.say(L.comms_check);
+                s.say(L.youre_inside_the_cannula);
                 s.waypoint = vn.needle.at(-300);
             },
             .flow_wall => {
-                s.say("First lesson, because everything after depends on it: blood in a vessel does not move as one block. Fly out to the wall and stop there.");
+                s.say(L.first_lesson);
                 const c = Vein.center(s.pos.z + 900);
                 s.waypoint = c.add(v3(-(vn.wallR(c.z, m.pi) - 60), 0, 0));
             },
             .flow_core => {
-                s.say("Feel it? Against the wall the blood is almost still. That's where you rest, and where you work.");
-                s.say("Now the middle of the stream.");
+                s.say(L.feel_it_against_the_wall);
+                s.say(L.now_the_middle_of_the_stream);
                 s.waypoint = null;
             },
             .to_valve1 => {
-                s.say("And here it carries you. Core to travel, wall to hold — flow speed is on your top right.");
-                s.say("Ride it downstream. Watch for the wall changing shape.");
+                s.say(L.and_here_it_carries_you);
+                s.say(L.ride_it_downstream);
                 s.waypoint = Vein.center(vn.valves[0].zb - 500);
             },
             .valve1_identify => {
-                s.say("There: the wall bulges. Put your reticle on the pale flap inside the bulge and press T. Ask me about anything that way.");
+                s.say(L.there_the_wall_bulges);
                 s.waypoint = Vein.center(vn.valves[0].zb + 700);
             },
             .valve1_pass => {
-                s.say("Watch one cycle. When the calf relaxes, blood falls back, the cusps meet and nothing passes. Go through while they lie open.");
+                s.say(L.watch_one_cycle);
                 s.waypoint = Vein.center(vn.valves[0].top() + 300);
             },
             .neutrophil => {
                 s.want_checkpoint = true;
-                s.say("Clean. I've saved your position.");
-                s.say("Pale cells are rolling along the wall down here. Get your reticle on one and identify it.");
+                s.say(L.clean_position_saved);
+                s.say(L.pale_cells_are_rolling);
                 s.waypoint = null;
             },
             .staph => {
-                s.say("More of them on the wall means infection close by. And here is the reason.");
-                s.say("Bacteria ahead. Left arm is Q, right arm is E. Your left arm carries lytic rounds: hold Q.");
+                s.say(L.more_of_them_on_the_wall);
+                s.say(L.bacteria_ahead);
                 const f = Vein.tangent(s.pos.z);
                 for (0..4) |i| {
                     const off = v3(s.rng.range(-70, 70), s.rng.range(-70, 70), 260 + @as(f32, @floatFromInt(i)) * 70);
@@ -581,60 +588,60 @@ pub const Sim = struct {
                 s.waypoint = null;
             },
             .tools => {
-                s.say("Each arm carries three tools. Z cycles the left arm, X the right. Rounds for organisms, the drill for anything fibrous, the punch for anything brittle — and the arms work at the same time.");
-                s.say("Fit the drill to one arm and keep rounds on the other. You will need both at once.");
+                s.say(L.each_arm_carries_three_tools);
+                s.say(L.fit_the_drill_to_one_arm);
                 s.waypoint = null;
             },
             .transit1 => s.beginTransit(station_b_z),
             .v2_approach => {
                 s.station = 1;
-                s.say("Next valve. Look at the upper cusp: it isn't moving. Something behind it is holding it shut.");
-                s.say("Go past its free edge, then back down into the pocket behind it.");
+                s.say(L.next_valve);
+                s.say(L.go_past_its_free_edge);
                 const v = &vn.valves[1];
                 s.waypoint = Vein.center(v.top() + 150).add(v3(0, 900, 0));
             },
             .treat => {
                 s.want_checkpoint = true;
-                s.say("There it is. A septic thrombus, and it's alive: three biofilm colonies, four fibrin cables holding it in place.");
-                s.say("Colonies first — they re-knit whatever you cut.");
+                s.say(L.there_it_is_a_septic_thrombus);
+                s.say(L.colonies_first);
                 s.waypoint = if (s.find(.thrombus)) |e| e.pos else null;
             },
             .lyse_core => {
-                s.urgent("It's loose and drifting. Rounds on both arms!");
-                s.say("Dissolve it before it leaves the pocket.");
+                s.urgent(L.its_loose_and_drifting);
+                s.say(L.dissolve_it_before_it_leaves);
             },
             .freed => {
                 vn.valves[1].pinned[0] = false;
                 s.freed_t = 0;
                 s.stabilise(15);
                 s.sound(.objective, 0, 1);
-                s.say("The cusp is moving. That valve works again, and the pressure in her leg is already falling.");
+                s.say(L.the_cusp_is_moving);
                 s.waypoint = null;
             },
             .to_ring2 => {
                 s.want_checkpoint = true;
-                s.say("Sync Servo is live. Trigger both arms within a tenth of a second and they land as one blow, three times as hard.");
-                s.say("Put both arms on Punch and try it on the way to the marker.");
+                s.say(L.sync_servo_is_live);
+                s.say(L.put_both_arms_on_punch);
                 s.waypoint = if (s.findRing(1)) |e| e.pos else null;
             },
             .transit2 => s.beginTransit(station_c_z),
             .septum_find => {
                 s.station = 2;
-                s.say("Last stretch: the junction with the femoral vein is half a centimetre ahead.");
-                s.say("Feel that? No flow at all. Something has this vein corked. Find it and identify it.");
+                s.say(L.last_stretch);
+                s.say(L.no_flow_at_all);
                 s.waypoint = null;
             },
             .septum_break => {
-                s.say("A stone, in the only channel through an old scar. Rounds won't touch calcium.");
-                s.say("Both arms to Punch, and land them together.");
+                s.say(L.a_stone_in_the_only_channel);
+                s.say(L.both_arms_to_punch);
                 s.waypoint = if (s.find(.phlebolith)) |e| e.pos.add(v3(0, 0, -230)) else null;
             },
             .exit => {
                 vn.septum.corked = false;
                 s.stabilise(10);
                 s.sound(.shatter, 0, 1);
-                s.urgent("It's through — hold on!");
-                s.say("Fine grit. The lung capillaries will catch it and macrophages will clear it. Ride the flow out.");
+                s.urgent(L.its_through_hold_on);
+                s.say(L.fine_grit);
                 s.waypoint = Vein.center(vein_mod.z_exit);
             },
             .done => {
@@ -661,95 +668,31 @@ pub const Sim = struct {
         s.latched = false;
         s.sound(.transit, 0, 1);
         s.voice.clear();
-        s.say("Tempo link down. Twelve centimetres in three seconds — don't blink.");
+        s.say(L.tempo_link_down);
     }
 
-    pub fn hintText(s: *const Sim) []const u8 {
+    pub fn hintText(s: *const Sim) Text {
         if (s.chapter == 1) return ch2.hintText(s);
-        const lv = s.hint_level;
+        const lv: usize = @min(s.hint_level, 2);
         return switch (s.stage) {
-            .needle => switch (lv) {
-                0 => "The light at the end of the tube is the bevel. Head for it.",
-                1 => "Hold W. Steer with the mouse or the arrow keys.",
-                else => "Hold W and Shift together and keep the bright opening in the middle of your view until the walls fall away.",
-            },
-            .flow_wall => switch (lv) {
-                0 => "Any wall will do. Pick a direction across the stream and keep going.",
-                1 => "Turn until the diamond marker is ahead, then hold W with Shift. It is over a millimetre away.",
-                else => "Face the marker, hold Shift+W for about five seconds, and stop when the cobbled wall fills your view.",
-            },
-            .flow_core => switch (lv) {
-                0 => "The core is the axis of the vein, as far from every wall as you can get.",
-                1 => "Turn your back to the wall and thrust until the flow readout climbs.",
-                else => "Fly away from the wall until FLOW on the top right reads above 150.",
-            },
-            .to_valve1 => switch (lv) {
-                0 => "Downstream is the way the cells are moving.",
-                1 => "Stay in the core and let it carry you; add W to go faster.",
-                else => "Follow the diamond marker. The valve is where the wall swells outward.",
-            },
-            .valve1_identify => switch (lv) {
-                0 => "Two pale sheets hang inside the bulge. Those are what I mean.",
-                1 => "Centre the reticle on one of the pale sheets — the label under the reticle changes — and press T.",
-                else => "Fly toward the marker, aim at a sheet until the reticle reads UNIDENTIFIED, press T.",
-            },
-            .valve1_pass => switch (lv) {
-                0 => "The gap between the two cusps opens and closes with the pump. The gauge on the right shows the cycle.",
-                1 => "Wait upstream of the cusps until they swing back against the wall, then go through the middle.",
-                else => "Hover near the axis. When VALVE on the right reads OPEN, hold Shift+W straight down the centre.",
-            },
-            .neutrophil => switch (lv) {
-                0 => "They are on the wall, not in the stream. Go and look at the wall.",
-                1 => "Fly to the wall a little further downstream. The pale, slightly spiky spheres are the ones.",
-                else => "Hug the wall past the valve, put the reticle on a pale sphere larger than a red cell, press T.",
-            },
-            .staph => switch (lv) {
-                0 => "Gold clusters, small. They come to you.",
-                1 => "Point the reticle at a cluster and hold Q. When one glows it is about to lunge: shoot it or sidestep.",
-                else => "Hold Q and sweep the reticle over each gold cluster. Strafe with A or D whenever one flares.",
-            },
-            .tools => switch (lv) {
-                0 => "The panels at the bottom corners show what each arm is carrying.",
-                1 => "Press Z or X until one panel reads DRILL and the other SHOOT.",
-                else => "Press X once: the right arm goes from PUNCH to DRILL. Leave the left on SHOOT. Then fly to the ring.",
-            },
-            .v2_approach => switch (lv) {
-                0 => "The pocket is the space between that cusp and the wall. Its opening faces downstream.",
-                1 => "Fly downstream past the cusp's free edge, then turn back upstream above it.",
-                else => "Follow the marker over the edge of the upper cusp, turn around, and fly back along the wall side of the cusp until you see the clot.",
-            },
-            .treat => if (s.count(.nest) > 0) switch (lv) {
-                0 => "The gold domes on the clot are the colonies. Rounds alone bounce off the slime.",
-                1 => "One arm on Drill, one on Shoot. Touch a dome and hold the drill in it; fire the other arm at the same time.",
-                else => "Fly to a gold dome until it fills the view. Hold the Drill arm's key until the dome turns clear, and hold the Shoot arm's key with it. Eight rounds kill it.",
-            } else switch (lv) {
-                0 => "The pale cables run from the clot to the wall and to the cusp. They are what holds it.",
-                1 => "Fly up to a cable and hold the drill on it for three seconds. Keep the other arm on Shoot for whatever comes at you.",
-                else => "Follow the marker to a cable, press the drill against it and hold. When fragments break off, shoot each one three times before it reaches the stream.",
-            },
-            .lyse_core => switch (lv) {
-                0 => "Nothing shields it now. Rounds work.",
-                1 => "Put both arms on Shoot and hold both keys on the clot.",
-                else => "Z and X until both panels read SHOOT. Aim at the clot, hold Q and E until it is gone.",
-            },
-            .freed => "Take a breath. She's better than she was.",
-            .to_ring2 => switch (lv) {
-                0 => "The marker is downstream of the valve, below the axis.",
-                1 => "Leave the pocket over the cusp's free edge and follow the diamond.",
-                else => "Fly downstream out of the pocket, then follow the diamond marker to the ring and through it.",
-            },
-            .septum_find => switch (lv) {
-                0 => "The vein is walled off ahead. Look for the one place the wall is not scar.",
-                1 => "Follow the web down and to the right until you find a pale stone set into it.",
-                else => "Fly downstream to the scar wall, find the chalk-white boulder in it, aim at it and press T.",
-            },
-            .septum_break => switch (lv) {
-                0 => "Brittle things break on impact. One arm is not enough impact.",
-                1 => "Both arms on Punch. Get within arm's reach of the stone and press Q and E at the same instant.",
-                else => "Z and X until both panels read PUNCH. Fly until the stone fills the view, then tap Q and E together. SYNC flashes when you get it. Five of those.",
-            },
-            .exit => "Let the channel take you, then keep going downstream.",
-            else => "Fly through the ring.",
+            .needle => H.needle[lv],
+            .flow_wall => H.flow_wall[lv],
+            .flow_core => H.flow_core[lv],
+            .to_valve1 => H.to_valve1[lv],
+            .valve1_identify => H.valve1_identify[lv],
+            .valve1_pass => H.valve1_pass[lv],
+            .neutrophil => H.neutrophil[lv],
+            .staph => H.staph[lv],
+            .tools => H.tools[lv],
+            .v2_approach => H.v2_approach[lv],
+            .treat => if (s.count(.nest) > 0) H.treat_colonies[lv] else H.treat_cables[lv],
+            .lyse_core => H.lyse_core[lv],
+            .freed => H.freed,
+            .to_ring2 => H.to_ring2[lv],
+            .septum_find => H.septum_find[lv],
+            .septum_break => H.septum_break[lv],
+            .exit => H.exit,
+            else => H.ring,
         };
     }
 
@@ -919,7 +862,7 @@ pub const Sim = struct {
             s.pos.z -= 140 * dt;
             if (!s.said.reflux) {
                 s.said.reflux = true;
-                s.urgent("Reflux — the cusps are closing. Back off!");
+                s.urgent(L.reflux_back_off);
             }
         }
         if (res.wall or res.leaflet) {
@@ -1038,7 +981,7 @@ pub const Sim = struct {
                 s.sound(.scan, 0, 1);
                 return;
             }
-            s.voice.say("Nothing under your reticle. Point at something and ask again.", .chatter);
+            s.voice.say(L.nothing_under_your_reticle, .chatter);
             return;
         };
         const i = @intFromEnum(tp);
@@ -1060,19 +1003,19 @@ pub const Sim = struct {
             .leaflet => if (s.stage == .valve1_identify or s.stage == .to_valve1) s.setStage(.valve1_pass),
             .sinus => if (s.stage == .valve1_identify and !s.said.sinus) {
                 s.said.sinus = true;
-                s.say("That's the bulge itself. The flap inside it is what I'm after.");
+                s.say(L.thats_the_bulge_itself);
             },
             .neutrophil => if (s.stage == .neutrophil) s.setStage(.staph),
             .phlebolith => if (s.stage == .septum_find) s.setStage(.septum_break),
             .reticulocyte, .band_cell, .nucleated_red_cell => {
                 s.odd_found += 1;
                 if (s.odd_found == 1) {
-                    s.say("Keep an eye out for more that look wrong. I want to know how many.");
+                    s.say(L.keep_an_eye_out_for_more);
                 } else if (s.odd_found == 3) {
                     s.hidden_unlocked = true;
                     s.sound(.objective, 0, 1);
-                    s.say("Three immature cells in one vein. Her marrow is emptying its reserves — that's the sepsis.");
-                    s.say("The femur's nutrient vein drains into the vessel you're about to join. I've logged the route. If she gets through today, I'd like to see where they are made.");
+                    s.say(L.three_immature_cells);
+                    s.say(L.the_femurs_nutrient_vein);
                 }
             },
             else => if (s.chapter == 1) ch2.onIdentify(s, tp),
@@ -1164,7 +1107,7 @@ pub const Sim = struct {
                         s.sound(.overheat, pan, 1);
                         if (!s.said.overheat) {
                             s.said.overheat = true;
-                            s.say("Drill's overheated. Let it cool — or share the work between both arms.");
+                            s.say(L.drills_overheated);
                         }
                     }
                 }
@@ -1275,7 +1218,7 @@ pub const Sim = struct {
                     s.burst(hit_at, if (sync) 40 else 8, if (sync) 220 else 90, .{ 1, 0.9, 0.7, 1 }, 3, 0.6);
                     if (!sync and !s.said.single_punch and s.stage == .septum_break) {
                         s.said.single_punch = true;
-                        s.say("One arm only chips it. Both together.");
+                        s.say(L.one_arm_only_chips_it);
                     }
                     if (e.hp <= 0) s.shatterStone(@intCast(idx));
                 },
@@ -1284,7 +1227,7 @@ pub const Sim = struct {
                         s.shedEmbolus(hit_at, d.norm().neg());
                         if (!s.said.punch_clot) {
                             s.said.punch_clot = true;
-                            s.urgent("Don't hit the clot — it sheds!");
+                            s.urgent(L.dont_hit_the_clot_it_sheds);
                         }
                     }
                 },
@@ -1367,7 +1310,7 @@ pub const Sim = struct {
                     if (spark) s.burst(tg.point, 2, 50, .{ 1, 0.85, 0.3, 1 }, 2.5, 0.4);
                     if (e.aux > 0.6 and !s.said.nest_open) {
                         s.said.nest_open = true;
-                        s.urgent("It's open — fire into it!");
+                        s.urgent(L.its_open_fire_into_it);
                     }
                     return true;
                 },
@@ -1381,7 +1324,7 @@ pub const Sim = struct {
                     }
                     if (!s.said.drill_clot) {
                         s.said.drill_clot = true;
-                        s.urgent("Not the clot body — it fragments!");
+                        s.urgent(L.not_the_clot_body_it_fragments);
                     }
                     return true;
                 },
@@ -1421,7 +1364,7 @@ pub const Sim = struct {
             if (spark) s.burst(tg.point, 2, 140, .{ 1, 1, 0.9, 1 }, 1.8, 0.25);
             if (!s.said.needle_drill) {
                 s.said.needle_drill = true;
-                s.voice.say("That's my needle you're drilling.", .chatter);
+                s.voice.say(L.thats_my_needle_youre_drilling, .chatter);
             }
             return true;
         }
@@ -1450,7 +1393,7 @@ pub const Sim = struct {
     fn noteEmbolus(s: *Sim) void {
         if (!s.said.embolus) {
             s.said.embolus = true;
-            s.urgent("Fragments loose — dissolve them!");
+            s.urgent(L.fragments_loose_dissolve_them);
         }
     }
 
@@ -1502,10 +1445,10 @@ pub const Sim = struct {
         s.progress();
         const left = s.count(.nest);
         if (left == 0) {
-            s.say("Colonies are gone. Now the cables: drill each one through. I'll call the fragments.");
+            s.say(L.colonies_are_gone);
         } else if (!s.said.nest_dead) {
             s.said.nest_dead = true;
-            s.say("One down. Same again.");
+            s.say(L.one_down_same_again);
         }
     }
 
@@ -1540,7 +1483,7 @@ pub const Sim = struct {
                     s.sound(.absorb, 0, 0.7);
                     if (!s.said.absorb) {
                         s.said.absorb = true;
-                        s.say("The slime is soaking up your rounds. Open it with the drill and fire through the hole — both arms at once.");
+                        s.say(L.the_slime_is_soaking_up_rounds);
                     }
                 }
                 return true;
@@ -1569,7 +1512,7 @@ pub const Sim = struct {
                     s.sound(.punch_hit, 0, 0.4);
                     if (!s.said.core_half and e.hp < e.max_hp * 0.5) {
                         s.said.core_half = true;
-                        s.voice.say("It's dissolving. Keep both arms on it.", .chatter);
+                        s.voice.say(L.its_dissolving, .chatter);
                     }
                     if (e.hp <= 0) {
                         s.burst(e.pos, 90, 200, .{ 0.5, 1, 0.9, 1 }, 6, 1.4);
@@ -1692,7 +1635,7 @@ pub const Sim = struct {
                         e.hp = @min(e.max_hp, e.hp + 0.3 * dt);
                         if (!s.said.regrow and e.hp < e.max_hp - 0.8) {
                             s.said.regrow = true;
-                            s.say("See it knitting back? That's coagulase. Kill the colonies first.");
+                            s.say(L.see_it_knitting_back);
                         }
                     }
                 },
@@ -1709,7 +1652,7 @@ pub const Sim = struct {
                         s.sound(.escape, 0, 1);
                         if (!s.said.escaped) {
                             s.said.escaped = true;
-                            s.say("One got past you. That's in her lungs now; we will pay for it later.");
+                            s.say(L.one_got_past_you);
                         }
                     }
                 },
@@ -1755,7 +1698,7 @@ pub const Sim = struct {
                             s.stats.emboli_escaped += 5;
                             s.stabilise(-25);
                             s.sound(.escape, 0, 1);
-                            s.urgent("It's in the stream. That's a massive embolus.");
+                            s.urgent(L.its_in_the_stream);
                             s.setStage(.freed);
                         }
                     }
@@ -1790,7 +1733,7 @@ pub const Sim = struct {
                     _ = s.spawn(.{ .kind = .cocci, .pos = stone.pos.add(d.scale(stone.radius + 6)), .vel = d.scale(45), .radius = 2.6, .seed = s.rng.f(), .variant = @intCast(s.rng.below(3)), .timer = 0.8 });
                     if (!s.said.stone_colony) {
                         s.said.stone_colony = true;
-                        s.urgent("The stone's colonised — company!");
+                        s.urgent(L.the_stones_colonised_company);
                     }
                 }
             }
@@ -1820,7 +1763,7 @@ pub const Sim = struct {
                     s.sound(.windup, m.clamp(e.pos.sub(s.pos).dot(s.right()) / 40, -1, 1), 0.8);
                     if (!s.said.windup) {
                         s.said.windup = true;
-                        s.urgent("It's glowing — shoot it or move!");
+                        s.urgent(L.its_glowing_shoot_it_or_move);
                     }
                 }
             },
@@ -1877,13 +1820,13 @@ pub const Sim = struct {
 
         if (s.stall_t > 50 and !s.said.stall and s.stage != .freed) {
             s.said.stall = true;
-            s.voice.say("If you want a pointer, press H.", .chatter);
+            s.voice.say(L.if_you_want_a_pointer, .chatter);
         }
 
         switch (s.stage) {
             .needle => {
                 if (!s.in_bore) {
-                    s.say("You're out. This is the great saphenous vein: 3.6 millimetres across, and to you a cathedral.");
+                    s.say(L.youre_out);
                     s.setStage(.flow_wall);
                 }
             },
@@ -1926,7 +1869,7 @@ pub const Sim = struct {
                 const ok = (a == .drill and b == .shoot) or (a == .shoot and b == .drill);
                 if (ok and s.waypoint == null) {
                     s.progress();
-                    s.say("Good. The marker is ahead of you — fly through it.");
+                    s.say(L.good_the_marker_is_ahead);
                     s.waypoint = if (s.findRing(0)) |e| e.pos else null;
                 }
                 if (s.atRing(0) and ok) s.setStage(.transit1);
@@ -1958,7 +1901,7 @@ pub const Sim = struct {
                 if (s.atRing(1)) s.setStage(.transit2);
                 if (!s.said.sync_try and s.stats.sync_strikes > 0) {
                     s.said.sync_try = true;
-                    s.say("That's it. You'll feel the difference on anything hard.");
+                    s.say(L.thats_it_youll_feel_the_difference);
                 }
             },
             .septum_find => {
@@ -1970,7 +1913,7 @@ pub const Sim = struct {
             .septum_break => {},
             .exit => {
                 if (s.pos.z > vein_mod.z_exit) {
-                    s.say("Femoral vein. The leg is done.");
+                    s.say(L.femoral_vein_the_leg_is_done);
                     s.setStage(.done);
                 }
             },
@@ -1998,30 +1941,31 @@ pub const Sim = struct {
         return @abs(s.pos.z - e.pos.z) < 60 and s.pos.dist(e.pos) < e.radius * 0.95;
     }
 
-    /// One-line objective for the HUD.
-    pub fn objective(s: *const Sim, buf: []u8) []const u8 {
-        return switch (s.stage) {
-            .g_arrive, .g_villus, .g_descend, .g_wave, .g_scan, .g_extrude, .g_factory, .g_tether, .g_flume, .g_exit => ch2.objective(s, buf),
-            .needle => "Leave the cannula",
-            .flow_wall => "Reach the vessel wall",
-            .flow_core => "Return to the core of the stream",
-            .to_valve1 => "Follow the flow to the first valve",
-            .valve1_identify => "Identify the valve cusp — aim at it and press T",
-            .valve1_pass => "Pass the valve while it is open",
-            .neutrophil => "Identify a cell rolling on the wall — T",
-            .staph => std.fmt.bufPrint(buf, "Destroy the bacteria — {d} left", .{s.count(.cocci)}) catch "",
-            .tools => if (s.waypoint == null) "Fit DRILL on one arm and SHOOT on the other — Z / X" else "Fly through the transit marker",
-            .transit1, .transit2 => "Transit",
-            .v2_approach => "Enter the pocket behind the pinned cusp",
-            .treat => std.fmt.bufPrint(buf, "Colonies {d}/3 destroyed  ·  Cables {d}/4 cut  ·  Fragments loose {d}", .{ 3 - @as(i32, @intCast(s.count(.nest))), 4 - @as(i32, @intCast(s.count(.anchor))), s.count(.embolus) }) catch "",
-            .lyse_core => "Dissolve the thrombus before it leaves the pocket",
-            .freed => "Valve restored",
-            .to_ring2 => "Fly through the transit marker — try a Sync Strike on the way",
-            .septum_find => "Find what is blocking the vein and identify it — T",
-            .septum_break => std.fmt.bufPrint(buf, "Shatter the phlebolith with Sync punches — {d}%", .{@as(i32, @intFromFloat(100 * (1 - (if (s.findConst(.phlebolith)) |e| e.hp / e.max_hp else 0))))}) catch "",
-            .exit => "Ride the flow into the femoral vein",
-            .done => "Chapter complete",
+    /// One-line objective for the HUD, in `lang`. `buf` holds the result where it has numbers in it.
+    pub fn objective(s: *const Sim, lang: Lang, buf: []u8) []const u8 {
+        const text: Text = switch (s.stage) {
+            .g_arrive, .g_villus, .g_descend, .g_wave, .g_scan, .g_extrude, .g_factory, .g_tether, .g_flume, .g_exit => return ch2.objective(s, lang, buf),
+            .needle => O.needle,
+            .flow_wall => O.flow_wall,
+            .flow_core => O.flow_core,
+            .to_valve1 => O.to_valve1,
+            .valve1_identify => O.valve1_identify,
+            .valve1_pass => O.valve1_pass,
+            .neutrophil => O.neutrophil,
+            .staph => return i18n.format(buf, lang, O.staph, .{i18n.int(s.count(.cocci))}),
+            .tools => if (s.waypoint == null) O.tools else O.transit_marker,
+            .transit1, .transit2 => O.transit,
+            .v2_approach => O.v2_approach,
+            .treat => return i18n.format(buf, lang, O.treat, .{ i18n.int(3 - @as(i32, @intCast(s.count(.nest)))), i18n.int(4 - @as(i32, @intCast(s.count(.anchor)))), i18n.int(s.count(.embolus)) }),
+            .lyse_core => O.lyse_core,
+            .freed => O.freed,
+            .to_ring2 => O.to_ring2,
+            .septum_find => O.septum_find,
+            .septum_break => return i18n.format(buf, lang, O.septum_break, .{i18n.int(@as(i32, @intFromFloat(100 * (1 - (if (s.findConst(.phlebolith)) |e| e.hp / e.max_hp else 0)))))}),
+            .exit => O.exit,
+            .done => O.done,
         };
+        return text.get(lang);
     }
 
     pub fn grade(s: *const Sim) u8 {

@@ -3,6 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key><string>en</string>
+	<key>CFBundleLocalizations</key><array><string>en</string><string>uk</string></array>
 	<key>CFBundleExecutable</key><string>dentro</string>
 	<key>CFBundleIdentifier</key><string>game.dentro-del-cuerpo</string>
 	<key>CFBundleName</key><string>Dentro del cuerpo</string>

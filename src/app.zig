@@ -9,6 +9,12 @@ const vein_mod = @import("vein.zig");
 const util = @import("util.zig");
 const campaign = @import("campaign.zig");
 const bot_mod = @import("bot.zig");
+const i18n = @import("i18n.zig");
+const strings = @import("strings.zig");
+const Lang = i18n.Lang;
+
+/// The game's name. It is Spanish in every language.
+pub const title = "Dentro del cuerpo";
 const Vec3 = m.Vec3;
 const v3 = m.v3;
 const Vein = vein_mod.Vein;
@@ -24,6 +30,8 @@ pub const UiInput = struct {
     retry: bool = false,
     restart: bool = false,
     quit_to_title: bool = false,
+    /// Switch to the next language (title and pause screens).
+    language: bool = false,
 };
 
 pub const Save = struct {
@@ -36,6 +44,42 @@ pub const Save = struct {
     time: f32 = 0,
     ch2_done: bool = false,
     grade2: u8 = '-',
+    /// The language the player picked in the game; null until they pick one, so the system's preference
+    /// keeps applying.
+    lang: ?Lang = null,
+
+    /// The file is one line of space-separated values in field order. Fields were appended over time, so a
+    /// file may stop after any field from `time` on; what is missing keeps its default.
+    pub fn parse(data: []const u8) ?Save {
+        var it = std.mem.tokenizeAny(u8, data, " \r\n");
+        var toks: [10][]const u8 = undefined;
+        var n: usize = 0;
+        while (it.next()) |tok| {
+            if (n >= toks.len) break;
+            toks[n] = tok;
+            n += 1;
+        }
+        if (n < 7) return null;
+        var vals: [9]f32 = @splat(0);
+        for (toks[0..@min(n, 9)], 0..) |tok, i| vals[i] = std.fmt.parseFloat(f32, tok) catch 0;
+        return .{
+            .ch1_done = vals[0] > 0.5,
+            .grade = @intFromFloat(m.clamp(vals[1], 32, 126)),
+            .emboli = @intFromFloat(@max(0, vals[2])),
+            .stability = vals[3],
+            .marrow = vals[4] > 0.5,
+            .atlas = @intFromFloat(@max(0, vals[5])),
+            .time = vals[6],
+            .ch2_done = vals[7] > 0.5,
+            .grade2 = if (n >= 9) @intFromFloat(m.clamp(vals[8], 32, 126)) else '-',
+            .lang = if (n >= 10) Lang.fromTag(toks[9]) else null,
+        };
+    }
+
+    pub fn format(sv: Save, buf: []u8) []const u8 {
+        const lang_tag = if (sv.lang) |l| l.tag() else "";
+        return std.fmt.bufPrint(buf, "{d} {d} {d} {d:.1} {d} {d} {d:.1} {d} {d}{s}{s}\n", .{ @intFromBool(sv.ch1_done), sv.grade, sv.emboli, sv.stability, @intFromBool(sv.marrow), sv.atlas, sv.time, @intFromBool(sv.ch2_done), sv.grade2, if (lang_tag.len > 0) " " else "", lang_tag }) catch "";
+    }
 };
 
 pub const CellKind = enum(u8) { red, platelet, white };
@@ -66,6 +110,8 @@ pub const App = struct {
     time: f32 = 0,
     screen_t: f32 = 0,
     save: Save = .{},
+    /// Language everything is drawn in. Changing it takes effect on the next frame.
+    lang: Lang = .en,
     map_sel: usize = 0,
     briefing_page: usize = 0,
     sway: [2]f32 = .{ 0, 0 },
@@ -86,8 +132,9 @@ pub const App = struct {
     save_path_len: usize = 0,
 
     /// `persist` is false for bot-driven and scripted runs, which must never touch the player's save.
-    pub fn init(app: *App, persist: bool) void {
-        app.* = .{};
+    /// `default_lang` applies unless the save holds a language the player chose.
+    pub fn init(app: *App, persist: bool, default_lang: Lang) void {
+        app.* = .{ .lang = default_lang };
         app.sim = game.Sim.init();
         app.parkForTitle();
         app.checkpoint = app.sim;
@@ -95,7 +142,15 @@ pub const App = struct {
         if (persist) {
             app.locateSave();
             app.loadSave();
+            if (app.save.lang) |l| app.lang = l;
         }
+    }
+
+    /// The player's switch: the next language, from the next frame, remembered across launches.
+    pub fn cycleLanguage(app: *App) void {
+        app.lang = app.lang.next();
+        app.save.lang = app.lang;
+        app.writeSave();
     }
 
     /// Title backdrop: hang in the stream upstream of the first valve.
@@ -121,33 +176,14 @@ pub const App = struct {
         var buf: [512]u8 = undefined;
         const path: [*:0]const u8 = @ptrCast(&app.save_path);
         const data = util.readFile(path, &buf) orelse return;
-        var it = std.mem.tokenizeAny(u8, data, " \n");
-        var vals: [9]f32 = @splat(0);
-        var n: usize = 0;
-        while (it.next()) |tok| {
-            if (n >= vals.len) break;
-            vals[n] = std.fmt.parseFloat(f32, tok) catch 0;
-            n += 1;
-        }
-        if (n < 7) return;
-        app.save = .{
-            .ch1_done = vals[0] > 0.5,
-            .grade = @intFromFloat(m.clamp(vals[1], 32, 126)),
-            .emboli = @intFromFloat(@max(0, vals[2])),
-            .stability = vals[3],
-            .marrow = vals[4] > 0.5,
-            .atlas = @intFromFloat(@max(0, vals[5])),
-            .time = vals[6],
-            .ch2_done = vals[7] > 0.5,
-            .grade2 = if (n >= 9) @intFromFloat(m.clamp(vals[8], 32, 126)) else '-',
-        };
+        if (Save.parse(data)) |sv| app.save = sv;
     }
 
     fn writeSave(app: *App) void {
         if (app.save_path_len == 0) return;
         var buf: [256]u8 = undefined;
-        const sv = app.save;
-        const text = std.fmt.bufPrint(&buf, "{d} {d} {d} {d:.1} {d} {d} {d:.1} {d} {d}\n", .{ @intFromBool(sv.ch1_done), sv.grade, sv.emboli, sv.stability, @intFromBool(sv.marrow), sv.atlas, sv.time, @intFromBool(sv.ch2_done), sv.grade2 }) catch return;
+        const text = app.save.format(&buf);
+        if (text.len == 0) return;
         const path: [*:0]const u8 = @ptrCast(&app.save_path);
         _ = util.writeFile(path, text);
     }
@@ -321,6 +357,7 @@ pub const App = struct {
                 app.sim.yaw = -0.16 + 0.05 * @sin(app.time * 0.21);
                 app.sim.pitch = -0.1 + 0.03 * @sin(app.time * 0.17);
                 app.updateCells(dt);
+                if (ui.language) app.cycleLanguage();
                 if (ui.confirm) {
                     app.chapter = 0;
                     app.screen = .briefing;
@@ -338,7 +375,7 @@ pub const App = struct {
                 if (ui.confirm) {
                     app.briefing_page += 1;
                     app.screen_t = 0;
-                    if (app.briefing_page >= briefing_pages.len) app.startChapter(0);
+                    if (app.briefing_page >= strings.briefing.pages.len) app.startChapter(0);
                 } else if (ui.back) {
                     app.screen = .title;
                 }
@@ -362,6 +399,7 @@ pub const App = struct {
                 }
             },
             .pause => {
+                if (ui.language) app.cycleLanguage();
                 if (ui.back or ui.confirm) {
                     app.screen = .play;
                     app.want_capture = true;
@@ -431,23 +469,17 @@ pub const App = struct {
         app.sim.stats.retries = stats.retries + 1;
         app.sim.stats.time = stats.time;
         app.sim.voice.clear();
-        app.sim.voice.say("Link re-established. You're back at the last checkpoint.", .normal);
+        app.sim.voice.say(strings.line.link_re_established, .normal);
         app.seedCells();
         app.screen_t = 0;
         if (app.bot != null) app.bot = .{};
     }
 };
 
-pub const briefing_pages = [_][]const u8{
-    "Patient: 58, colloid cyst of the third ventricle. It plugs the foramina of Monro without warning; the next time may be the last. She is septic from an infected clot in her right leg, and she will not survive open surgery.\n\nSo we go in through the leg.",
-    "You fly a drone the size of a red blood cell: eight micrometres. Two arms, each fitted with a punch, a drill or a lytic emitter, each on its own trigger.\n\nYour display removes ninety-nine red cells in a hundred, or blood would be a wall. Your link runs at one-hundredth speed, so a second of your time is ten milliseconds of hers.",
-    "Every stop between here and the brain removes something that would kill her before the operation, and teaches the drone something it needs at the end. First stop is the clot.\n\nI'm Elena Marín. I'll be on comms the whole way. Point at anything and press T — I'll tell you what it is.",
-};
-
 test "cells stay inside the lumen" {
     const app = try std.testing.allocator.create(App);
     defer std.testing.allocator.destroy(app);
-    app.init(false);
+    app.init(false, .en);
     for (0..120) |_| app.step(.{}, .{}, 1.0 / 60.0);
     var visible: usize = 0;
     for (&app.far) |*c| {
@@ -465,7 +497,7 @@ test "both failure states have a way back" {
     const dt: f32 = 1.0 / 60.0;
     const first = [_]game.Stage{ .needle, .g_arrive };
     for (first, 0..) |first_stage, ch| {
-        app.init(false);
+        app.init(false, .en);
         app.chapter = @intCast(ch);
         app.startChapter(0);
         for (0..30) |_| app.step(.{}, .{}, dt);
@@ -490,4 +522,109 @@ test "both failure states have a way back" {
         try std.testing.expect(app.sim.stability > 50);
         try std.testing.expectEqual(@as(u32, 2), app.sim.stats.retries);
     }
+}
+
+test "the save file round-trips, and files from before a field existed still load" {
+    var buf: [128]u8 = undefined;
+    const sv: Save = .{ .ch1_done = true, .grade = 'B', .emboli = 2, .stability = 81.5, .marrow = true, .atlas = 9, .time = 312.4, .ch2_done = true, .grade2 = 'A', .lang = .uk };
+    const text = sv.format(&buf);
+    try std.testing.expectEqualStrings("1 66 2 81.5 1 9 312.4 1 65 uk\n", text);
+    try std.testing.expectEqualDeep(sv, Save.parse(text).?);
+
+    // No language chosen: the token is left out, which is also what every earlier build wrote.
+    var plain = sv;
+    plain.lang = null;
+    try std.testing.expectEqualStrings("1 66 2 81.5 1 9 312.4 1 65\n", plain.format(&buf));
+    try std.testing.expectEqualDeep(plain, Save.parse("1 66 2 81.5 1 9 312.4 1 65\n").?);
+
+    // The first format had seven fields; chapter 2's two were appended later.
+    const old = Save.parse("1 66 2 81.5 1 9 312.4\n").?;
+    try std.testing.expect(old.ch1_done and !old.ch2_done and old.grade == 'B' and old.grade2 == '-' and old.lang == null);
+    try std.testing.expectEqual(@as(?Save, null), Save.parse("1 66 2\n"));
+    try std.testing.expectEqual(@as(?Lang, null), Save.parse("1 66 2 81.5 1 9 312.4 1 65 xx\n").?.lang);
+}
+
+test "the language switch works on the title and pause screens and never writes a save in scripted runs" {
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+    app.init(false, .en);
+    app.step(.{}, .{ .language = true }, dt);
+    try std.testing.expectEqual(Lang.uk, app.lang);
+    try std.testing.expectEqual(@as(?Lang, .uk), app.save.lang);
+    try std.testing.expectEqual(@as(usize, 0), app.save_path_len);
+
+    // In play the key belongs to the simulation (it skips a comms line); the language stays.
+    app.startChapter(0);
+    app.step(.{}, .{ .language = true }, dt);
+    try std.testing.expectEqual(Lang.uk, app.lang);
+    app.step(.{}, .{ .back = true }, dt);
+    try std.testing.expectEqual(Screen.pause, app.screen);
+    app.step(.{}, .{ .language = true }, dt);
+    try std.testing.expectEqual(Lang.en, app.lang);
+    try std.testing.expectEqual(Screen.pause, app.screen);
+}
+
+extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+extern "c" fn mkdtemp(template: [*:0]u8) ?[*:0]u8;
+extern "c" fn unlink(path: [*:0]const u8) c_int;
+extern "c" fn rmdir(path: [*:0]const u8) c_int;
+
+test "the chosen language survives a relaunch, in a real save file under a scratch home" {
+    var home_buf = "/tmp/dentro-test-XXXXXX".*;
+    const home = std.mem.span(mkdtemp(&home_buf) orelse return error.SkipZigTest);
+    var paths: [3][256]u8 = undefined;
+    const lib = try std.fmt.bufPrintSentinel(&paths[0], "{s}/Library", .{home}, 0);
+    const support = try std.fmt.bufPrintSentinel(&paths[1], "{s}/Library/Application Support", .{home}, 0);
+    util.makeDir(lib.ptr);
+    util.makeDir(support.ptr);
+    var old_home: [512:0]u8 = undefined;
+    const had_home = util.env("HOME");
+    if (had_home) |h| {
+        @memcpy(old_home[0..h.len], h);
+        old_home[h.len] = 0;
+    }
+    _ = setenv("HOME", home.ptr, 1);
+    defer if (had_home != null) {
+        _ = setenv("HOME", &old_home, 1);
+    };
+
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+    var file: [256]u8 = undefined;
+
+    // First launch on a Ukrainian system: no save, so the system's language applies and nothing is written.
+    app.init(true, .uk);
+    const save_path: [*:0]const u8 = @ptrCast(&app.save_path);
+    var path_copy: [512:0]u8 = undefined;
+    @memcpy(path_copy[0 .. app.save_path_len + 1], app.save_path[0 .. app.save_path_len + 1]);
+    defer {
+        _ = unlink(&path_copy);
+        path_copy[std.mem.lastIndexOfScalar(u8, path_copy[0..app.save_path_len], '/').?] = 0;
+        _ = rmdir(&path_copy);
+        _ = rmdir(support.ptr);
+        _ = rmdir(lib.ptr);
+        _ = rmdir(home.ptr);
+    }
+    try std.testing.expectEqual(Lang.uk, app.lang);
+    try std.testing.expectEqual(@as(?[]u8, null), util.readFile(save_path, &file));
+
+    // The player switches to English on the title screen; the file now says so.
+    app.step(.{}, .{ .language = true }, dt);
+    try std.testing.expectEqual(Lang.en, app.lang);
+    try std.testing.expectEqualStrings("0 45 0 0.0 0 0 0.0 0 45 en\n", util.readFile(save_path, &file).?);
+
+    // Relaunch: the player's choice wins over the system's language.
+    app.init(true, .uk);
+    try std.testing.expectEqual(Lang.en, app.lang);
+
+    // A save written by a build that had no language: progress loads, the system's language applies, and
+    // saving progress again does not invent a choice.
+    try std.testing.expect(util.writeFile(save_path, "1 66 2 81.5 1 9 312.4 1 65\n"));
+    app.init(true, .uk);
+    try std.testing.expectEqual(Lang.uk, app.lang);
+    try std.testing.expect(app.save.ch1_done and app.save.ch2_done and app.save.lang == null);
+    app.writeSave();
+    try std.testing.expectEqualStrings("1 66 2 81.5 1 9 312.4 1 65\n", util.readFile(save_path, &file).?);
 }

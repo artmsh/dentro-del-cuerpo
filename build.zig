@@ -24,7 +24,19 @@ pub fn build(b: *std.Build) void {
         mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
     }
     mod.linkSystemLibrary("objc", .{});
-    for ([_][]const u8{ "AppKit", "Foundation", "QuartzCore", "Metal", "CoreGraphics", "CoreText", "CoreFoundation", "AudioToolbox", "ImageIO" }) |fw| mod.linkFramework(fw, .{});
+    for ([_][]const u8{ "AppKit", "Foundation", "QuartzCore", "Metal", "CoreGraphics", "CoreFoundation", "AudioToolbox", "ImageIO" }) |fw| mod.linkFramework(fw, .{});
+
+    // Text: the vendored rasteriser as one C translation unit, and the fonts it reads, embedded by name
+    // because they live outside the module's source directory. UBSan is off for the C file: it is third-party
+    // code whose arithmetic is not ours to audit, and a Debug build would otherwise trap inside it.
+    mod.link_libc = true;
+    mod.addIncludePath(b.path("vendor/stb"));
+    mod.addCSourceFile(.{ .file = b.path("src/stb_truetype.c"), .flags = &.{"-fno-sanitize=undefined"} });
+    inline for (.{
+        .{ "font-regular", "res/fonts/NotoSans-ExtraCondensedMedium.ttf" },
+        .{ "font-bold", "res/fonts/NotoSans-ExtraCondensedSemiBold.ttf" },
+        .{ "font-symbols", "res/fonts/DejaVuSans.ttf" },
+    }) |f| mod.addAnonymousImport(f[0], .{ .root_source_file = b.path(f[1]) });
 
     const exe = b.addExecutable(.{ .name = "dentro", .root_module = mod });
     b.installArtifact(exe);
@@ -39,6 +51,12 @@ pub fn build(b: *std.Build) void {
     sign.step.dependOn(&b.addInstallFile(b.path("res/Info.plist"), app_dir ++ "Info.plist").step);
     sign.step.dependOn(&b.addInstallFile(b.path("src/shaders/shaders.metal"), app_dir ++ "Resources/shaders/shaders.metal").step);
     sign.step.dependOn(&b.addInstallFile(b.path("res/AppIcon.icns"), app_dir ++ "Resources/AppIcon.icns").step);
+    // The fonts are inside the binary; their licences ask to travel with every copy, so they go in the bundle.
+    inline for (.{
+        .{ "res/fonts/OFL-NotoSans.txt", "NotoSans-OFL.txt" },
+        .{ "res/fonts/LICENSE-DejaVu.txt", "DejaVuSans-LICENSE.txt" },
+        .{ "vendor/stb/LICENSE", "stb_truetype-LICENSE.txt" },
+    }) |f| sign.step.dependOn(&b.addInstallFile(b.path(f[0]), app_dir ++ "Resources/licenses/" ++ f[1]).step);
     app.dependOn(&sign.step);
     b.getInstallStep().dependOn(app);
 

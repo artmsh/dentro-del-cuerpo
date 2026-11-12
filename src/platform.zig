@@ -124,14 +124,42 @@ pub fn now() f64 {
     return CACurrentMediaTime();
 }
 
+/// The user's languages in order of preference, as comma-separated locale identifiers ("uk-UA,en-US").
+/// On macOS this is the system list, or the application's own list if one is set for it in System Settings.
+/// Every platform layer supplies this function; choosing among the game's languages is `i18n`'s job.
+pub fn preferredLanguages(buf: []u8) []const u8 {
+    const pool = objc.poolPush();
+    defer objc.poolPop(pool);
+    const list = objc.get(objc.class("NSLocale"), "preferredLanguages");
+    const count = objc.send(fn (id, SEL) callconv(.c) u64, list, "count", .{});
+    var n: usize = 0;
+    for (0..count) |i| {
+        const item = objc.send(fn (id, SEL, u64) callconv(.c) id, list, "objectAtIndex:", .{i});
+        const tag = std.mem.span(objc.cString(item));
+        if (n + tag.len + 1 > buf.len) break;
+        if (n > 0) {
+            buf[n] = ',';
+            n += 1;
+        }
+        @memcpy(buf[n..][0..tag.len], tag);
+        n += tag.len;
+    }
+    return buf[0..n];
+}
+
+/// Titles of the two items in the application menu.
+pub const MenuTitles = struct { fullscreen: [*:0]const u8, quit: [*:0]const u8 };
+
 pub const Platform = struct {
     app: id,
     window: id,
     view: id,
+    fullscreen_item: id,
+    quit_item: id,
     captured: bool = false,
     input: Input = .{},
 
-    pub fn init(title: [*:0]const u8, layer: id, w: f64, h: f64) Platform {
+    pub fn init(title: [*:0]const u8, menu: MenuTitles, layer: id, w: f64, h: f64) Platform {
         const app = objc.get(objc.class("NSApplication"), "sharedApplication");
         _ = objc.send(fn (id, SEL, i64) callconv(.c) bool, app, "setActivationPolicy:", .{0});
 
@@ -150,9 +178,9 @@ pub const Platform = struct {
         objc.setObj(menubar, "addItem:", app_item);
         objc.setObj(app, "setMainMenu:", menubar);
         const app_menu = objc.new("NSMenu");
-        const fs_item = objc.send(fn (id, SEL, id, SEL, id) callconv(.c) id, objc.alloc("NSMenuItem"), "initWithTitle:action:keyEquivalent:", .{ objc.nsString("Toggle Full Screen"), objc.sel("toggleFullScreen:"), objc.nsString("f") });
+        const fs_item = objc.send(fn (id, SEL, id, SEL, id) callconv(.c) id, objc.alloc("NSMenuItem"), "initWithTitle:action:keyEquivalent:", .{ objc.nsString(menu.fullscreen), objc.sel("toggleFullScreen:"), objc.nsString("f") });
         objc.setObj(app_menu, "addItem:", fs_item);
-        const quit_item = objc.send(fn (id, SEL, id, SEL, id) callconv(.c) id, objc.alloc("NSMenuItem"), "initWithTitle:action:keyEquivalent:", .{ objc.nsString("Quit Dentro del cuerpo"), objc.sel("terminate:"), objc.nsString("q") });
+        const quit_item = objc.send(fn (id, SEL, id, SEL, id) callconv(.c) id, objc.alloc("NSMenuItem"), "initWithTitle:action:keyEquivalent:", .{ objc.nsString(menu.quit), objc.sel("terminate:"), objc.nsString("q") });
         objc.setObj(app_menu, "addItem:", quit_item);
         objc.setObj(app_item, "setSubmenu:", app_menu);
 
@@ -172,7 +200,20 @@ pub const Platform = struct {
         objc.call(app, "finishLaunching");
         objc.setObj(window, "makeKeyAndOrderFront:", null);
         objc.setB(app, "activateIgnoringOtherApps:", true);
-        return .{ .app = app, .window = window, .view = view };
+        return .{ .app = app, .window = window, .view = view, .fullscreen_item = fs_item, .quit_item = quit_item };
+    }
+
+    /// Retitle the application menu, for when the language changes while the game is running.
+    pub fn setMenuTitles(p: *Platform, menu: MenuTitles) void {
+        objc.setObj(p.fullscreen_item, "setTitle:", objc.nsString(menu.fullscreen));
+        objc.setObj(p.quit_item, "setTitle:", objc.nsString(menu.quit));
+    }
+
+    /// The title an item of the application menu shows now, read back from the menu itself. Valid until the
+    /// enclosing autorelease pool drains.
+    pub fn menuTitle(p: *Platform, item: enum { fullscreen, quit }) []const u8 {
+        const title = objc.get(if (item == .quit) p.quit_item else p.fullscreen_item, "title");
+        return std.mem.span(objc.send(fn (id, SEL) callconv(.c) [*:0]const u8, title, "UTF8String", .{}));
     }
 
     /// Drawable size in pixels and the backing scale factor.

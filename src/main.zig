@@ -4,7 +4,11 @@
 //!   dentro --demo              windowed, flown by the scripted pilot (end-to-end run on the real display)
 //!   dentro --inputtest         windowed, posts key events into its own queue and checks they reach the arms
 //!   dentro --selftest          headless: scripted pilot plays chapter 1, prints the timeline
-//!   dentro --shots <dir>       headless GPU: renders the chapter offscreen and writes BMP frames
+//!   dentro --shots <dir>       headless GPU: renders every screen offscreen and writes BMP frames
+//!
+//! `--lang en|uk` picks the language for the run. Without it the game uses the language the player chose in
+//! the game, or else the first supported one in the system's preference list; the scripted modes, whose
+//! output is compared between runs, use English.
 
 const std = @import("std");
 const objc = @import("objc.zig");
@@ -22,6 +26,13 @@ const vein_mod = @import("vein.zig");
 const app_mod = @import("app.zig");
 const draw = @import("draw.zig");
 const audio_mod = @import("audio.zig");
+const i18n = @import("i18n.zig");
+const strings = @import("strings.zig");
+const guide = @import("guide.zig");
+const campaign = @import("campaign.zig");
+const l10n = @import("l10n.zig");
+const Lang = i18n.Lang;
+const Text = i18n.Text;
 
 const embedded_shaders = @embedFile("shaders/shaders.metal");
 extern "c" fn _NSGetExecutablePath(buf: [*]u8, size: *u32) c_int;
@@ -35,15 +46,22 @@ pub fn main(init: std.process.Init) !void {
     var shots_dir: []const u8 = ".";
     var start_chapter: ?u8 = null;
     var fullscreen = false;
+    var lang_arg: ?Lang = null;
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const a = args[i];
-        const known = [_][]const u8{ "--selftest", "--demo", "--inputtest", "--fullscreen", "--icon", "--shots", "--chapter" };
+        const known = [_][]const u8{ "--selftest", "--demo", "--inputtest", "--fullscreen", "--icon", "--shots", "--chapter", "--lang" };
         var ok = false;
         for (known) |k| ok = ok or std.mem.eql(u8, a, k);
+        // Cocoa reads "-AppleLanguages (uk)" and its kin from the command line as user defaults; they come
+        // with a value and are not this program's to judge.
+        if (std.mem.startsWith(u8, a, "-Apple")) {
+            i += 1;
+            continue;
+        }
         // Finder passes -psn_… on some launch paths; anything else unknown is a mistake worth stopping for.
         if (!ok and !std.mem.startsWith(u8, a, "-psn")) {
-            std.debug.print("unknown argument: {s}\nusage: dentro [--fullscreen] [--chapter 1|2] [--demo | --inputtest | --selftest | --shots <dir> | --icon <png>]\n", .{a});
+            std.debug.print("unknown argument: {s}\nusage: dentro [--fullscreen] [--lang en|uk] [--chapter 1|2] [--demo | --inputtest | --selftest | --shots <dir> | --icon <png>]\n", .{a});
             std.process.exit(2);
         }
         if (std.mem.eql(u8, a, "--selftest")) mode = .selftest;
@@ -60,6 +78,15 @@ pub fn main(init: std.process.Init) !void {
             i += 1;
             continue;
         }
+        if (std.mem.eql(u8, a, "--lang")) {
+            lang_arg = if (i + 1 < args.len) Lang.fromTag(args[i + 1]) else null;
+            if (lang_arg == null) {
+                std.debug.print("--lang takes en or uk\n", .{});
+                std.process.exit(2);
+            }
+            i += 1;
+            continue;
+        }
         if (std.mem.eql(u8, a, "--icon") and i + 1 < args.len) {
             mode = .icon;
             shots_dir = args[i + 1];
@@ -73,11 +100,37 @@ pub fn main(init: std.process.Init) !void {
     }
     switch (mode) {
         .selftest => return runSelftest(arena),
-        .shots => return runShots(arena, shots_dir, start_chapter),
+        .shots => return runShots(arena, shots_dir, start_chapter, lang_arg),
         .icon => return runIcon(arena, shots_dir),
-        else => return runWindow(arena, mode, fullscreen, start_chapter),
+        else => return runWindow(arena, mode, fullscreen, start_chapter, lang_arg),
     }
 }
+
+/// The language the system would like, for a first launch: the first supported one in its preference list.
+fn systemLanguage() Lang {
+    var buf: [512]u8 = undefined;
+    return Lang.fromPreferences(platform.preferredLanguages(&buf));
+}
+
+/// NUL-terminated copies of the menu titles in `lang`, for the platform layer.
+const MenuText = struct {
+    fullscreen: [96:0]u8 = undefined,
+    quit: [96:0]u8 = undefined,
+
+    fn set(mt: *MenuText, lang: Lang) platform.MenuTitles {
+        return .{
+            .fullscreen = terminate(&mt.fullscreen, strings.menu.fullscreen.get(lang)),
+            .quit = terminate(&mt.quit, strings.menu.quit.get(lang)),
+        };
+    }
+
+    fn terminate(out: *[96:0]u8, s: []const u8) [*:0]const u8 {
+        const n = @min(s.len, out.len);
+        @memcpy(out[0..n], s[0..n]);
+        out[n] = 0;
+        return out;
+    }
+};
 
 fn runSelftest(arena: std.mem.Allocator) !void {
     const sim = try arena.create(game.Sim);
@@ -130,10 +183,13 @@ const Engine = struct {
     vm: vein_mod.Meshes,
     app: *app_mod.App,
 
-    fn init(e: *Engine, arena: std.mem.Allocator, persist: bool) !void {
+    /// `lang` is the language asked for on the command line; `fallback` applies when neither it nor the
+    /// save file names one.
+    fn init(e: *Engine, arena: std.mem.Allocator, persist: bool, lang: ?Lang, fallback: Lang) !void {
         e.g = try gpu.Gpu.init(shaderSource(arena));
         e.app = try arena.create(app_mod.App);
-        e.app.init(persist);
+        e.app.init(persist, fallback);
+        if (lang) |l| e.app.lang = l;
         var b = mesh.Builder.init(arena);
         const meshes = render.Meshes.build(&b);
         e.vm = vein_mod.buildMeshes(&b, &e.app.sim.vein);
@@ -152,11 +208,21 @@ const Engine = struct {
 
 // ---------------------------------------------------------------------------- offscreen screenshots
 
-fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8) !void {
+/// The atlas entry whose long text is longest in `lang`.
+fn longestDeep(lang: Lang) Text {
+    var best = guide.entry(@enumFromInt(0)).deep;
+    for (1..guide.Topic.count) |k| {
+        const d = guide.entry(@enumFromInt(k)).deep;
+        if (d.get(lang).len > best.get(lang).len) best = d;
+    }
+    return best;
+}
+
+fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8, lang: ?Lang) !void {
     const pool = objc.poolPush();
     defer objc.poolPop(pool);
     const e = try arena.create(Engine);
-    try e.init(arena, false);
+    try e.init(arena, false, lang, .en);
     const w: u32 = 1600;
     const h: u32 = 1000;
     e.g.resize(w, h, true);
@@ -183,16 +249,31 @@ fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8) !void {
     };
     var sh: Shooter = .{ .e = e, .px = px, .dir = dir };
 
-    // Menus.
+    // Menus. The language key is pressed on the title screen to show the switch taking effect at once,
+    // then pressed until the run is back in its own language.
     for (0..150) |_| app.step(.{}, .{}, dt);
     sh.snap("title");
+    for (1..Lang.count) |_| {
+        app.step(.{}, .{ .language = true }, dt);
+        sh.snap("title-language-switched");
+    }
+    app.step(.{}, .{ .language = true }, dt);
+    // The route map with each chapter selected in turn, before anything is unlocked.
     app.step(.{}, .{ .map = true }, dt);
     for (0..30) |_| app.step(.{}, .{}, dt);
-    sh.snap("map");
+    for (0..campaign.chapters.len) |k| {
+        var nb: [24]u8 = undefined;
+        sh.snap(if (k == 0) "map" else std.fmt.bufPrint(&nb, "map-row{d:0>2}", .{k + 1}) catch "map");
+        app.step(.{}, .{ .down = true }, dt);
+    }
     app.step(.{}, .{ .back = true }, dt);
     app.step(.{}, .{ .confirm = true }, dt);
-    for (0..240) |_| app.step(.{}, .{}, dt);
-    sh.snap("briefing");
+    for (0..strings.briefing.pages.len) |k| {
+        for (0..600) |_| app.step(.{}, .{}, dt);
+        var nb: [24]u8 = undefined;
+        sh.snap(if (k == 0) "briefing" else std.fmt.bufPrint(&nb, "briefing-page{d}", .{k + 1}) catch "briefing");
+        if (k + 1 < strings.briefing.pages.len) app.step(.{}, .{ .confirm = true }, dt);
+    }
 
     // The chapters, flown by the scripted pilot.
     app.bot = .{};
@@ -263,9 +344,78 @@ fn runShots(arena: std.mem.Allocator, dir: []const u8, only: ?u8) !void {
         }
         all_done = all_done and app.sim.mode == .complete;
     }
-    // Pause screen.
+
+    // The route map as the debrief leaves it, with the flown chapters logged.
+    if (app.sim.mode == .complete) {
+        app.step(.{}, .{ .confirm = true }, dt);
+        for (0..30) |_| app.step(.{}, .{}, dt);
+        sh.snap("map-after-debrief");
+        while (app.map_sel > 0) {
+            app.step(.{}, .{ .up = true }, dt);
+            var nb: [32]u8 = undefined;
+            sh.snap(std.fmt.bufPrint(&nb, "map-logged-row{d:0>2}", .{app.map_sel + 1}) catch "map");
+        }
+    }
+
+    // Text the pilot's run does not reach. Each case is put on screen directly: the worst case for the
+    // subtitle box from each source of lines, the HUD warnings, the failure cards and the debrief notes.
+    app.bot = null;
+    for (0..2) |ch| {
+        app.chapter = @intCast(ch);
+        app.startChapter(0);
+        for (0..40) |_| app.step(.{}, .{}, dt);
+        const s = &app.sim;
+        const tag: []const u8 = if (ch == 0) "vein" else "gut";
+        var nb: [48]u8 = undefined;
+        if (ch == 0) {
+            const cases = [_]struct { []const u8, Text }{
+                .{ "subtitle-longest-line", l10n.longestIn(strings.line, app.lang) },
+                .{ "subtitle-longest-hint", l10n.longestIn(strings.hint, app.lang) },
+                .{ "subtitle-longest-atlas", longestDeep(app.lang) },
+            };
+            for (cases) |case| {
+                s.voice.clear();
+                s.voice.say(case[1], .normal);
+                s.voice.age = 60;
+                sh.snap(case[0]);
+            }
+            s.voice.clear();
+            s.arms[0].tool = .drill;
+            s.arms[0].overheated = true;
+            s.arms[1].tool = .shoot;
+            s.tissue_flash = 1;
+            s.checkpoint_toast = 2;
+            s.hidden_unlocked = true;
+            sh.snap("hud-warnings");
+            s.tissue_flash = 0;
+            s.checkpoint_toast = 0;
+            s.mode = .dead;
+            sh.snap("dead");
+        }
+        s.voice.clear();
+        s.mode = .lost;
+        sh.snap(std.fmt.bufPrint(&nb, "lost-{s}", .{tag}) catch "lost");
+        // The debrief with the notes a clean run does not earn.
+        s.mode = .complete;
+        s.stats.emboli_escaped = 3;
+        s.hidden_unlocked = true;
+        s.g.spread = 2;
+        sh.snap(std.fmt.bufPrint(&nb, "complete-notes-{s}", .{tag}) catch "complete");
+        if (ch == 1) {
+            s.g.commensals_lost = 5;
+            sh.snap("complete-notes-gut-flora");
+        }
+        s.mode = .playing;
+    }
+
+    // Pause screen, and the language key on it.
     app.screen = .pause;
     sh.snap("pause");
+    for (1..Lang.count) |_| {
+        app.step(.{}, .{ .language = true }, dt);
+        sh.snap("pause-language-switched");
+    }
+    app.step(.{}, .{ .language = true }, dt);
     std.debug.print("shots: {d} frames, chapters complete = {}\n", .{ sh.n, all_done });
 }
 
@@ -274,7 +424,7 @@ fn runIcon(arena: std.mem.Allocator, path: []const u8) !void {
     const pool = objc.poolPush();
     defer objc.poolPop(pool);
     const e = try arena.create(Engine);
-    try e.init(arena, false);
+    try e.init(arena, false, null, .en);
     const n: u32 = 2048; // supersampled; the iconset step scales it down
     e.g.resize(n, n, true);
     const px = try arena.alloc(u8, n * n * 4);
@@ -340,6 +490,7 @@ fn gather(in: *const platform.Input, captured: bool, dt: f32) struct { c: game.C
         .retry = in.hit(.r),
         .restart = in.hit(.n),
         .quit_to_title = in.hit(.l),
+        .language = in.hit(.tab),
     };
     return .{ .c = c, .ui = ui };
 }
@@ -350,15 +501,18 @@ fn stopAudioOnTerminate() void {
     if (live_audio) |a| a.stop();
 }
 
-fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapter: ?u8) !void {
+fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapter: ?u8, lang: ?Lang) !void {
     const outer = objc.poolPush();
     defer objc.poolPop(outer);
     const e = try arena.create(Engine);
-    try e.init(arena, mode == .play);
-    const layer = e.g.makeLayer();
-    var plat = platform.Platform.init("Dentro del cuerpo", layer, 1440, 900);
-    if (fullscreen) plat.toggleFullscreen();
+    // The input test asserts on its output, so it does not follow the machine it runs on.
+    try e.init(arena, mode == .play, lang, if (mode == .inputtest) .en else systemLanguage());
     const app = e.app;
+    const layer = e.g.makeLayer();
+    var menu_text: MenuText = .{};
+    var menu_lang = app.lang;
+    var plat = platform.Platform.init(app_mod.title, menu_text.set(menu_lang), layer, 1440, 900);
+    if (fullscreen) plat.toggleFullscreen();
 
     const audio = try arena.create(audio_mod.Audio);
     audio.* = .{};
@@ -380,6 +534,10 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
     }
     var it: InputTest = .{};
     if (mode == .inputtest) it.begin(app);
+    if (mode == .demo) {
+        var prefs: [512]u8 = undefined;
+        std.debug.print("[demo] language {s} (asked for: {s}; system preference: {s})\n", .{ app.lang.tag(), if (lang) |l| l.tag() else "-", platform.preferredLanguages(&prefs) });
+    }
 
     var last = platform.now();
     var frames: u64 = 0;
@@ -425,6 +583,10 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, fullscreen: bool, start_chapt
         }
         plat.input.endFrame();
         plat.capture(app.want_capture and mode == .play);
+        if (app.lang != menu_lang) {
+            menu_lang = app.lang;
+            plat.setMenuTitles(menu_text.set(menu_lang));
+        }
 
         // Continuous audio state.
         {
@@ -487,6 +649,7 @@ const InputTest = struct {
     stone_hp: f32 = 0,
     saw_both: bool = false,
     saw_drill_and_shoot: bool = false,
+    start_lang: Lang = .en,
 
     fn begin(it: *InputTest, app: *app_mod.App) void {
         _ = it;
@@ -587,10 +750,26 @@ const InputTest = struct {
             262 => plat.postKey(.escape, false),
             280 => {
                 it.check(app.screen == .pause, "Esc pauses");
+                it.start_lang = app.lang;
+                plat.postKey(.tab, true);
+            },
+            282 => plat.postKey(.tab, false),
+            286 => {
+                it.check(app.lang == it.start_lang.next() and app.lang != it.start_lang, "Tab in the pause menu switches to the next language");
+                it.check(std.mem.eql(u8, plat.menuTitle(.quit), strings.menu.quit.get(app.lang)), "the menu bar follows the language");
+                it.check(app.save.lang == app.lang and app.save_path_len == 0, "the choice is recorded for saving, and a scripted run has no save file to write");
+                plat.postKey(.tab, true);
+            },
+            288 => plat.postKey(.tab, false),
+            292 => {
+                var want = it.start_lang;
+                for (0..2) |_| want = want.next();
+                it.check(app.lang == want, "Tab again moves on to the language after that");
+                while (app.lang != it.start_lang) app.cycleLanguage();
                 plat.postKey(.r, true);
             },
-            282 => plat.postKey(.r, false),
-            300 => {
+            294 => plat.postKey(.r, false),
+            312 => {
                 it.check(app.screen == .play and s.stats.retries == 1, "R in the pause menu relaunches from the checkpoint");
                 // Chapter 2: the tether key, from where the drone arrives among the villi.
                 app.chapter = 1;
@@ -599,17 +778,17 @@ const InputTest = struct {
                 s.stage = .g_tether;
                 s.voice.clear();
             },
-            329 => it.check(aim(s, true), "a villus is within tether range of the arrival point"),
-            330 => plat.postKey(.g, true),
-            332 => plat.postKey(.g, false),
-            340 => it.check(s.tether != null and s.g.tether_uses == 1, "G fires the tether at the tissue under the reticle"),
-            470 => {
+            341 => it.check(aim(s, true), "a villus is within tether range of the arrival point"),
+            342 => plat.postKey(.g, true),
+            344 => plat.postKey(.g, false),
+            352 => it.check(s.tether != null and s.g.tether_uses == 1, "G fires the tether at the tissue under the reticle"),
+            482 => {
                 it.check(s.tether != null and s.pos.dist(s.tether_hold) < 30, "the line reels the drone in and holds it with no thrust");
                 it.check(aim(s, false), "open lumen is in view from the hold point");
                 plat.postKey(.g, true);
             },
-            472 => plat.postKey(.g, false),
-            485 => {
+            484 => plat.postKey(.g, false),
+            497 => {
                 it.check(s.tether == null, "G on nothing releases the tether");
                 it.finished = true;
             },
@@ -629,4 +808,7 @@ test {
     _ = @import("gut.zig");
     _ = @import("app.zig");
     _ = @import("bot.zig");
+    _ = @import("utf8.zig");
+    _ = @import("i18n.zig");
+    _ = @import("l10n.zig");
 }

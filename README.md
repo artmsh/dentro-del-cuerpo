@@ -22,8 +22,9 @@
 > [DESIGN.md](docs/DESIGN.md) are playable.
 
 *Inside the Body.* A doctor pilots the drone in through a vein in the patient's right leg and organ by organ
-to the brain, treating what it finds on the way. Written in Zig over AppKit and Metal, with no other
-dependencies.
+to the brain, treating what it finds on the way. It is playable in English and Ukrainian. Written in Zig over
+AppKit and Metal; the only third-party code is the vendored `stb_truetype.h`, which rasterises the bundled
+fonts.
 
 ## Rationale
 
@@ -49,12 +50,19 @@ pace are fiction, and the in-game atlas labels which is which.
   contractions to wait out, a scan that separates rotavirus-infected cells from commensal bacteria, and the
   Mucus Tether upgrade.
 - Audio synthesised at runtime, with no sample files; each arm's sounds are panned to its side.
+- English and Ukrainian throughout: HUD, menus, route map, briefing, debrief, Dr. Marín's lines, hints and
+  the atlas. The language follows the system's preference list on first launch and can be switched with
+  `Tab` on the title and pause screens; the choice is saved. A string without a Ukrainian translation fails
+  the build or the tests, so the game never falls back to English mid-screen.
 
 <p align="center">
   <img src="docs/images/jejunum-viroplasm.jpg" width="360" alt="Screenshot of chapter 2: a pink viroplasm dome among villi in the jejunum, with yellow bacteria in the stream.">
   <img src="docs/images/route-map.jpg" width="360" alt="Screenshot of the route map: a body outline with eleven numbered stops and the chapter list.">
 </p>
 <p align="center"><sub>Left: chapter 2, the viroplasm dome that needs drill and shot together. Right: the route map with chapter 1's briefing.</sub></p>
+
+<p align="center"><img src="docs/images/jejunum-uk.jpg" width="720" alt="Screenshot of chapter 2 in Ukrainian: the HUD, the objective and Dr. Marín's subtitle are in Ukrainian while the drone hovers over villi in a stream of bacteria."></p>
+<p align="center"><sub>Chapter 2 in Ukrainian (<code>dentro --lang uk</code>, or <code>Tab</code> on the title screen).</sub></p>
 
 ## Comparison
 
@@ -103,6 +111,10 @@ open "zig-out/Dentro del cuerpo.app"      # or double-click it in Finder
 unlocks on the route map when chapter 1 is finished; `--chapter 2` opens it directly. Progress is saved to
 `~/Library/Application Support/Dentro del cuerpo/save.txt`.
 
+The game starts in Ukrainian if Ukrainian comes before English in the system's list of preferred languages,
+and in English otherwise. `Tab` on the title or pause screen switches the language at once and the choice is
+kept in the save file; `--lang en` or `--lang uk` sets it for one run without changing what is saved.
+
 ## Controls
 
 | | |
@@ -118,6 +130,7 @@ unlocks on the route map when chapter 1 is finished; `--chapter 2` opens it dire
 | Ask Dr. Marín for a hint | `H` (three levels per objective) |
 | Skip the current comms line | `Tab` |
 | Pause | `Esc`; then `R` relaunch from checkpoint, `N` restart chapter, `L` title |
+| Switch language (English, Ukrainian) | `Tab` on the title screen or the pause screen |
 | Route map (from the title) | `M` |
 
 After the chapter 1 upgrade, triggering both arms within 0.12 s lands them as one Sync Strike.
@@ -137,16 +150,22 @@ vein that should not be in circulating blood) is already in chapter 1.
 ## Development
 
 ```sh
-zig build test                 # unit tests and a scripted pilot that must finish both chapters
+zig build test                 # unit tests, translation checks, and a scripted pilot that must finish both chapters
 zig-out/bin/dentro --selftest  # the same playthroughs, with a printed summary
-zig-out/bin/dentro --shots DIR # offscreen GPU render of the menus and every stage, one BMP each
+zig-out/bin/dentro --shots DIR # offscreen GPU render of every screen and stage, one BMP each
+zig-out/bin/dentro --lang uk --shots DIR   # the same in Ukrainian
 zig-out/bin/dentro --inputtest # opens the window and drives it with synthetic key events
 zig-out/bin/dentro --demo      # the scripted pilot flies chapter 1 in the window, with audio
 zig-out/bin/dentro --chapter 2 --demo
 ```
 
+The scripted modes run in English unless `--lang` says otherwise, so their output does not depend on the
+machine; `--demo` follows the system like normal play. The tests fail on a string with no Ukrainian text, on
+placeholders that differ between the two languages, and on any character that has no glyph in the font
+atlas.
+
 ```text
-Build Summary: 3/3 steps succeeded; 31/31 tests passed
+Build Summary: 3/3 steps succeeded; 50/50 tests passed
 …
 selftest ch2: completed=true stage=done sim_time=86.8s deaths=0 stability=100.0 grade=A atlas=3
 …
@@ -161,3 +180,12 @@ Source layout and build decisions are in [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 Source code is licensed under [Apache-2.0](LICENSE). Artwork and writing (the icon in `res/`, the images in
 `docs/images/`, the game's script and atlas text, and the design documents in `docs/`) are licensed under
 [CC BY 4.0](LICENSE-ARTWORK.txt); attribute them to "Dentro del cuerpo" with a link to this repository.
+
+Third-party files are distributed under their own licences. The fonts are compiled into the binary, and
+their licence texts are copied into the app bundle under `Contents/Resources/licenses/`:
+
+| | | |
+|---|---|---|
+| `res/fonts/NotoSans-ExtraCondensedMedium.ttf`, `NotoSans-ExtraCondensedSemiBold.ttf` | Noto Sans 2.015, [notofonts/latin-greek-cyrillic](https://github.com/notofonts/latin-greek-cyrillic) | [SIL Open Font License 1.1](res/fonts/OFL-NotoSans.txt) |
+| `res/fonts/DejaVuSans.ttf` (arrows and symbols the text face lacks) | DejaVu Sans 2.37, [dejavu-fonts](https://github.com/dejavu-fonts/dejavu-fonts) | [Bitstream Vera and Arev licences, public-domain changes](res/fonts/LICENSE-DejaVu.txt) |
+| `vendor/stb/stb_truetype.h` | stb_truetype 1.27, [nothings/stb](https://github.com/nothings/stb) | [MIT or public domain](vendor/stb/LICENSE) |

@@ -5,6 +5,7 @@ const m = @import("math.zig");
 const gpu = @import("gpu.zig");
 const font_mod = @import("font.zig");
 const mesh_mod = @import("mesh.zig");
+const utf8 = @import("utf8.zig");
 const Vec3 = m.Vec3;
 const Mat4 = m.Mat4;
 
@@ -280,8 +281,7 @@ pub const Renderer = struct {
         var w: f32 = 0;
         var i: usize = 0;
         while (i < s.len) {
-            const cp = font_mod.nextCodepoint(s, &i);
-            w += r.font.glyphs[@intFromEnum(face)][font_mod.slot(cp)].adv * k;
+            w += r.font.glyph(face, utf8.next(s, &i)).adv * k;
         }
         return w;
     }
@@ -293,8 +293,7 @@ pub const Renderer = struct {
         var pen = x;
         var i: usize = 0;
         while (i < s.len) {
-            const cp = font_mod.nextCodepoint(s, &i);
-            const gl = r.font.glyphs[@intFromEnum(face)][font_mod.slot(cp)];
+            const gl = r.font.glyph(face, utf8.next(s, &i));
             if (gl.w > 0) {
                 const x0 = pen + gl.ox * k;
                 const y0 = base + gl.oy * k;
@@ -315,7 +314,8 @@ pub const Renderer = struct {
         _ = r.text(face, right - r.textWidth(face, size, s), y, size, color, s);
     }
 
-    /// Word-wrapped paragraph. Returns the y below the last line.
+    /// Word-wrapped paragraph; a dash stays on the line of the word before it. Returns the y below the last
+    /// line.
     pub fn paragraph(r: *Renderer, face: font_mod.Face, x: f32, y: f32, max_w: f32, size: f32, color: Color, s: []const u8) f32 {
         var line_y = y;
         const lh = size * 1.28;
@@ -324,7 +324,7 @@ pub const Renderer = struct {
             var stop = start;
             var last_break: ?usize = null;
             while (stop < s.len and s[stop] != '\n') {
-                if (s[stop] == ' ') {
+                if (utf8.breakable(s, stop)) {
                     if (r.textWidth(face, size, s[start..stop]) > max_w) break;
                     last_break = stop;
                 }

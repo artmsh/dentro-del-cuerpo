@@ -8,6 +8,13 @@ const m = @import("math.zig");
 const game = @import("game.zig");
 const gut = @import("gut.zig");
 const guide = @import("guide.zig");
+const i18n = @import("i18n.zig");
+const strings = @import("strings.zig");
+const Text = i18n.Text;
+const Lang = i18n.Lang;
+const L = strings.line;
+const H = strings.hint;
+const O = strings.objective;
 const Vec3 = m.Vec3;
 const v3 = m.v3;
 const Sim = game.Sim;
@@ -151,59 +158,59 @@ pub fn begin(s: *Sim) void {
 pub fn enter(s: *Sim, st: Stage) void {
     switch (st) {
         .g_arrive => {
-            s.say("And you're through. Femoral vein, heart, lungs, heart again, down the aorta and out a capillary. She felt none of it.");
-            s.say("This is the jejunum, the first stretch of small intestine. You came out of the tip of one of these fingers.");
+            s.say(L.and_youre_through);
+            s.say(L.this_is_the_jejunum);
             s.waypoint = null;
         },
         .g_villus => {
-            s.say("Look around before you move. Put your reticle on one of the fingers and press T.");
+            s.say(L.look_around_before_you_move);
             s.waypoint = null;
         },
         .g_descend => {
-            s.say("Now feel the stream. Up here it will carry you a millimetre a second the wrong way. Between the villi it barely moves.");
-            s.say("Go down. All the way to the floor.");
+            s.say(L.now_feel_the_stream);
+            s.say(L.go_down_all_the_way);
             const gp = gut.gapNear(s.pos.x, s.pos.z - 200);
             s.waypoint = v3(gp.x, 70, gp.z);
         },
         .g_wave => {
             s.gut.launch(@max(-1700, s.pos.z - 4400));
             s.g.ring_was_behind = false;
-            s.urgent("Contraction ring, coming from upstream. Stay down between them.");
-            s.say("Watch the roof. That is the far wall of the gut closing on this one.");
+            s.urgent(L.contraction_ring_coming);
+            s.say(L.watch_the_roof);
             s.waypoint = null;
         },
         .g_scan => {
             s.want_checkpoint = true;
-            s.say("That happens every half minute. The ring always comes from upstream; when I call it, you go down.");
-            s.say("Now the job. Rotavirus is inside her own cells at the tips, and from outside an infected cell looks like any other. Fly to the marker, get above the tips and scan: T.");
+            s.say(L.that_happens_every_half_minute);
+            s.say(L.now_the_job);
             s.waypoint = s.g.tips[1].cap.add(v3(0, 150, 0));
             s.g.wave_t = wave_period;
         },
         .g_extrude => {
-            s.say("There. The swollen ones. Punch each one out of the sheet, then shoot it once it floats free.");
-            s.say("One arm on Punch, one on Shoot. And scan anything small before you fire at it.");
+            s.say(L.there_the_swollen_ones);
+            s.say(L.one_arm_on_punch_one_on_shoot);
         },
         .g_factory => {
             s.want_checkpoint = true;
             s.stabilise(8);
-            s.say("That villus is clean, and the fever curve just bent. One more site upstream. Stay low on the way: the marker is past the next rows.");
+            s.say(L.that_villus_is_clean);
             s.waypoint = if (s.find(.factory)) |e| e.pos else null;
         },
         .g_tether => {
             s.want_checkpoint = true;
-            s.say("Upstream of here the villi are gone, and so is your shelter. This is what the tether is for.");
-            s.say("Aim at a villus within reach and press G. It reels you in and holds you there. G again lets go.");
+            s.say(L.upstream_the_villi_are_gone);
+            s.say(L.aim_at_a_villus_within_reach);
             s.waypoint = null;
         },
         .g_flume => {
-            s.say("Good. Now go upstream through the stripped stretch. Aim at the floor ahead, G, and let it pull you. Then the next point.");
+            s.say(L.good_now_go_upstream);
             s.waypoint = v3(0, 300, gut.blunt_z0 - 300);
         },
         .g_exit => {
             s.want_checkpoint = true;
             s.stabilise(6);
-            s.say("You're across. The villi here are whole again.");
-            s.say("The marker takes you up the lumen on the tether: duodenum, then the stomach.");
+            s.say(L.youre_across);
+            s.say(L.the_marker_takes_you_up);
             s.waypoint = v3(0, 430, exit_z);
         },
         else => {},
@@ -217,71 +224,40 @@ pub fn upgradeTaken(s: *Sim) void {
     s.setStage(.g_tether);
 }
 
-pub fn objective(s: *const Sim, buf: []u8) []const u8 {
+pub fn objective(s: *const Sim, lang: Lang, buf: []u8) []const u8 {
     const g = &s.g;
-    return switch (s.stage) {
-        .g_arrive => "Arrival — proximal jejunum",
-        .g_villus => "Identify a villus — aim at one and press T",
-        .g_descend => "Descend to the crypt floor, out of the stream",
-        .g_wave => "Stay below the villus tips until the ring has passed",
-        .g_scan => "Scan the villus tips at the marker — T",
-        .g_extrude => std.fmt.bufPrint(buf, "Infected cells cleared {d}/{d}  ·  Virus spread {d}  ·  Loose {d}", .{ g.cleared, g.total, g.spread, s.count(.shed) + s.count(.virion) }) catch "",
+    const text: Text = switch (s.stage) {
+        .g_arrive => O.g_arrive,
+        .g_villus => O.g_villus,
+        .g_descend => O.g_descend,
+        .g_wave => O.g_wave,
+        .g_scan => O.g_scan,
+        .g_extrude => return i18n.format(buf, lang, O.g_extrude, .{ i18n.int(g.cleared), i18n.int(g.total), i18n.int(g.spread), i18n.int(s.count(.shed) + s.count(.virion)) }),
         .g_factory => if (s.findConst(.factory)) |e|
-            (std.fmt.bufPrint(buf, "Drill the dome open and fire into it — {d}%", .{@as(i32, @intFromFloat(100 * (1 - e.hp / e.max_hp)))}) catch "")
+            return i18n.format(buf, lang, O.g_factory, .{i18n.int(@as(i32, @intFromFloat(100 * (1 - e.hp / e.max_hp))))})
         else
-            "Dome destroyed",
-        .g_tether => "Tether to a villus — aim within 0.4 mm and press G",
-        .g_flume => "Cross the blunted stretch upstream on the tether",
-        .g_exit => "Fly through the transit marker",
-        else => "",
+            O.g_factory_done,
+        .g_tether => O.g_tether,
+        .g_flume => O.g_flume,
+        .g_exit => O.transit_marker,
+        else => return "",
     };
+    return text.get(lang);
 }
 
-pub fn hintText(s: *const Sim) []const u8 {
-    const lv = s.hint_level;
+pub fn hintText(s: *const Sim) Text {
+    const lv: usize = @min(s.hint_level, 2);
     return switch (s.stage) {
-        .g_villus => switch (lv) {
-            0 => "Anything tall and cobbled is a villus.",
-            1 => "Turn until one of the fingers is under the reticle, then press T.",
-            else => "Look down and to the side with the mouse or arrow keys until the reticle label appears on a villus. Press T.",
-        },
-        .g_descend => switch (lv) {
-            0 => "The stream is fast above the tips and still below them.",
-            1 => "Follow the marker down into the gap between three villi. C descends.",
-            else => "Hold C until the flow readout on the top right drops under 20 and the floor of pits is right below you.",
-        },
-        .g_wave => switch (lv) {
-            0 => "The ring only closes the lumen down to the tips.",
-            1 => "Stay near the floor. Do not sit on top of a villus.",
-            else => "Hold C to stay on the crypt floor and wait. The roof comes down, passes over you and lifts again.",
-        },
-        .g_scan => switch (lv) {
-            0 => "Infected cells do not show until the scan reads them.",
-            1 => "Go to the marker, climb until you are level with the villus tips and press T. The pulse reaches 0.7 mm.",
-            else => "Fly to the diamond marker, hold Space until you are just above the tops of the villi, press T. Swollen magenta cells appear on the infected tips.",
-        },
-        .g_extrude => switch (lv) {
-            0 => "A cell in the sheet is pushed out. A cell that is already out is shot.",
-            1 => "Get within arm's reach of a swollen cell and punch it. It floats off flashing: put rounds in it before it bursts. If the count is not complete, scan another tip.",
-            else => "Z and X until one panel reads PUNCH and the other SHOOT. Hover over a magenta cell, hit the Punch key, then hold the Shoot key on the cell that floats away. Press T near small organisms first: green are hers, magenta are virus.",
-        },
-        .g_factory => switch (lv) {
-            0 => "It is the colony from the vein again, in different clothes.",
-            1 => "One arm on Drill, one on Shoot. Hold the drill in the dome and fire with the other arm once it opens.",
-            else => "Fly up to the mucus dome on the marked villus. Hold the Drill key with the bit in it; when Marín calls it open, hold the Shoot key as well. Blebs will come at you: the drill holds its place if you look away to shoot them.",
-        },
-        .g_tether => switch (lv) {
-            0 => "The tether needs tissue to hold and it reaches 0.4 mm.",
-            1 => "Put the reticle on a villus close by and press G.",
-            else => "Fly to within a couple of villus widths of any villus, aim at it, press G. Do it twice.",
-        },
-        .g_flume => switch (lv) {
-            0 => "You cannot out-fly this stream. You can out-pull it.",
-            1 => "Aim at the floor ahead of you, upstream, and press G. When it has reeled you in, aim further on and press G again.",
-            else => "Face the marker. Look slightly down at the stubs about a third of a millimetre ahead, press G, wait until you stop, repeat. Do not release with nothing new to hold: the stream takes you straight back.",
-        },
-        .g_exit => "Fly through the ring ahead of you.",
-        else => "Wait for it.",
+        .g_villus => H.g_villus[lv],
+        .g_descend => H.g_descend[lv],
+        .g_wave => H.g_wave[lv],
+        .g_scan => H.g_scan[lv],
+        .g_extrude => H.g_extrude[lv],
+        .g_factory => H.g_factory[lv],
+        .g_tether => H.g_tether[lv],
+        .g_flume => H.g_flume[lv],
+        .g_exit => H.g_exit,
+        else => H.wait,
     };
 }
 
@@ -315,7 +291,7 @@ pub fn moveCollide(s: *Sim, p: Vec3, dt: f32) void {
         }
         if (!g.said.crushed) {
             g.said.crushed = true;
-            s.urgent("You're on a tip — get down between them!");
+            s.urgent(L.youre_on_a_tip);
         }
         if (s.hull <= 0) s.hurtDrone(1);
     }
@@ -326,9 +302,9 @@ pub fn moveCollide(s: *Sim, p: Vec3, dt: f32) void {
     if (g.stream_t > 1.3 and g.said.stream <= 0 and @intFromEnum(s.stage) >= @intFromEnum(Stage.g_descend)) {
         g.said.stream = 18;
         if (gut.blunting(s.pos.z) > 0.5) {
-            s.urgent(if (s.has_tether) "The stream has you. Tether to the floor!" else "Nothing to hide behind here. Back downstream, into the villi.");
+            s.urgent(if (s.has_tether) L.the_stream_has_you else L.nothing_to_hide_behind_here);
         } else {
-            s.urgent("You're in the stream. Down, between the villi.");
+            s.urgent(L.youre_in_the_stream);
         }
     }
 }
@@ -373,7 +349,7 @@ pub fn tetherKey(s: *Sim) void {
         s.sound(.swing, 0, 0.6);
         if (!g.said.tether_first) {
             g.said.tether_first = true;
-            s.say("Holding. Feel that? The stream is still there and you are not moving.");
+            s.say(L.holding_feel_that);
         }
         return;
     }
@@ -384,7 +360,7 @@ pub fn tetherKey(s: *Sim) void {
     }
     if (g.said.tether_none <= 0) {
         g.said.tether_none = 6;
-        s.voice.say("Nothing in reach to hold. The line is 0.4 millimetres.", .chatter);
+        s.voice.say(L.nothing_in_reach_to_hold, .chatter);
     }
 }
 
@@ -413,13 +389,13 @@ pub fn scanPulse(s: *Sim) void {
             g.said.revealed = true;
             if (s.stage == .g_scan) s.setStage(.g_extrude);
         } else if (s.stage == .g_extrude) {
-            s.voice.say("More of them. Same again.", .chatter);
+            s.voice.say(L.more_of_them_same_again, .chatter);
         }
     }
     if (microbes > 0 and !g.said.unknown) {
         g.said.unknown = true;
         s.atlas[@intFromEnum(Topic.unknown_microbe)] = true;
-        s.say("Resolved. Green rods are hers. Anything magenta is virus.");
+        s.say(L.resolved_green_rods_are_hers);
     }
 }
 
@@ -428,7 +404,7 @@ pub fn onIdentify(s: *Sim, tp: Topic) void {
         .villus, .villus_tip => if (s.stage == .g_villus) {
             s.setStage(.g_descend);
         },
-        .crypt => if (s.stage == .g_descend or s.stage == .g_wave) s.voice.say("And that is the safest place in the gut.", .chatter),
+        .crypt => if (s.stage == .g_descend or s.stage == .g_wave) s.voice.say(L.the_safest_place_in_the_gut, .chatter),
         else => {},
     }
 }
@@ -462,11 +438,11 @@ fn rupture(s: *Sim, idx: u16, n: usize, in_place: bool) void {
         s.tissueDamage(2, true);
         if (!g.said.in_place) {
             g.said.in_place = true;
-            s.urgent("Not in the sheet! Punch it out first.");
+            s.urgent(L.not_in_the_sheet);
         }
     } else if (!g.said.burst) {
         g.said.burst = true;
-        s.say("That one burst before you got to it. Every bleb it threw is looking for a clean tip.");
+        s.say(L.that_one_burst);
     }
 }
 
@@ -481,7 +457,7 @@ fn killCommensal(s: *Sim, idx: u16) void {
     s.sound(.tissue, 0, 0.8);
     if (!g.said.commensal) {
         g.said.commensal = true;
-        s.urgent("Those were hers. Scan before you fire.");
+        s.urgent(L.those_were_hers);
     }
 }
 
@@ -495,7 +471,7 @@ fn killFactory(s: *Sim, idx: u16) void {
     s.shake = @max(s.shake, 0.8);
     s.sound(.nest_die, 0, 1);
     s.voice.clear();
-    s.say("Dome's gone. Clear what it threw and hold still a moment.");
+    s.say(L.domes_gone);
 }
 
 pub fn punched(s: *Sim, idx: u16, dir: Vec3) void {
@@ -517,7 +493,7 @@ pub fn punched(s: *Sim, idx: u16, dir: Vec3) void {
             s.sound(.cut, 0, 0.9);
             if (!g.said.extruded) {
                 g.said.extruded = true;
-                s.say("Out, and the sheet has closed behind it. Now shoot it before it bursts.");
+                s.say(L.out_and_the_sheet_has_closed);
             }
         },
         .shed => e.vel = e.vel.add(dir.scale(150)),
@@ -556,7 +532,7 @@ pub fn shotHit(s: *Sim, sh: *game.Shot, idx: u16, at: Vec3) bool {
                 s.sound(.kill, 0, 0.8);
                 if (!g.said.half and g.cleared * 2 >= g.total) {
                     g.said.half = true;
-                    s.voice.say("Half of them. Keep that rhythm: out, then down.", .chatter);
+                    s.voice.say(L.half_of_them, .chatter);
                 }
             }
             return !sh.lance;
@@ -583,7 +559,7 @@ pub fn shotHit(s: *Sim, sh: *game.Shot, idx: u16, at: Vec3) bool {
                 s.sound(.absorb, 0, 0.7);
                 if (!g.said.absorb) {
                     g.said.absorb = true;
-                    s.say("Mucus. It soaks up rounds the way the biofilm did. Drill it open and fire through the hole.");
+                    s.say(L.mucus_it_soaks_up_rounds);
                 }
             }
             return true;
@@ -620,7 +596,7 @@ pub fn drilled(s: *Sim, idx: u16, point: Vec3, rate: f32, dt: f32, spark: bool) 
             if (spark) s.burst(point, 2, 50, .{ 1, 0.7, 0.9, 1 }, 2.5, 0.4);
             if (e.aux > 0.6 and !g.said.open) {
                 g.said.open = true;
-                s.urgent("It's open — fire into it!");
+                s.urgent(L.its_open_fire_into_it);
             }
             return true;
         },
@@ -636,13 +612,13 @@ pub fn shotTissue(s: *Sim, h: gut.RayHit) void {
         s.tissueDamage(3, true);
         if (!g.said.crypt_shot) {
             g.said.crypt_shot = true;
-            s.urgent("Not the crypts. Those stem cells are her recovery.");
+            s.urgent(L.not_the_crypts);
         }
     } else {
         s.tissueDamage(1.5, true);
         if (h.what == .tip and !g.said.guess and s.stage == .g_extrude) {
             g.said.guess = true;
-            s.say("Don't guess at tips. Scan, then act on what lights up.");
+            s.say(L.dont_guess_at_tips);
         }
     }
 }
@@ -682,7 +658,7 @@ fn updateVirion(s: *Sim, idx: u16, dt: f32) void {
                     s.sound(.windup, m.clamp(to_drone.dot(s.right()) / -60, -1, 1), 0.8);
                     if (!g.said.bleb_attack) {
                         g.said.bleb_attack = true;
-                        s.voice.say("It flares before it darts. Move when it flares.", .chatter);
+                        s.voice.say(L.it_flares_before_it_darts, .chatter);
                     }
                 }
             } else if (nearestTip(s, e.pos)) |ti| {
@@ -705,7 +681,7 @@ fn updateVirion(s: *Sim, idx: u16, dt: f32) void {
                     s.sound(.escape, 0, 0.7);
                     if (!g.said.spread) {
                         g.said.spread = true;
-                        s.say("A bleb reached a clean tip. There is a new infected cell up there and you will need the scan to find it.");
+                        s.say(L.a_bleb_reached_a_clean_tip);
                     }
                 }
             }
@@ -808,7 +784,7 @@ fn waveClock(s: *Sim, dt: f32) void {
         g.wave_t = wave_period;
         s.gut.launch(@max(-1700, s.pos.z - 4400));
         g.ring_was_behind = false;
-        s.urgent(if (s.tether != null) "Ring coming. Stay on the line and stay low." else "Ring coming — get down.");
+        s.urgent(if (s.tether != null) L.ring_coming_stay_on_the_line else L.ring_coming_get_down);
         s.sound(.transit, 0, 0.5);
     }
 }
@@ -821,7 +797,7 @@ fn arrivals(s: *Sim) void {
     const y = 560 + s.rng.range(0, 160);
     addCommensals(s, v3(base.x - 60, y, base.z), 3);
     for (0..2) |_| spawnVirion(s, v3(base.x + 70 + s.rng.range(-20, 20), y + s.rng.range(-20, 20), base.z + s.rng.range(-20, 20)), .{}, false);
-    s.voice.say("The ring washed something in. Scan it before you decide.", .chatter);
+    s.voice.say(L.the_ring_washed_something_in, .chatter);
 }
 
 /// Seconds until the leading edge of the ring reaches the drone, if one is on its way.
@@ -842,7 +818,7 @@ pub fn script(s: *Sim, dt: f32) void {
     waveClock(s, dt);
     if (s.stall_t > 55 and !s.said.stall) {
         s.said.stall = true;
-        s.voice.say("If you want a pointer, press H.", .chatter);
+        s.voice.say(L.if_you_want_a_pointer, .chatter);
     }
     const h = s.pos.y - gut.floorY(s.pos.x);
     switch (s.stage) {
@@ -854,7 +830,7 @@ pub fn script(s: *Sim, dt: f32) void {
             if (passed and s.stage_t > 3) {
                 if (!g.said.wave_ok and g.crush_hits == 0) {
                     g.said.wave_ok = true;
-                    s.say("And it has gone over you. The villi mesh and the spaces between stay open.");
+                    s.say(L.it_has_gone_over_you);
                 }
                 s.setStage(.g_scan);
             }
@@ -892,12 +868,12 @@ pub fn script(s: *Sim, dt: f32) void {
         .g_flume => {
             if (!g.said.blunt and s.pos.z < gut.blunt_z1 + 500) {
                 g.said.blunt = true;
-                s.say("Here. The virus killed the tip cells faster than the crypts could replace them: stubs, and nothing to brake the stream.");
+                s.say(L.here_the_virus_killed_the_tips);
             }
             if (s.pos.z < gut.blunt_z0 - 250) s.setStage(.g_exit);
         },
         .g_exit => if (s.atRing(2)) {
-            s.say("Line's on. Next stop is acid.");
+            s.say(L.lines_on);
             s.setStage(.done);
         },
         else => {},

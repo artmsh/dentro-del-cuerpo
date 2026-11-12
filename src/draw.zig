@@ -11,6 +11,14 @@ const app_mod = @import("app.zig");
 const campaign = @import("campaign.zig");
 const gut = @import("gut.zig");
 const ch2 = @import("ch2.zig");
+const i18n = @import("i18n.zig");
+const strings = @import("strings.zig");
+const utf8 = @import("utf8.zig");
+const font = @import("font.zig");
+const Text = i18n.Text;
+const Lang = i18n.Lang;
+const hud = strings.hud;
+const card_text = strings.card;
 const Vec3 = m.Vec3;
 const v3 = m.v3;
 const Mat4 = m.Mat4;
@@ -37,12 +45,72 @@ fn mixc(a: Color, b: Color, t: f32) Color {
     return .{ m.lerp(a[0], b[0], t), m.lerp(a[1], b[1], t), m.lerp(a[2], b[2], t), m.lerp(a[3], b[3], t) };
 }
 
-fn fmt(buf: []u8, comptime f: []const u8, args: anytype) []const u8 {
-    return std.fmt.bufPrint(buf, f, args) catch "";
+/// Language of the frame being drawn; set once at the top of `frame`.
+var lang: Lang = .en;
+
+fn tr(text: Text) []const u8 {
+    return text.get(lang);
+}
+
+fn tf(buf: []u8, comptime text: Text, args: anytype) []const u8 {
+    return i18n.format(buf, lang, text, args);
+}
+
+fn number(buf: []u8, v: anytype) []const u8 {
+    return i18n.expand(buf, lang, "{0}", &.{i18n.int(v)});
 }
 
 fn distText(buf: []u8, d: f32) []const u8 {
-    return if (d < 1000) fmt(buf, "{d:.0} µm", .{d}) else fmt(buf, "{d:.2} mm", .{d / 1000});
+    return if (d < 1000) tf(buf, hud.micrometres, .{i18n.fixed(d, 0)}) else tf(buf, hud.millimetres, .{i18n.fixed(d / 1000, 2)});
+}
+
+/// `size`, or the largest smaller size at which `s` is no wider than `max_w`. Text in a slot of fixed
+/// width goes through this, so a longer translation shrinks a little instead of running out of its panel.
+fn fitSize(r: *Renderer, face: font.Face, size: f32, max_w: f32, s: []const u8) f32 {
+    const w = r.textWidth(face, size, s);
+    return if (w > max_w) size * max_w / w else size;
+}
+
+/// The first `n` characters of `s`, for text that types itself out.
+fn revealed(s: []const u8, n: f32) []const u8 {
+    return s[0..utf8.prefixLen(s, @intFromFloat(@max(0, n)))];
+}
+
+/// A run of text in one face and colour; `drawRuns` sets several side by side.
+const Run = struct { face: font.Face = .regular, color: Color, text: []const u8 };
+
+fn runsWidth(r: *Renderer, size: f32, runs: []const Run) f32 {
+    var w: f32 = 0;
+    for (runs) |run| w += r.textWidth(run.face, size, run.text);
+    return w;
+}
+
+fn drawRuns(r: *Renderer, x: f32, y: f32, size: f32, runs: []const Run) void {
+    var pen = x;
+    for (runs) |run| pen += r.text(run.face, pen, y, size, run.color, run.text);
+}
+
+/// The language switch: its key, its label, and every language under its own name with the current one
+/// lit. Returns the runs in `out`.
+fn languageRuns(out: *[4 + 2 * Lang.count]Run, key_color: Color, a: f32, with_key: bool) []const Run {
+    var n: usize = 0;
+    if (with_key) {
+        out[n] = .{ .face = .bold, .color = alpha(key_color, a), .text = tr(strings.language.key) };
+        out[n + 1] = .{ .color = alpha(white, a * 0.85), .text = " — " };
+        n += 2;
+    }
+    out[n] = .{ .color = alpha(white, a * 0.85), .text = tr(strings.language.label) };
+    out[n + 1] = .{ .color = alpha(white, a * 0.85), .text = ":   " };
+    n += 2;
+    for (Lang.all, 0..) |l, i| {
+        if (i > 0) {
+            out[n] = .{ .color = alpha(dim, a * 0.7), .text = "  ·  " };
+            n += 1;
+        }
+        out[n] = if (l == lang) .{ .face = .bold, .color = alpha(white, a), .text = l.endonym() } else .{ .color = alpha(dim, a * 0.8), .text = l.endonym() };
+        n += 1;
+    }
+    return out[0..n];
 }
 
 pub const Out = struct { scene: gpu.Frame, arm: gpu.Frame, post: gpu.Post };
@@ -58,6 +126,7 @@ var bore_mix: f32 = 1;
 
 pub fn frame(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, dt: f32) Out {
     const s = &app.sim;
+    lang = app.lang;
     const aspect = r.ui_w / r.ui_h;
 
     // Camera.
@@ -574,29 +643,32 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
             if (a.engaged) r.arc(cx, cy, rad + 7, centre - 0.5, centre + 0.5, 2, alpha(col, 0.5 + 0.5 * @sin(app.time * 30)));
             // tool initial beside the arc
             const tx = cx + (if (i == 0) @as(f32, -62) else 50);
-            _ = r.text(.bold, tx, cy - 9, 15, alpha(col, 0.85), a.tool.name()[0..1]);
+            _ = r.text(.bold, tx, cy - 9, 15, alpha(col, 0.85), utf8.first(tr(a.tool.name())));
         }
         if (s.sync_flash > 0) {
-            r.textCentered(.bold, cx, cy - 92, 34, alpha(white, s.sync_flash), "SYNC");
+            r.textCentered(.bold, cx, cy - 92, 34, alpha(white, s.sync_flash), tr(hud.sync));
             r.arc(cx, cy, 40 + 60 * (1 - s.sync_flash), 0, m.tau, 3, alpha(white, s.sync_flash));
         }
-        if (s.tissue_flash > 0) r.textCentered(.bold, cx, cy + 86, 20, alpha(red, s.tissue_flash), "TISSUE DAMAGE");
+        if (s.tissue_flash > 0) r.textCentered(.bold, cx, cy + 86, 20, alpha(red, s.tissue_flash), tr(hud.tissue_damage));
 
         // --- what the reticle is on
         if (s.focus.topic) |tp| {
             const known = s.atlas[@intFromEnum(tp)];
             const e = guide.entry(tp);
             const d = distText(&buf2, s.focus.dist);
-            r.rect(cx - 120, cy + 35, 240, 46, .{ 0.02, 0.03, 0.05, 0.42 });
+            const name = if (known) tr(e.name) else tr(hud.unidentified);
+            const detail = if (!known) d else if (s.atlas_deep[@intFromEnum(tp)]) tf(&buf, hud.focus, .{ i18n.str(d), i18n.str(tr(e.size)) }) else tf(&buf, hud.focus_more, .{ i18n.str(d), i18n.str(tr(e.size)) });
+            // the plate grows with its text: names and sizes are longer in some languages
+            const pw = @max(240, @max(r.textWidth(.bold, 17, name), r.textWidth(.regular, 14, detail)) + 28);
+            r.rect(cx - pw * 0.5, cy + 35, pw, 46, .{ 0.02, 0.03, 0.05, 0.42 });
             if (known) {
                 const col = if (e.hostile) gold else white;
-                r.textCentered(.bold, cx, cy + 40, 17, alpha(col, 0.95), e.name);
-                r.textCentered(.regular, cx, cy + 60, 14, alpha(dim, 0.9), fmt(&buf, "{s}  ·  {s}{s}", .{ d, e.size, if (!s.atlas_deep[@intFromEnum(tp)]) "  ·  T: more" else "" }));
+                r.textCentered(.bold, cx, cy + 40, 17, alpha(col, 0.95), name);
             } else {
                 const blink = 0.6 + 0.4 * @sin(app.time * 6);
-                r.textCentered(.bold, cx, cy + 40, 17, alpha(cyan, blink), "UNIDENTIFIED  —  T");
-                r.textCentered(.regular, cx, cy + 60, 14, alpha(dim, 0.9), d);
+                r.textCentered(.bold, cx, cy + 40, 17, alpha(cyan, blink), name);
             }
+            r.textCentered(.regular, cx, cy + 60, 14, alpha(dim, 0.9), detail);
         }
     }
 
@@ -604,7 +676,7 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
     if (!in_transit) {
         if (s.waypoint) |wp| marker(r, vw, wp, s.pos, cyan, "", app.time);
         for (&s.ents) |*e| {
-            if (e.kind == .embolus) marker(r, vw, e.pos, s.pos, red, "EMBOLUS", app.time);
+            if (e.kind == .embolus) marker(r, vw, e.pos, s.pos, red, tr(hud.embolus), app.time);
         }
     }
 
@@ -614,12 +686,12 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
         const y: f32 = 24;
         r.rect(x - 10, y - 8, 300, 128, panel);
         const hr = 68 + (100 - s.stability) * 0.75;
-        _ = r.text(.bold, x, y, 13, dim, "PATIENT");
+        _ = r.text(.bold, x, y, 13, dim, tr(hud.patient));
         const scol: Color = if (s.stability < 25) red else if (s.stability < 50) gold else green;
-        _ = r.text(.bold, x, y + 16, 26, scol, fmt(&buf, "{d:.0}", .{s.stability}));
-        _ = r.text(.regular, x + 46, y + 26, 13, dim, "STABILITY");
-        r.textRight(.bold, x + 280, y + 16, 26, white, fmt(&buf, "{d:.0}", .{hr}));
-        r.textRight(.regular, x + 232, y + 26, 13, dim, "HR");
+        _ = r.text(.bold, x, y + 16, 26, scol, i18n.expand(&buf, lang, "{0}", &.{i18n.fixed(s.stability, 0)}));
+        _ = r.text(.regular, x + 46, y + 26, 13, dim, tr(hud.stability));
+        r.textRight(.bold, x + 280, y + 16, 26, white, i18n.expand(&buf, lang, "{0}", &.{i18n.fixed(hr, 0)}));
+        r.textRight(.regular, x + 232, y + 26, 13, dim, tr(hud.heart_rate));
         bar(r, x, y + 50, 280, 5, s.stability / 100, scol);
         // ECG strip
         const n: usize = 90;
@@ -635,10 +707,11 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
             px = xx;
             py = yy;
         }
-        _ = r.text(.bold, x, y + 100, 13, dim, "HULL");
-        bar(r, x + 44, y + 105, 236, 5, s.hull / 100, if (s.hull < 35) red else white);
-        _ = r.text(.regular, x, y + 132, 13, alpha(dim, 0.9), fmt(&buf, "ATLAS {d}/{d}", .{ s.atlasCount(), s.atlasTotal() }));
-        if (s.has_sync) _ = r.text(.bold, x + 110, y + 132, 13, alpha(white, 0.9), "SYNC SERVO");
+        // the hull bar starts where its label ends (17 units after "HULL", as the panel was drawn)
+        const hull_x = x + @round(r.text(.bold, x, y + 100, 13, dim, tr(hud.hull))) + 17;
+        bar(r, hull_x, y + 105, x + 280 - hull_x, 5, s.hull / 100, if (s.hull < 35) red else white);
+        const atlas_w = r.text(.regular, x, y + 132, 13, alpha(dim, 0.9), tf(&buf, hud.atlas, .{ i18n.int(s.atlasCount()), i18n.int(s.atlasTotal()) }));
+        if (s.has_sync) _ = r.text(.bold, x + @max(110, atlas_w + 24), y + 132, 13, alpha(white, 0.9), tr(hud.sync_servo));
     }
 
     // --- location and flow, top right
@@ -647,45 +720,55 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
         const y: f32 = 24;
         r.rect(x - 310, y - 8, 320, 128, panel);
         const flow = s.worldFlow(s.pos).len();
-        r.textRight(.bold, x, y, 13, dim, if (s.chapter == 1) "PROXIMAL JEJUNUM" else "R. GREAT SAPHENOUS VEIN");
-        r.textRight(.bold, x, y + 16, 22, white, fmt(&buf, "{d:.1} cm", .{s.locationCm()}));
-        r.textRight(.regular, x - 96, y + 23, 13, dim, if (s.chapter == 1) "PAST DUODENAL FLEXURE" else "TO FEMORAL JUNCTION");
-        r.textRight(.bold, x, y + 46, 22, if (s.chapter == 1 and flow > 330) gold else white, fmt(&buf, "{d:.0}", .{flow}));
-        r.textRight(.regular, x - 60, y + 53, 13, dim, if (s.chapter == 1) "STREAM  µm/s at 1:100" else "FLOW  µm/s at 1:100");
+        r.textRight(.bold, x, y, 13, dim, if (s.chapter == 1) tr(hud.site_jejunum) else tr(hud.site_vein));
+        r.textRight(.bold, x, y + 16, 22, white, tf(&buf, hud.centimetres, .{i18n.fixed(s.locationCm(), 1)}));
+        r.textRight(.regular, x - 96, y + 23, 13, dim, if (s.chapter == 1) tr(hud.past_duodenal_flexure) else tr(hud.to_femoral_junction));
+        r.textRight(.bold, x, y + 46, 22, if (s.chapter == 1 and flow > 330) gold else white, i18n.expand(&buf, lang, "{0}", &.{i18n.fixed(flow, 0)}));
+        r.textRight(.regular, x - 60, y + 53, 13, dim, if (s.chapter == 1) tr(hud.stream_unit) else tr(hud.flow_unit));
         bar(r, x - 300, y + 76, 300, 4, flow / (if (s.chapter == 1) @as(f32, 900.0) else 480.0), alpha(white, 0.8));
         // pump cycle
         const ttr = Vein.timeToReflux(s.clock);
+        var status_col = green;
+        var status: []const u8 = undefined;
         if (s.chapter == 1) {
             if (ch2.underRing(s)) {
-                r.textRight(.bold, x, y + 90, 15, red, "CONTRACTION — STAY BETWEEN THE VILLI");
+                status_col = red;
+                status = tr(hud.contraction_overhead);
             } else if (ch2.ringEta(s)) |eta| {
-                if (eta > 0) r.textRight(.bold, x, y + 90, 15, gold, fmt(&buf, "CONTRACTION RING IN {d:.1} s", .{eta})) else r.textRight(.bold, x, y + 90, 15, green, "RING PASSED");
+                if (eta > 0) status_col = gold;
+                status = if (eta > 0) tf(&buf, hud.contraction_in, .{i18n.fixed(eta, 1)}) else tr(hud.ring_passed);
             } else if (s.tether != null) {
-                r.textRight(.bold, x, y + 90, 15, green, "TETHERED  ·  G releases");
+                status = tr(hud.tethered);
             } else {
-                r.textRight(.bold, x, y + 90, 15, green, "LUMEN OPEN");
+                status = tr(hud.lumen_open);
             }
         } else if (s.station == 2 and s.vein.septum.corked) {
-            r.textRight(.bold, x, y + 90, 15, gold, "NO FLOW — VEIN OBSTRUCTED");
+            status_col = gold;
+            status = tr(hud.no_flow);
         } else if (ttr <= 0) {
-            r.textRight(.bold, x, y + 90, 15, red, "REFLUX — VALVES SHUT");
+            status_col = red;
+            status = tr(hud.reflux);
         } else if (ttr < 1.6) {
-            r.textRight(.bold, x, y + 90, 15, gold, fmt(&buf, "VALVES CLOSING IN {d:.1} s", .{ttr}));
+            status_col = gold;
+            status = tf(&buf, hud.valves_closing, .{i18n.fixed(ttr, 1)});
         } else {
-            r.textRight(.bold, x, y + 90, 15, green, fmt(&buf, "VALVES OPEN  ·  {d:.1} s", .{ttr}));
+            status = tf(&buf, hud.valves_open, .{i18n.fixed(ttr, 1)});
         }
+        r.textRight(.bold, x, y + 90, fitSize(r, .bold, 15, 300, status), status_col, status);
     }
 
     // --- objective, top centre
     {
-        var obuf: [160]u8 = undefined;
-        const text = s.objective(&obuf);
-        const tw = r.textWidth(.bold, 18, text);
+        var obuf: [240]u8 = undefined;
+        const text = s.objective(lang, &obuf);
+        // between the two top panels, with a margin
+        const size = fitSize(r, .bold, 18, W - 2 * 366 - 36, text);
+        const tw = r.textWidth(.bold, size, text);
         r.rect(cx - tw * 0.5 - 18, 22, tw + 36, 34, panel);
         r.rect(cx - tw * 0.5 - 18, 22, 3, 34, cyan);
-        r.textCentered(.bold, cx, 28, 18, white, text);
-        if (s.checkpoint_toast > 0) r.textCentered(.bold, cx, 66, 15, alpha(green, m.sat(s.checkpoint_toast)), "CHECKPOINT SAVED");
-        if (s.hidden_unlocked) r.textCentered(.bold, cx, 86, 14, alpha(gold, 0.9), "HIDDEN ROUTE LOGGED: BONE MARROW");
+        r.textCentered(.bold, cx, 28 + (18 - size) * 0.6, size, white, text);
+        if (s.checkpoint_toast > 0) r.textCentered(.bold, cx, 66, 15, alpha(green, m.sat(s.checkpoint_toast)), tr(hud.checkpoint_saved));
+        if (s.hidden_unlocked) r.textCentered(.bold, cx, 86, 14, alpha(gold, 0.9), tr(hud.hidden_route));
     }
 
     // --- arm panels, bottom corners
@@ -698,12 +781,14 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
         r.rect(x, y, pw, 96, panel);
         r.rect(if (i == 0) x else x + pw - 4, y, 4, 96, col);
         const tx = x + 16;
-        _ = r.text(.bold, tx, y + 8, 13, alpha(col, 0.9), if (i == 0) "LEFT ARM  ·  Q  /  left click" else "RIGHT ARM  ·  E  /  right click");
-        _ = r.text(.bold, tx, y + 26, 30, mixc(white, col, a.flash), a.tool.name());
+        const inner = pw - 32;
+        const head = if (i == 0) tr(hud.left_arm) else tr(hud.right_arm);
+        _ = r.text(.bold, tx, y + 8, fitSize(r, .bold, 13, inner, head), alpha(col, 0.9), head);
+        const name_w = r.text(.bold, tx, y + 26, 30, mixc(white, col, a.flash), tr(a.tool.name()));
         const label: []const u8 = switch (a.tool) {
-            .shoot => "CHARGE",
-            .drill => if (a.overheated) "OVERHEATED" else if (a.engaged) "CUTTING" else "HEAT",
-            .punch => "READY",
+            .shoot => tr(hud.charge),
+            .drill => if (a.overheated) tr(hud.overheated) else if (a.engaged) tr(hud.cutting) else tr(hud.heat),
+            .punch => tr(hud.ready),
         };
         const frac: f32 = switch (a.tool) {
             .shoot => a.charge,
@@ -711,9 +796,10 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
             .punch => 1 - m.sat(a.cooldown / 0.5),
         };
         const bcol: Color = if (a.tool == .drill) mixc(col, red, a.heat) else col;
-        _ = r.text(.regular, tx + 126, y + 38, 13, if (a.overheated and a.tool == .drill) red else dim, label);
-        bar(r, tx, y + 64, pw - 32, 5, frac, bcol);
-        _ = r.text(.regular, tx, y + 74, 13, alpha(dim, 0.85), if (i == 0) "Z: change tool   1 2 3: punch / drill / shoot" else "X: change tool   8 9 0: punch / drill / shoot");
+        _ = r.text(.regular, tx + @max(126, name_w + 16), y + 38, 13, if (a.overheated and a.tool == .drill) red else dim, label);
+        bar(r, tx, y + 64, inner, 5, frac, bcol);
+        const keys = if (i == 0) tr(hud.left_keys) else tr(hud.right_keys);
+        _ = r.text(.regular, tx, y + 74, fitSize(r, .regular, 13, inner, keys), alpha(dim, 0.85), keys);
     }
 
     // --- Marín
@@ -723,18 +809,21 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
         // arrival card: where the transit took the drone
         const a = m.sat(s.stage_t / 0.8) * m.sat((6.5 - s.stage_t) / 1.0);
         r.rect(cx - 430, 232, 860, 150, alpha(panel, a));
-        r.textCentered(.bold, cx, 246, 15, alpha(dim, a), "CHAPTER 2  ·  TRANSIT COMPLETE");
-        r.textCentered(.bold, cx, 270, 40, alpha(white, a), "Proximal jejunum");
-        r.textCentered(.regular, cx, 326, 16, alpha(dim, a), "femoral vein → vena cava → right heart → lungs → left heart → aorta →");
-        r.textCentered(.regular, cx, 348, 16, alpha(dim, a), "superior mesenteric artery → villus capillary → out through the tip");
+        r.textCentered(.bold, cx, 246, 15, alpha(dim, a), tr(hud.arrival_chapter));
+        r.textCentered(.bold, cx, 270, 40, alpha(white, a), tr(hud.arrival_place));
+        r.textCentered(.regular, cx, 326, 16, alpha(dim, a), tr(hud.arrival_route[0]));
+        r.textCentered(.regular, cx, 348, 16, alpha(dim, a), tr(hud.arrival_route[1]));
     }
     if (in_transit) {
-        r.textCentered(.bold, cx, 300, 30, alpha(white, 0.9), "TRANSIT — TEMPO LINK 1:1");
-        r.textCentered(.regular, cx, 340, 18, alpha(dim, 0.9), fmt(&buf, "{d:.1} cm to femoral junction", .{s.locationCm()}));
+        r.textCentered(.bold, cx, 300, 30, alpha(white, 0.9), tr(hud.transit));
+        r.textCentered(.regular, cx, 340, 18, alpha(dim, 0.9), tf(&buf, hud.transit_distance, .{i18n.fixed(s.locationCm(), 1)}));
     }
 
-    r.rect(cx - 300, 874, 600, 22, .{ 0.02, 0.03, 0.05, 0.45 });
-    r.textCentered(.regular, cx, 878, 13, alpha(dim, 0.85), if (s.has_tether) "WASD move   Space / C up, down   Shift boost   G tether   T scan   H hint   Tab skip   Esc pause" else "WASD move   Space / C up, down   Shift boost   T identify   H hint   Tab skip line   Esc pause");
+    const controls = if (s.has_tether) tr(hud.controls_tether) else tr(hud.controls);
+    // the strip sits between the two arm panels and widens for a longer line
+    const strip = @max(600, r.textWidth(.regular, 13, controls) + 40);
+    r.rect(cx - strip * 0.5, 874, strip, 22, .{ 0.02, 0.03, 0.05, 0.45 });
+    r.textCentered(.regular, cx, 878, 13, alpha(dim, 0.85), controls);
 }
 
 fn marker(r: *Renderer, vw: *const View, p: Vec3, from: Vec3, col: Color, label: []const u8, time: f32) void {
@@ -767,21 +856,19 @@ fn marker(r: *Renderer, vw: *const View, p: Vec3, from: Vec3, col: Color, label:
 
 fn drawSubtitles(app: *App, r: *Renderer) void {
     const s = &app.sim;
-    const text_full = s.voice.current orelse return;
+    const text_full = tr(s.voice.current orelse return);
     const W = r.ui_w;
     const cx = W * 0.5;
     const size: f32 = if (s.voice.urgent) 25 else 20;
     const max_w: f32 = 760;
-    // typewriter reveal, cut on a UTF-8 boundary
-    var n: usize = @intFromFloat(@min(@as(f32, @floatFromInt(text_full.len)), s.voice.age * 75 + 1));
-    while (n < text_full.len and (text_full[n] & 0xC0) == 0x80) n += 1;
     const h = r.paragraphHeight(.regular, max_w, size, text_full);
     const y = 748 - h;
     const fade = m.sat(s.voice.remaining / 0.3) * m.sat(s.voice.age / 0.1);
     r.rect(cx - max_w * 0.5 - 20, y - 30, max_w + 40, h + 42, alpha(panel, fade));
     r.rect(cx - max_w * 0.5 - 20, y - 30, 3, h + 42, alpha(if (s.voice.urgent) gold else green, fade));
-    _ = r.text(.bold, cx - max_w * 0.5, y - 22, 13, alpha(if (s.voice.urgent) gold else green, fade), "DRA. MARÍN");
-    _ = r.paragraph(.regular, cx - max_w * 0.5, y, max_w, size, alpha(if (s.voice.urgent) gold else white, fade), text_full[0..n]);
+    _ = r.text(.bold, cx - max_w * 0.5, y - 22, 13, alpha(if (s.voice.urgent) gold else green, fade), tr(hud.marin));
+    // typewriter reveal, counted in characters so every script types at the same pace
+    _ = r.paragraph(.regular, cx - max_w * 0.5, y, max_w, size, alpha(if (s.voice.urgent) gold else white, fade), revealed(text_full, s.voice.age * 75 + 1));
 }
 
 fn card(r: *Renderer, w: f32, h: f32, accent: Color) [2]f32 {
@@ -793,153 +880,142 @@ fn card(r: *Renderer, w: f32, h: f32, accent: Color) [2]f32 {
     return .{ x, y };
 }
 
+/// An upgrade card: kicker, name, a figure drawn by the caller in the gap, the explanation, and the key.
+/// The card grows with the explanation, which runs to more lines in some languages. Returns the y of the
+/// figure's centre line.
+fn upgradeCard(app: *App, r: *Renderer, kicker: Text, name: Text, body: Text) f32 {
+    const cx = r.ui_w * 0.5;
+    const body_h = r.paragraphHeight(.regular, 600, 20, tr(body));
+    const h = 380 + @max(0, body_h - 106);
+    const o = card(r, 720, h, white);
+    r.textCentered(.bold, cx, o[1] + 30, 15, dim, tr(kicker));
+    r.textCentered(.bold, cx, o[1] + 58, 54, white, tr(name));
+    _ = r.paragraph(.regular, o[0] + 60, o[1] + 220, 600, 20, white, tr(body));
+    r.textCentered(.bold, cx, o[1] + h - 44, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), tr(card_text.install));
+    return o[1] + 168;
+}
+
+const DebriefRow = struct { label: Text, value: []const u8 };
+
+/// The debrief card shared by both chapters: heading, grade, the rows, and the notes under them.
+fn debrief(app: *App, r: *Renderer, kicker: Text, heading: Text, rows: []const DebriefRow, notes: []const ?Text) void {
+    const s = &app.sim;
+    const cx = r.ui_w * 0.5;
+    const o = card(r, 820, 560, green);
+    r.textCentered(.bold, cx, o[1] + 26, 15, dim, tr(kicker));
+    r.textCentered(.bold, cx, o[1] + 50, 50, white, tr(heading));
+    const g = s.grade();
+    r.textCentered(.bold, cx, o[1] + 122, 84, if (g == 'A') green else if (g == 'D') red else gold, &[1]u8{g});
+    const lx = o[0] + 90;
+    const rx = o[0] + 730;
+    var y = o[1] + 236;
+    for (rows) |row| {
+        _ = r.text(.regular, lx, y, 19, dim, tr(row.label));
+        r.textRight(.bold, rx, y, 19, white, row.value);
+        y += 27;
+    }
+    y += 10;
+    for (notes, 0..) |maybe, i| {
+        const note = maybe orelse continue;
+        if (i == 0) r.textCentered(.regular, cx, y, fitSize(r, .regular, 17, 760, tr(note)), alpha(gold, 0.95), tr(note)) else r.textCentered(.bold, cx, y, 16, gold, tr(note));
+        y += 26;
+    }
+    r.textCentered(.bold, cx, o[1] + 514, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), tr(card_text.to_route_map));
+}
+
 fn drawModeOverlay(app: *App, r: *Renderer) void {
     const s = &app.sim;
     const cx = r.ui_w * 0.5;
-    var buf: [200]u8 = undefined;
+    var buf: [240]u8 = undefined;
     switch (s.mode) {
         .upgrade_card => {
             if (s.chapter == 1) {
-                const o = card(r, 720, 380, white);
-                r.textCentered(.bold, cx, o[1] + 30, 15, dim, "MUCIN SYNTHESIS CALIBRATED  —  UPGRADE");
-                r.textCentered(.bold, cx, o[1] + 58, 54, white, "MUCUS TETHER");
+                const fy = upgradeCard(app, r, card_text.tether_kicker, card_text.tether_name, card_text.tether_body);
                 // a line reeling a dot toward an anchor
                 const k = @mod(app.time * 0.6, 1.0);
-                r.line(cx - 150, o[1] + 168, cx + 150, o[1] + 168, 2, alpha(green, 0.5));
-                r.arc(cx + 150, o[1] + 168, 7, 0, m.tau, 14, green);
-                r.arc(cx - 150 + 290 * k, o[1] + 168, 9, 0, m.tau, 4, white);
-                _ = r.paragraph(.regular, o[0] + 60, o[1] + 220, 600, 20, white, "G fires a mucin line at whatever tissue the reticle is on, up to 0.4 mm away, reels the drone in and holds it there against any stream. G on a new point moves the line; G on nothing releases it. Hold on through a contraction, or cross a stream the thrusters cannot beat one pull at a time.");
-                r.textCentered(.bold, cx, o[1] + 336, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), "Enter — install");
+                r.line(cx - 150, fy, cx + 150, fy, 2, alpha(green, 0.5));
+                r.arc(cx + 150, fy, 7, 0, m.tau, 14, green);
+                r.arc(cx - 150 + 290 * k, fy, 9, 0, m.tau, 4, white);
                 return;
             }
-            const o = card(r, 720, 380, white);
-            r.textCentered(.bold, cx, o[1] + 30, 15, dim, "FIELD CALIBRATION COMPLETE  —  UPGRADE");
-            r.textCentered(.bold, cx, o[1] + 58, 54, white, "SYNC SERVO");
+            const fy = upgradeCard(app, r, card_text.sync_kicker, card_text.sync_name, card_text.sync_body);
             // the two arcs closing into one ring
             const k = 0.5 + 0.5 * @sin(app.time * 2.5);
-            r.arc(cx - 14 * k, o[1] + 168, 30, m.pi - 1.3, m.pi + 1.3, 4, cyan);
-            r.arc(cx + 14 * k, o[1] + 168, 30, -1.3, 1.3, 4, amber);
-            _ = r.paragraph(.regular, o[0] + 60, o[1] + 220, 600, 20, white, "Trigger both arms within a tenth of a second and they land as one Sync Strike: three times the effect, with a shockwave that clears small organisms around you. Two punches shatter calcium. Two rounds merge into a lance that pierces.");
-            r.textCentered(.bold, cx, o[1] + 336, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), "Enter — install");
+            r.arc(cx - 14 * k, fy, 30, m.pi - 1.3, m.pi + 1.3, 4, cyan);
+            r.arc(cx + 14 * k, fy, 30, -1.3, 1.3, 4, amber);
         },
         .dead => {
             const o = card(r, 620, 240, red);
-            r.textCentered(.bold, cx, o[1] + 36, 50, red, "SIGNAL LOST");
-            r.textCentered(.regular, cx, o[1] + 112, 20, white, "The hull failed. The patient is unharmed; the drone is not.");
-            r.textCentered(.bold, cx, o[1] + 176, 18, alpha(white, 0.7 + 0.3 * @sin(app.time * 4)), "Enter — relaunch from the last checkpoint");
+            r.textCentered(.bold, cx, o[1] + 36, 50, red, tr(card_text.signal_lost));
+            r.textCentered(.regular, cx, o[1] + 112, fitSize(r, .regular, 20, 580, tr(card_text.hull_failed)), white, tr(card_text.hull_failed));
+            r.textCentered(.bold, cx, o[1] + 176, 18, alpha(white, 0.7 + 0.3 * @sin(app.time * 4)), tr(card_text.relaunch));
         },
         .lost => {
             const o = card(r, 660, 240, red);
-            r.textCentered(.bold, cx, o[1] + 36, 50, red, "PATIENT LOST");
-            r.textCentered(.regular, cx, o[1] + 112, 20, white, if (s.chapter == 1) "Too much damage to the lining, too much virus spread. She did not make it." else "Too much damage to healthy tissue, too many emboli. She did not make it.");
-            r.textCentered(.bold, cx, o[1] + 176, 18, alpha(white, 0.7 + 0.3 * @sin(app.time * 4)), "Enter — restart the chapter");
+            const why = if (s.chapter == 1) tr(card_text.lost_gut) else tr(card_text.lost_vein);
+            r.textCentered(.bold, cx, o[1] + 36, 50, red, tr(card_text.patient_lost));
+            r.textCentered(.regular, cx, o[1] + 112, fitSize(r, .regular, 20, 620, why), white, why);
+            r.textCentered(.bold, cx, o[1] + 176, 18, alpha(white, 0.7 + 0.3 * @sin(app.time * 4)), tr(card_text.restart));
         },
         .complete => {
+            const stability = tf(buf[0..24], card_text.out_of_100, .{i18n.fixed(s.stability, 0)});
+            const atlas = tf(buf[24..48], card_text.out_of, .{ i18n.int(s.atlasCount()), i18n.int(s.atlasTotal()) });
+            const relaunches = number(buf[48..64], s.stats.retries);
+            const time = tf(buf[64..112], card_text.duration, .{ i18n.int(@as(u32, @intFromFloat(@floor(s.stats.time / 60)))), i18n.padded(@as(u32, @intFromFloat(@floor(@mod(s.stats.time, 60)))), 2) });
             if (s.chapter == 1) {
-                const o = card(r, 820, 560, green);
-                r.textCentered(.bold, cx, o[1] + 26, 15, dim, "CHAPTER 2  ·  INTESTINES");
-                r.textCentered(.bold, cx, o[1] + 50, 50, white, "Up the lumen");
-                const g = s.grade();
-                r.textCentered(.bold, cx, o[1] + 122, 84, if (g == 'A') green else if (g == 'D') red else gold, &[1]u8{g});
-                const lx = o[0] + 90;
-                const rx = o[0] + 730;
-                var y = o[1] + 236;
-                const rows = [_]struct { k: []const u8, v: []const u8 }{
-                    .{ .k = "Patient stability", .v = fmt(buf[0..24], "{d:.0} / 100", .{s.stability}) },
-                    .{ .k = "Infected cells cleared", .v = fmt(buf[24..48], "{d} / {d}", .{ s.g.cleared, s.g.total }) },
-                    .{ .k = "Times the virus spread", .v = fmt(buf[48..72], "{d}", .{s.g.spread}) },
-                    .{ .k = "Commensal bacteria killed", .v = fmt(buf[72..96], "{d}", .{s.g.commensals_lost}) },
-                    .{ .k = "Hits on the lining", .v = fmt(buf[96..120], "{d}", .{s.stats.tissue_hits}) },
-                    .{ .k = "Atlas entries identified", .v = fmt(buf[120..144], "{d} / {d}", .{ s.atlasCount(), s.atlasTotal() }) },
-                    .{ .k = "Relaunches", .v = fmt(buf[144..168], "{d}", .{s.stats.retries}) },
-                    .{ .k = "Time on the link", .v = fmt(buf[168..200], "{d:.0} min {d:0>2.0} s", .{ @floor(s.stats.time / 60), @mod(s.stats.time, 60) }) },
-                };
-                for (rows) |row| {
-                    _ = r.text(.regular, lx, y, 19, dim, row.k);
-                    r.textRight(.bold, rx, y, 19, white, row.v);
-                    y += 27;
-                }
-                const note: []const u8 = if (s.g.spread == 0 and s.g.commensals_lost == 0) "Nothing spread and her flora is intact. The villi will be back within the week." else if (s.g.commensals_lost > 3) "The virus is cleared, and so is some of what kept other things out." else "Cleared. What spread will slow her recovery by a day or two.";
-                r.textCentered(.regular, cx, y + 10, 17, alpha(gold, 0.95), note);
-                r.textCentered(.bold, cx, o[1] + 514, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), "Enter — route map");
+                const note: Text = if (s.g.spread == 0 and s.g.commensals_lost == 0) card_text.note_gut_clean else if (s.g.commensals_lost > 3) card_text.note_gut_flora else card_text.note_gut_spread;
+                debrief(app, r, card_text.gut_kicker, card_text.gut_title, &.{
+                    .{ .label = card_text.row_stability, .value = stability },
+                    .{ .label = card_text.row_cleared, .value = tf(buf[112..144], card_text.out_of, .{ i18n.int(s.g.cleared), i18n.int(s.g.total) }) },
+                    .{ .label = card_text.row_spread, .value = number(buf[144..160], s.g.spread) },
+                    .{ .label = card_text.row_commensals, .value = number(buf[160..176], s.g.commensals_lost) },
+                    .{ .label = card_text.row_lining, .value = number(buf[176..192], s.stats.tissue_hits) },
+                    .{ .label = card_text.row_atlas, .value = atlas },
+                    .{ .label = card_text.row_relaunches, .value = relaunches },
+                    .{ .label = card_text.row_time, .value = time },
+                }, &.{note});
                 return;
             }
-            const o = card(r, 820, 560, green);
-            r.textCentered(.bold, cx, o[1] + 26, 15, dim, "CHAPTER 1  ·  VEIN");
-            r.textCentered(.bold, cx, o[1] + 50, 50, white, "Into the femoral vein");
-            const g = s.grade();
-            r.textCentered(.bold, cx, o[1] + 122, 84, if (g == 'A') green else if (g == 'D') red else gold, &[1]u8{g});
-            const lx = o[0] + 90;
-            const rx = o[0] + 730;
-            var y = o[1] + 236;
-            const rows = [_]struct { k: []const u8, v: []const u8 }{
-                .{ .k = "Patient stability", .v = fmt(buf[0..24], "{d:.0} / 100", .{s.stability}) },
-                .{ .k = "Emboli that reached the lungs", .v = fmt(buf[24..48], "{d}", .{s.stats.emboli_escaped}) },
-                .{ .k = "Hits on healthy tissue", .v = fmt(buf[48..72], "{d}", .{s.stats.tissue_hits}) },
-                .{ .k = "Immune cells lost to friendly fire", .v = fmt(buf[72..96], "{d}", .{s.stats.friendly_fire}) },
-                .{ .k = "Sync Strikes landed", .v = fmt(buf[96..120], "{d}", .{s.stats.sync_strikes}) },
-                .{ .k = "Atlas entries identified", .v = fmt(buf[120..144], "{d} / {d}", .{ s.atlasCount(), s.atlasTotal() }) },
-                .{ .k = "Relaunches", .v = fmt(buf[144..168], "{d}", .{s.stats.retries}) },
-                .{ .k = "Time on the link", .v = fmt(buf[168..200], "{d:.0} min {d:0>2.0} s", .{ @floor(s.stats.time / 60), @mod(s.stats.time, 60) }) },
-            };
-            for (rows) |row| {
-                _ = r.text(.regular, lx, y, 19, dim, row.k);
-                r.textRight(.bold, rx, y, 19, white, row.v);
-                y += 27;
-            }
-            const note: []const u8 = if (s.stats.emboli_escaped == 0) "No emboli escaped. The lungs will be a shorter job." else "What escaped is lodged in her pulmonary arteries. You will meet it again in chapter 7.";
-            r.textCentered(.regular, cx, y + 10, 17, alpha(gold, 0.95), note);
-            if (s.hidden_unlocked) r.textCentered(.bold, cx, y + 36, 16, gold, "Hidden route logged: Bone Marrow");
-            r.textCentered(.bold, cx, o[1] + 514, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), "Enter — route map");
+            const note: Text = if (s.stats.emboli_escaped == 0) card_text.note_no_emboli else card_text.note_emboli;
+            debrief(app, r, card_text.vein_kicker, card_text.vein_title, &.{
+                .{ .label = card_text.row_stability, .value = stability },
+                .{ .label = card_text.row_emboli, .value = number(buf[112..128], s.stats.emboli_escaped) },
+                .{ .label = card_text.row_tissue, .value = number(buf[128..144], s.stats.tissue_hits) },
+                .{ .label = card_text.row_friendly_fire, .value = number(buf[144..160], s.stats.friendly_fire) },
+                .{ .label = card_text.row_sync, .value = number(buf[160..176], s.stats.sync_strikes) },
+                .{ .label = card_text.row_atlas, .value = atlas },
+                .{ .label = card_text.row_relaunches, .value = relaunches },
+                .{ .label = card_text.row_time, .value = time },
+            }, &.{ note, if (s.hidden_unlocked) card_text.note_hidden_route else null });
         },
         else => {},
     }
 }
 
 fn drawPause(app: *App, r: *Renderer) void {
+    _ = app;
     const cx = r.ui_w * 0.5;
-    const o = card(r, 760, 600, cyan);
-    r.textCentered(.bold, cx, o[1] + 28, 46, white, "PAUSED");
-    const opts = [_][2][]const u8{
-        .{ "Esc / Enter", "Resume" },
-        .{ "R", "Relaunch from last checkpoint" },
-        .{ "N", "Restart chapter" },
-        .{ "L", "Leave to title" },
-    };
+    const o = card(r, 760, 630, cyan);
+    r.textCentered(.bold, cx, o[1] + 28, 46, white, tr(strings.pause.heading));
     var y = o[1] + 104;
-    for (opts) |op| {
-        r.textRight(.bold, cx - 20, y, 20, cyan, op[0]);
-        _ = r.text(.regular, cx + 10, y, 20, white, op[1]);
+    for (strings.pause.options) |op| {
+        r.textRight(.bold, cx - 20, y, 20, cyan, tr(op[0]));
+        _ = r.text(.regular, cx + 10, y, 20, white, tr(op[1]));
         y += 30;
     }
+    // the language switch, laid out as one more option
+    var runs: [4 + 2 * Lang.count]Run = undefined;
+    r.textRight(.bold, cx - 20, y, 20, cyan, tr(strings.language.key));
+    drawRuns(r, cx + 10, y, 20, languageRuns(&runs, cyan, 1, false));
+    y += 30;
     y += 16;
     r.rect(o[0] + 60, y, 640, 1, alpha(dim, 0.4));
     y += 16;
-    const ctl = [_][2][]const u8{
-        .{ "Mouse / arrow keys", "Look" },
-        .{ "W A S D", "Thrust and strafe" },
-        .{ "Space / C", "Up / down" },
-        .{ "Shift", "Boost" },
-        .{ "Q  ·  left click", "Left arm" },
-        .{ "E  ·  right click", "Right arm" },
-        .{ "Z / X", "Cycle left / right arm tool" },
-        .{ "1 2 3  ·  8 9 0", "Punch, drill, shoot on left · right arm" },
-        .{ "T", "Identify what the reticle is on (again for more)" },
-        .{ "H", "Hint" },
-        .{ "Tab", "Skip the current line" },
-        .{ "Cmd+F", "Full screen" },
-    };
-    for (ctl) |cc| {
-        r.textRight(.bold, cx - 20, y, 16, dim, cc[0]);
-        _ = r.text(.regular, cx + 10, y, 16, white, cc[1]);
+    for (strings.pause.controls) |cc| {
+        r.textRight(.bold, cx - 20, y, 16, dim, tr(cc[0]));
+        _ = r.text(.regular, cx + 10, y, 16, white, tr(cc[1]));
         y += 23;
     }
-    drawSubtitlesPaused(app, r);
-}
-
-fn drawSubtitlesPaused(app: *App, r: *Renderer) void {
-    _ = app;
-    _ = r;
 }
 
 /// The app icon: the split reticle (left arm cyan, right arm amber) over the blood stream.
@@ -956,29 +1032,34 @@ fn drawIconMark(app: *App, r: *Renderer) void {
 fn drawTitle(app: *App, r: *Renderer) void {
     const cx = r.ui_w * 0.5;
     const a = m.sat((app.screen_t - 0.3) / 1.2);
-    r.textCentered(.bold, cx, 250, 120, alpha(white, a), "Dentro del cuerpo");
-    r.textCentered(.regular, cx, 392, 28, alpha(dim, a), "I N S I D E   T H E   B O D Y");
+    r.textCentered(.bold, cx, 250, 120, alpha(white, a), app_mod.title);
+    r.textCentered(.regular, cx, 392, 28, alpha(dim, a), tr(strings.title.tagline));
     r.rect(cx - 160, 446, 320, 1, alpha(cyan, 0.6 * a));
     const blink = 0.65 + 0.35 * @sin(app.time * 3);
-    r.textCentered(.bold, cx, 520, 24, alpha(green, a * blink), "Enter — begin");
-    r.textCentered(.regular, cx, 560, 20, alpha(white, a * 0.85), "M — route map");
+    r.textCentered(.bold, cx, 520, 24, alpha(green, a * blink), tr(strings.title.begin));
+    r.textCentered(.regular, cx, 560, 20, alpha(white, a * 0.85), tr(strings.title.route_map));
     if (app.save.ch1_done) {
-        var buf: [96]u8 = undefined;
-        r.textCentered(.regular, cx, 610, 16, alpha(gold, a * 0.9), if (app.save.ch2_done) fmt(&buf, "Chapters 1 and 2 complete  ·  grades {c} and {c}  ·  M for the route map", .{ app.save.grade, app.save.grade2 }) else fmt(&buf, "Chapter 1 complete  ·  grade {c}  ·  chapter 2 is open on the route map — M", .{ app.save.grade }));
+        var buf: [200]u8 = undefined;
+        r.textCentered(.regular, cx, 610, 16, alpha(gold, a * 0.9), if (app.save.ch2_done) tf(&buf, strings.title.progress_two, .{ i18n.char(app.save.grade), i18n.char(app.save.grade2) }) else tf(&buf, strings.title.progress_one, .{i18n.char(app.save.grade)}));
     }
-    r.textCentered(.regular, cx, 850, 14, alpha(dim, a * 0.8), "Right great saphenous vein, 3.6 mm across. Every disc is a red blood cell, 7.8 µm.");
+    // the language switch, in a plate of its own so it is found in either language
+    var runs: [4 + 2 * Lang.count]Run = undefined;
+    const lr = languageRuns(&runs, cyan, a, true);
+    const lw = runsWidth(r, 18, lr);
+    r.rect(cx - lw * 0.5 - 18, 692, lw + 36, 34, alpha(panel, a));
+    drawRuns(r, cx - lw * 0.5, 698, 18, lr);
+    r.textCentered(.regular, cx, 850, 14, alpha(dim, a * 0.8), tr(strings.title.backdrop));
 }
 
 fn drawBriefing(app: *App, r: *Renderer) void {
     const cx = r.ui_w * 0.5;
+    const pages = &strings.briefing.pages;
     const o = card(r, 860, 440, cyan);
-    var buf: [32]u8 = undefined;
-    r.textCentered(.bold, cx, o[1] + 26, 15, dim, fmt(&buf, "BRIEFING  ·  {d} / {d}", .{ app.briefing_page + 1, app_mod.briefing_pages.len }));
-    const page = app_mod.briefing_pages[@min(app.briefing_page, app_mod.briefing_pages.len - 1)];
-    var n: usize = @intFromFloat(@min(@as(f32, @floatFromInt(page.len)), app.screen_t * 140 + 1));
-    while (n < page.len and (page[n] & 0xC0) == 0x80) n += 1;
-    _ = r.paragraph(.regular, o[0] + 70, o[1] + 76, 720, 23, white, page[0..n]);
-    r.textCentered(.bold, cx, o[1] + 392, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), if (app.briefing_page + 1 == app_mod.briefing_pages.len) "Enter — launch" else "Enter — continue");
+    var buf: [64]u8 = undefined;
+    r.textCentered(.bold, cx, o[1] + 26, 15, dim, tf(&buf, strings.briefing.heading, .{ i18n.int(app.briefing_page + 1), i18n.int(pages.len) }));
+    const page = tr(pages[@min(app.briefing_page, pages.len - 1)]);
+    _ = r.paragraph(.regular, o[0] + 70, o[1] + 76, 720, 23, white, revealed(page, app.screen_t * 140 + 1));
+    r.textCentered(.bold, cx, o[1] + 392, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), if (app.briefing_page + 1 == pages.len) tr(strings.briefing.launch) else tr(strings.briefing.next));
 }
 
 // ---------------------------------------------------------------------------- route map
@@ -993,8 +1074,9 @@ const body_half = [_][2]f32{
 fn drawMap(app: *App, r: *Renderer) void {
     const W = r.ui_w;
     var buf: [128]u8 = undefined;
-    _ = r.text(.bold, 60, 36, 40, white, "Route");
-    _ = r.text(.regular, 190, 54, 16, dim, "right leg to third ventricle  ·  eleven stops, two off the chart");
+    const mt = strings.map;
+    const head_w = r.text(.bold, 60, 36, 40, white, tr(mt.heading));
+    _ = r.text(.regular, 60 + @max(130, head_w + 30), 54, 16, dim, tr(mt.subtitle));
 
     // Body diagram (patient's right is on the left, as on a chart).
     const bx: f32 = 70;
@@ -1029,7 +1111,7 @@ fn drawMap(app: *App, r: *Renderer) void {
         const rad: f32 = if (sel) 9 else 6;
         if (c.hidden) diamond(r, x, y, rad, 2, col) else r.arc(x, y, rad, 0, m.tau, if (sel) 3 else 2, col);
         if (sel) r.arc(x, y, 15 + 3 * @sin(app.time * 4), 0, m.tau, 1.5, alpha(col, 0.6));
-        const label: []const u8 = if (c.hidden) (if (known) "✓" else "?") else fmt(&buf, "{d}", .{i + 1});
+        const label: []const u8 = if (c.hidden) (if (known) "✓" else "?") else number(&buf, i + 1);
         _ = r.text(.bold, x + 12, y - 9, 13, alpha(col, 0.95), label);
     }
 
@@ -1042,10 +1124,10 @@ fn drawMap(app: *App, r: *Renderer) void {
         const known = !c.hidden or (i == campaign.main_count and app.save.marrow);
         if (i == campaign.main_count) y += 10;
         if (sel) r.rect(lx - 12, y - 3, 330, 27, alpha(cyan, 0.16));
-        const num: []const u8 = if (c.hidden) "◆" else fmt(&buf, "{d}", .{i + 1});
+        const num: []const u8 = if (c.hidden) "◆" else number(&buf, i + 1);
         _ = r.text(.bold, lx, y, 17, if (c.hidden) gold else dim, num);
-        _ = r.text(if (sel) .bold else .regular, lx + 34, y, 18, if (sel) white else alpha(white, 0.8), if (known) c.name else "— unknown —");
-        const status: []const u8 = if (done) "complete" else if (app.chapterUnlocked(i)) "playable" else if (c.playable) "locked" else if (c.hidden and !known) "hidden" else if (c.hidden) "route logged" else "mapped";
+        _ = r.text(if (sel) .bold else .regular, lx + 34, y, 18, if (sel) white else alpha(white, 0.8), if (known) tr(c.name) else tr(mt.unknown_row));
+        const status = tr(if (done) mt.complete else if (app.chapterUnlocked(i)) mt.playable else if (c.playable) mt.locked else if (c.hidden and !known) mt.hidden else if (c.hidden) mt.route_logged else mt.mapped);
         r.textRight(.regular, lx + 310, y + 2, 14, if (done) green else if (c.playable) white else alpha(dim, 0.8), status);
         y += 28;
     }
@@ -1058,24 +1140,25 @@ fn drawMap(app: *App, r: *Renderer) void {
     r.rect(dx - 24, 104, dw + 48, 720, panel);
     r.rect(dx - 24, 104, 3, 720, if (c.hidden) gold else cyan);
     var dy: f32 = 122;
-    _ = r.text(.bold, dx, dy, 34, white, if (known) c.name else "Unknown");
+    _ = r.text(.bold, dx, dy, 34, white, if (known) tr(c.name) else tr(mt.unknown_name));
     dy += 46;
-    _ = r.text(.regular, dx, dy, 17, dim, if (known) c.site else "Something along the way does not belong. Look closely.");
+    const site = if (known) tr(c.site) else tr(mt.unknown_site);
+    _ = r.text(.regular, dx, dy, fitSize(r, .regular, 17, dw, site), dim, site);
     dy += 40;
-    const fields = [_][2][]const u8{
-        .{ "HOW THE DRONE GETS THERE", c.route },
-        .{ "WHAT YOU LEARN TO READ", c.read },
-        .{ "OBJECTIVE", c.objective },
-        .{ "WHAT MAKES IT HARD HERE", c.challenge },
-        .{ "UPGRADE", c.upgrade },
+    const fields = [_][2]Text{
+        .{ mt.field_route, c.route },
+        .{ mt.field_read, c.read },
+        .{ mt.field_objective, c.objective },
+        .{ mt.field_challenge, c.challenge },
+        .{ mt.field_upgrade, c.upgrade },
     };
     for (fields, 0..) |fl, i| {
         if (!known and i != 2) continue;
-        _ = r.text(.bold, dx, dy, 13, if (c.hidden) gold else cyan, fl[0]);
-        dy = r.paragraph(.regular, dx, dy + 20, dw, 18, white, fl[1]) + 16;
+        _ = r.text(.bold, dx, dy, 13, if (c.hidden) gold else cyan, tr(fl[0]));
+        dy = r.paragraph(.regular, dx, dy + 20, dw, 18, white, tr(fl[1])) + 16;
     }
     const open = app.chapterUnlocked(app.map_sel);
-    const foot: []const u8 = if (open) "Enter — fly this chapter" else if (c.playable) "Complete the chapter before it to fly this one." else if (c.hidden and !known) "Not yet found." else "Designed and routed; not yet flyable in this build.";
-    _ = r.text(.bold, dx, 786, 17, if (open) alpha(green, 0.7 + 0.3 * @sin(app.time * 4)) else alpha(dim, 0.9), foot);
-    r.textCentered(.regular, W * 0.5, 868, 14, alpha(dim, 0.8), "↑ ↓ select    Enter fly    Esc back");
+    const foot = tr(if (open) mt.fly else if (c.playable) mt.need_previous else if (c.hidden and !known) mt.not_found else mt.not_built);
+    _ = r.text(.bold, dx, 786, fitSize(r, .bold, 17, dw, foot), if (open) alpha(green, 0.7 + 0.3 * @sin(app.time * 4)) else alpha(dim, 0.9), foot);
+    r.textCentered(.regular, W * 0.5, 868, 14, alpha(dim, 0.8), tr(mt.keys));
 }
