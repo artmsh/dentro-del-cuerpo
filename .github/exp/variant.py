@@ -14,4 +14,10 @@ elif v == 'D':
         '    for (int j2 = -2; j2 <= 2; j2++)\n        for (int i2 = -2; i2 <= 2; i2++) {\n            float2 g = mg + float2(i2, j2);')
 elif v == 'E':
     rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(vo.y * 3.0, vo.x, vo.z, 1.0);')
+elif v == 'F':
+    rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(edge, near, goblet, 1.0);')
+elif v == 'G':
+    rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(albedo, 1.0);')
+elif v == 'H':
+    rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(mott, band, vo.z, 1.0);')
 open(dst, 'w', newline='').write(s)
