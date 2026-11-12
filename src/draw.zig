@@ -87,10 +87,23 @@ fn fitSize(r: *Renderer, face: font.Face, size: f32, max_w: f32, s: []const u8) 
     return if (w > max_w) size * max_w / w else size;
 }
 
-/// The first `n` characters of `s`, for text that types itself out.
-fn revealed(s: []const u8, n: f32) []const u8 {
-    return s[0..utf8.prefixLen(s, @intFromFloat(@max(0, n)))];
+/// How many bytes of `s` its first `n` characters take, for text that types itself out. The reveal is
+/// counted in characters so that every script types at the same pace.
+fn revealedLen(s: []const u8, n: f32) usize {
+    return utf8.prefixLen(s, @intFromFloat(@max(0, n)));
 }
+
+/// A rectangle on the HUD canvas.
+const Box = struct {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+
+    fn overlaps(a: Box, b: Box) bool {
+        return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h;
+    }
+};
 
 /// A run of text in one face and colour; `drawRuns` sets several side by side.
 const Run = struct { face: font.Face = .regular, color: Color, text: []const u8 };
@@ -642,7 +655,10 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
 
     // --- reticle: left half is the left arm, right half is the right arm
     const in_transit = s.mode == .transit;
+    var reticle_block: ?Box = null;
     if (!in_transit) {
+        // The arcs and the tool initials either side of them; a marker's label keeps out of this.
+        reticle_block = .{ .x = cx - 68, .y = cy - 40, .w = 136, .h = 75 };
         r.rect(cx - 1.5, cy - 1.5, 3, 3, alpha(white, 0.9));
         for (0..2) |i| {
             const a = &s.arms[i];
@@ -679,6 +695,8 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
             // the plate grows with its text: names and sizes are longer in some languages
             const pw = @max(240, @max(r.textWidth(.bold, 17, name), r.textWidth(.regular, 14, detail)) + 28);
             r.rect(cx - pw * 0.5, cy + 35, pw, 46, .{ 0.02, 0.03, 0.05, 0.42 });
+            // With the plate under it, the block is the reticle and the plate together.
+            reticle_block = .{ .x = cx - pw * 0.5, .y = cy - 40, .w = pw, .h = 121 };
             if (known) {
                 const col = if (e.hostile) gold else white;
                 r.textCentered(.bold, cx, cy + 40, 17, alpha(col, 0.95), name);
@@ -692,9 +710,9 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
 
     // --- waypoint and loose emboli
     if (!in_transit) {
-        if (s.waypoint) |wp| marker(r, vw, wp, s.pos, cyan, "", app.time);
+        if (s.waypoint) |wp| marker(r, vw, wp, s.pos, cyan, "", app.time, reticle_block);
         for (&s.ents) |*e| {
-            if (e.kind == .embolus) marker(r, vw, e.pos, s.pos, red, tr(hud.embolus), app.time);
+            if (e.kind == .embolus) marker(r, vw, e.pos, s.pos, red, tr(hud.embolus), app.time, reticle_block);
         }
     }
 
@@ -702,7 +720,8 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
     {
         const x: f32 = 28;
         const y: f32 = 24;
-        r.rect(x - 10, y - 8, 300, 128, panel);
+        // The panel runs down to the atlas count, which is the last line of it.
+        r.rect(x - 10, y - 8, 300, 150, panel);
         const hr = 68 + (100 - s.stability) * 0.75;
         _ = r.text(.bold, x, y, 13, dim, tr(hud.patient));
         const scol: Color = if (s.stability < 25) red else if (s.stability < 50) gold else green;
@@ -728,8 +747,8 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
         // the hull bar starts where its label ends (17 units after "HULL", as the panel was drawn)
         const hull_x = x + @round(r.text(.bold, x, y + 100, 13, dim, tr(hud.hull))) + 17;
         bar(r, hull_x, y + 105, x + 280 - hull_x, 5, s.hull / 100, if (s.hull < 35) red else white);
-        const atlas_w = r.text(.regular, x, y + 132, 13, alpha(dim, 0.9), tf(&buf, hud.atlas, .{ i18n.int(s.atlasCount()), i18n.int(s.atlasTotal()) }));
-        if (s.has_sync) _ = r.text(.bold, x + @max(110, atlas_w + 24), y + 132, 13, alpha(white, 0.9), tr(hud.sync_servo));
+        const atlas_w = r.text(.regular, x, y + 122, 13, alpha(dim, 0.9), tf(&buf, hud.atlas, .{ i18n.int(s.atlasCount()), i18n.int(s.atlasTotal()) }));
+        if (s.has_sync) _ = r.text(.bold, x + @max(110, atlas_w + 24), y + 122, 13, alpha(white, 0.9), tr(hud.sync_servo));
     }
 
     // --- location and flow, top right
@@ -844,7 +863,21 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
     r.textCentered(.regular, cx, 878, 13, alpha(dim, 0.85), controls);
 }
 
-fn marker(r: *Renderer, vw: *const View, p: Vec3, from: Vec3, col: Color, label: []const u8, time: f32) void {
+/// Where a marker's distance label goes: under the diamond, unless that would put it across `avoid` (the
+/// reticle and the focus plate, which carry text of their own). Then it goes above the diamond, above
+/// the name if the marker has one, and if that is covered too, just under the block. Returns the y of
+/// the label's top.
+fn markerLabelY(x: f32, y: f32, w: f32, named: bool, avoid: ?Box) f32 {
+    const below = y + 16;
+    const block = avoid orelse return below;
+    const h: f32 = 15;
+    if (!block.overlaps(.{ .x = x - w * 0.5, .y = below, .w = w, .h = h })) return below;
+    const above = y - (if (named) @as(f32, 46) else 30);
+    if (!block.overlaps(.{ .x = x - w * 0.5, .y = above, .w = w, .h = h })) return above;
+    return block.y + block.h + 3;
+}
+
+fn marker(r: *Renderer, vw: *const View, p: Vec3, from: Vec3, col: Color, label: []const u8, time: f32, avoid: ?Box) void {
     var buf: [48]u8 = undefined;
     const W = r.ui_w;
     const dist = p.dist(from);
@@ -852,7 +885,8 @@ fn marker(r: *Renderer, vw: *const View, p: Vec3, from: Vec3, col: Color, label:
     if (project(r, vw, p)) |xy| {
         if (xy[0] > 40 and xy[0] < W - 40 and xy[1] > 70 and xy[1] < 760) {
             diamond(r, xy[0], xy[1], 11, 2, alpha(col, pulse));
-            r.textCentered(.bold, xy[0], xy[1] + 16, 13, alpha(col, 0.9), distText(&buf, dist));
+            const d = distText(&buf, dist);
+            r.textCentered(.bold, xy[0], markerLabelY(xy[0], xy[1], r.textWidth(.bold, 13, d), label.len > 0, avoid), 13, alpha(col, 0.9), d);
             if (label.len > 0) r.textCentered(.bold, xy[0], xy[1] - 30, 12, alpha(col, 0.9), label);
             return;
         }
@@ -885,8 +919,9 @@ fn drawSubtitles(app: *App, r: *Renderer) void {
     r.rect(cx - max_w * 0.5 - 20, y - 30, max_w + 40, h + 42, alpha(panel, fade));
     r.rect(cx - max_w * 0.5 - 20, y - 30, 3, h + 42, alpha(if (s.voice.urgent) gold else green, fade));
     _ = r.text(.bold, cx - max_w * 0.5, y - 22, 13, alpha(if (s.voice.urgent) gold else green, fade), tr(hud.marin));
-    // typewriter reveal, counted in characters so every script types at the same pace
-    _ = r.paragraph(.regular, cx - max_w * 0.5, y, max_w, size, alpha(if (s.voice.urgent) gold else white, fade), revealed(text_full, s.voice.age * 75 + 1));
+    // Typewriter reveal. The whole line is laid out once and revealed within that layout, so a word is on
+    // its final line from its first letter.
+    _ = r.paragraphRevealed(.regular, cx - max_w * 0.5, y, max_w, size, alpha(if (s.voice.urgent) gold else white, fade), text_full, revealedLen(text_full, s.voice.age * 75 + 1));
 }
 
 fn card(r: *Renderer, w: f32, h: f32, accent: Color) [2]f32 {
@@ -922,8 +957,16 @@ fn debrief(app: *App, r: *Renderer, kicker: Text, heading: Text, rows: []const D
     const o = card(r, 820, 560, green);
     r.textCentered(.bold, cx, o[1] + 26, 15, dim, tr(kicker));
     r.textCentered(.bold, cx, o[1] + 50, 50, white, tr(heading));
+    // The grade, with its caption: on an Xbox controller the prompt at the foot of the card is "A" too,
+    // and a bare letter does not say which of the two it is.
     const g = s.grade();
-    r.textCentered(.bold, cx, o[1] + 122, 84, if (g == 'A') green else if (g == 'D') red else gold, &[1]u8{g});
+    const caption = tr(card_text.grade);
+    const gap: f32 = 18;
+    const gw = r.textWidth(.bold, 84, &[1]u8{g});
+    const cw = r.textWidth(.bold, 15, caption);
+    const gx = cx - (cw + gap + gw) * 0.5;
+    _ = r.text(.bold, gx, o[1] + 172, 15, dim, caption);
+    _ = r.text(.bold, gx + cw + gap, o[1] + 122, 84, if (g == 'A') green else if (g == 'D') red else gold, &[1]u8{g});
     const lx = o[0] + 90;
     const rx = o[0] + 730;
     var y = o[1] + 236;
@@ -1013,10 +1056,16 @@ fn drawModeOverlay(app: *App, r: *Renderer) void {
 fn drawPause(app: *App, r: *Renderer) void {
     const P = strings.pause;
     const cx = r.ui_w * 0.5;
-    const o = card(r, 760, 630, cyan);
+    // The card is as tall as its rows: the options, then the controls, with the rows that depend on the
+    // device and on what the drone carries.
+    const tether_row = app.sim.has_tether;
+    const fullscreen_row = device == .kbm;
+    const rows: f32 = @floatFromInt(P.controls.len + @intFromBool(tether_row) + @intFromBool(fullscreen_row));
+    const o = card(r, 760, 104 + 30 * @as(f32, app_mod.PauseItem.count) + 48 + 23 * rows + 36, cyan);
     r.textCentered(.bold, cx, o[1] + 28, 46, white, tr(P.heading));
     var y = o[1] + 104;
     // The options. The one under the selection is lit; an option with a key of its own shows it.
+    var option: usize = 0;
     for (0..app_mod.PauseItem.count) |i| {
         const item: app_mod.PauseItem = @enumFromInt(i);
         const selected = app.pause_sel == item;
@@ -1029,6 +1078,7 @@ fn drawPause(app: *App, r: *Renderer) void {
             .retry => bindings.label(.retry, prompt()),
             .restart => bindings.label(.restart, prompt()),
             .leave => bindings.label(.leave, prompt()),
+            .quit => bindings.label(.quit, prompt()),
             .language => tr(strings.language.key),
         };
         r.textRight(.bold, cx - 20, y, 20, cyan, key);
@@ -1036,7 +1086,8 @@ fn drawPause(app: *App, r: *Renderer) void {
             var runs: [4 + 2 * Lang.count]Run = undefined;
             drawRuns(r, cx + 10, y, 20, languageRuns(&runs, cyan, 1, false));
         } else {
-            _ = r.text(if (selected) .bold else .regular, cx + 10, y, 20, white, tr(P.options[i]));
+            _ = r.text(if (selected) .bold else .regular, cx + 10, y, 20, white, tr(P.options[option]));
+            option += 1;
         }
         y += 30;
     }
@@ -1056,7 +1107,11 @@ fn drawPause(app: *App, r: *Renderer) void {
         row(r, cx, y, cc);
         y += 23;
     }
-    if (device == .kbm) row(r, cx, y, P.fullscreen);
+    if (tether_row) {
+        row(r, cx, y, P.tether);
+        y += 23;
+    }
+    if (fullscreen_row) row(r, cx, y, P.fullscreen);
 }
 
 /// The app icon: the split reticle (left arm cyan, right arm amber) over the blood stream.
@@ -1076,19 +1131,42 @@ fn drawTitle(app: *App, r: *Renderer) void {
     r.textCentered(.bold, cx, 250, 120, alpha(white, a), app_mod.title);
     r.textCentered(.regular, cx, 392, 28, alpha(dim, a), tr(strings.title.tagline));
     r.rect(cx - 160, 446, 320, 1, alpha(cyan, 0.6 * a));
+    // The entries. The one under the selection is lit and shows the button that chooses it; the others
+    // show the key of their own, where they have one.
     const blink = 0.65 + 0.35 * @sin(app.time * 3);
-    r.textCentered(.bold, cx, 520, 24, alpha(green, a * blink), tr(strings.title.begin));
-    r.textCentered(.regular, cx, 560, 20, alpha(white, a * 0.85), tr(strings.title.route_map));
+    var y: f32 = 498;
+    for (0..app_mod.TitleItem.count) |i| {
+        const item: app_mod.TitleItem = @enumFromInt(i);
+        const selected = app.title_sel == item;
+        if (selected) {
+            r.rect(cx - 270, y - 5, 540, 36, alpha(panel, a));
+            r.rect(cx - 270, y - 5, 3, 36, alpha(cyan, a));
+        }
+        const own = switch (item) {
+            .begin => "",
+            .map => bindings.label(.map, prompt()),
+            .language => tr(strings.language.key),
+            .quit => bindings.label(.quit, prompt()),
+        };
+        const key = if (selected and own.len == 0) bindings.label(.confirm, prompt()) else own;
+        r.textRight(.bold, cx - 46, y, 22, alpha(cyan, a * (if (selected) @as(f32, 1) else 0.8)), key);
+        const col = if (selected) alpha(green, a * blink) else alpha(white, a * 0.85);
+        switch (item) {
+            .language => {
+                var runs: [4 + 2 * Lang.count]Run = undefined;
+                drawRuns(r, cx - 16, y, 22, languageRuns(&runs, cyan, a, false));
+            },
+            .begin => _ = r.text(if (selected) .bold else .regular, cx - 16, y, 22, col, tr(strings.title.begin)),
+            .map => _ = r.text(if (selected) .bold else .regular, cx - 16, y, 22, col, tr(strings.title.route_map)),
+            .quit => _ = r.text(if (selected) .bold else .regular, cx - 16, y, 22, col, tr(strings.title.quit)),
+        }
+        y += 38;
+    }
+    r.textCentered(.regular, cx, y + 4, 14, alpha(dim, a * 0.9), tr(strings.title.choose));
     if (app.save.ch1_done) {
         var buf: [200]u8 = undefined;
-        r.textCentered(.regular, cx, 610, 16, alpha(gold, a * 0.9), if (app.save.ch2_done) tf(&buf, strings.title.progress_two, .{ i18n.char(app.save.grade), i18n.char(app.save.grade2) }) else tf(&buf, strings.title.progress_one, .{i18n.char(app.save.grade)}));
+        r.textCentered(.regular, cx, y + 48, 16, alpha(gold, a * 0.9), if (app.save.ch2_done) tf(&buf, strings.title.progress_two, .{ i18n.char(app.save.grade), i18n.char(app.save.grade2) }) else tf(&buf, strings.title.progress_one, .{i18n.char(app.save.grade)}));
     }
-    // the language switch, in a plate of its own so it is found in either language
-    var runs: [4 + 2 * Lang.count]Run = undefined;
-    const lr = languageRuns(&runs, cyan, a, true);
-    const lw = runsWidth(r, 18, lr);
-    r.rect(cx - lw * 0.5 - 18, 692, lw + 36, 34, alpha(panel, a));
-    drawRuns(r, cx - lw * 0.5, 698, 18, lr);
     r.textCentered(.regular, cx, 850, 14, alpha(dim, a * 0.8), tr(strings.title.backdrop));
 }
 
@@ -1099,7 +1177,7 @@ fn drawBriefing(app: *App, r: *Renderer) void {
     var buf: [64]u8 = undefined;
     r.textCentered(.bold, cx, o[1] + 26, 15, dim, tf(&buf, strings.briefing.heading, .{ i18n.int(app.briefing_page + 1), i18n.int(pages.len) }));
     const page = tr(pages[@min(app.briefing_page, pages.len - 1)]);
-    _ = r.paragraph(.regular, o[0] + 70, o[1] + 76, 720, 23, white, revealed(page, app.screen_t * 140 + 1));
+    _ = r.paragraphRevealed(.regular, o[0] + 70, o[1] + 76, 720, 23, white, page, revealedLen(page, app.screen_t * 140 + 1));
     r.textCentered(.bold, cx, o[1] + 392, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), if (app.briefing_page + 1 == pages.len) tr(strings.briefing.launch) else tr(strings.briefing.next));
 }
 
@@ -1153,7 +1231,8 @@ fn drawMap(app: *App, r: *Renderer) void {
         if (c.hidden) diamond(r, x, y, rad, 2, col) else r.arc(x, y, rad, 0, m.tau, if (sel) 3 else 2, col);
         if (sel) r.arc(x, y, 15 + 3 * @sin(app.time * 4), 0, m.tau, 1.5, alpha(col, 0.6));
         const label: []const u8 = if (c.hidden) (if (known) "✓" else "?") else number(&buf, i + 1);
-        _ = r.text(.bold, x + 12, y - 9, 13, alpha(col, 0.95), label);
+        // clear of the node, and of the selection ring around it at its widest
+        _ = r.text(.bold, x + (if (sel) @as(f32, 24) else 12), y - 9, 13, alpha(col, 0.95), label);
     }
 
     // Chapter list.
@@ -1201,5 +1280,35 @@ fn drawMap(app: *App, r: *Renderer) void {
     const open = app.chapterUnlocked(app.map_sel);
     const foot = tr(if (open) mt.fly else if (c.playable) mt.need_previous else if (c.hidden and !known) mt.not_found else mt.not_built);
     _ = r.text(.bold, dx, 786, fitSize(r, .bold, 17, dw, foot), if (open) alpha(green, 0.7 + 0.3 * @sin(app.time * 4)) else alpha(dim, 0.9), foot);
-    r.textCentered(.regular, W * 0.5, 868, 14, alpha(dim, 0.8), tr(mt.keys));
+    // The keys, on a plate: the backdrop's cells drift behind this line and it has to stay readable.
+    const keys = tr(mt.keys);
+    const kw = r.textWidth(.regular, 14, keys) + 40;
+    r.rect((W - kw) * 0.5, 861, kw, 26, panel);
+    r.textCentered(.regular, W * 0.5, 866, 14, alpha(white, 0.85), keys);
+}
+
+test "a marker's distance label stays out of the reticle and the focus plate" {
+    const plate: Box = .{ .x = 600, .y = 410, .w = 240, .h = 121 };
+    const w: f32 = 60;
+    const label = struct {
+        fn box(x: f32, y: f32) Box {
+            return .{ .x = x - 30, .y = y, .w = 60, .h = 15 };
+        }
+    }.box;
+    // Nothing to avoid, or a marker well away from the block: the label sits under the diamond.
+    try std.testing.expectEqual(@as(f32, 316), markerLabelY(720, 300, w, false, null));
+    try std.testing.expectEqual(@as(f32, 216), markerLabelY(720, 200, w, false, plate));
+    try std.testing.expectEqual(@as(f32, 466), markerLabelY(300, 450, w, false, plate));
+    // Wherever the marker is on the screen, the label and the block do not meet.
+    var y: f32 = 80;
+    while (y < 760) : (y += 3) {
+        var x: f32 = 50;
+        while (x < 1390) : (x += 7) {
+            for ([_]bool{ false, true }) |named| {
+                try std.testing.expect(!plate.overlaps(label(x, markerLabelY(x, y, w, named, plate))));
+            }
+        }
+    }
+    // The case from the field: the waypoint dead ahead, behind the reticle. Under the plate.
+    try std.testing.expectEqual(plate.y + plate.h + 3, markerLabelY(720, 450, w, false, plate));
 }

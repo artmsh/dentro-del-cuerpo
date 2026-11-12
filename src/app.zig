@@ -50,10 +50,25 @@ pub const PauseItem = enum(u8) {
     retry,
     restart,
     leave,
+    quit,
     language,
 
     pub const count = @typeInfo(PauseItem).@"enum".field_names.len;
 };
+
+/// The entries of the title screen, top to bottom. Confirm chooses the one under the selection, which
+/// starts on Begin, so a first press of Enter or A still begins the game.
+pub const TitleItem = enum(u8) {
+    begin,
+    map,
+    language,
+    quit,
+
+    pub const count = @typeInfo(TitleItem).@"enum".field_names.len;
+};
+
+/// Where the save file lives under the home directory.
+const save_dir = "Library/Application Support/Dentro del cuerpo";
 
 pub const Save = struct {
     ch1_done: bool = false,
@@ -69,8 +84,17 @@ pub const Save = struct {
     /// keeps applying.
     lang: ?Lang = null,
 
+    /// The longest a chapter's time on the link is recorded as, in seconds.
+    const max_time: f32 = 1_000_000;
+
     /// The file is one line of space-separated values in field order. Fields were appended over time, so a
     /// file may stop after any field from `time` on; what is missing keeps its default.
+    ///
+    /// The file is outside the program's control, so this is total: whatever the bytes are, the result is
+    /// null (too few fields to be a save) or a save whose every field is in its range. A field that is not
+    /// a number reads as zero, a number outside the field's range is clamped to it, a grade that is not
+    /// one of the four letters is no grade, and the two decimals are rounded to the one digit the file
+    /// keeps, so what is read is exactly what `format` writes back.
     pub fn parse(data: []const u8) ?Save {
         var it = std.mem.tokenizeAny(u8, data, " \r\n");
         var toks: [10][]const u8 = undefined;
@@ -81,20 +105,50 @@ pub const Save = struct {
             n += 1;
         }
         if (n < 7) return null;
-        var vals: [9]f32 = @splat(0);
-        for (toks[0..@min(n, 9)], 0..) |tok, i| vals[i] = std.fmt.parseFloat(f32, tok) catch 0;
         return .{
-            .ch1_done = vals[0] > 0.5,
-            .grade = @intFromFloat(m.clamp(vals[1], 32, 126)),
-            .emboli = @intFromFloat(@max(0, vals[2])),
-            .stability = vals[3],
-            .marrow = vals[4] > 0.5,
-            .atlas = @intFromFloat(@max(0, vals[5])),
-            .time = vals[6],
-            .ch2_done = vals[7] > 0.5,
-            .grade2 = if (n >= 9) @intFromFloat(m.clamp(vals[8], 32, 126)) else '-',
+            .ch1_done = number(toks[0], 0, 1) > 0.5,
+            .grade = gradeOf(toks[1]),
+            .emboli = counter(toks[2]),
+            .stability = tenths(toks[3], 100),
+            .marrow = number(toks[4], 0, 1) > 0.5,
+            .atlas = counter(toks[5]),
+            .time = tenths(toks[6], max_time),
+            .ch2_done = n >= 8 and number(toks[7], 0, 1) > 0.5,
+            .grade2 = if (n >= 9) gradeOf(toks[8]) else '-',
             .lang = if (n >= 10) Lang.fromTag(toks[9]) else null,
         };
+    }
+
+    /// The value of a field as a number in [lo, hi]. Text that is not a number, and NaN, read as `lo`
+    /// clamped from zero; infinities and anything else out of range go to the nearer bound.
+    fn number(tok: []const u8, lo: f64, hi: f64) f64 {
+        const v = std.fmt.parseFloat(f64, tok) catch 0;
+        if (std.math.isNan(v)) return @max(lo, @min(hi, 0));
+        return @max(lo, @min(hi, v));
+    }
+
+    fn counter(tok: []const u8) u32 {
+        return @intFromFloat(@floor(number(tok, 0, std.math.maxInt(u32))));
+    }
+
+    /// A non-negative decimal no larger than `hi`, rounded to tenths.
+    fn tenths(tok: []const u8, hi: f32) f32 {
+        const t: f32 = @floatCast(@round(number(tok, 0, hi) * 10));
+        return t / 10;
+    }
+
+    /// Grades are stored as the character's code. Only A to D are grades; '-' stands for none yet.
+    fn gradeOf(tok: []const u8) u8 {
+        const c: u8 = @intFromFloat(@floor(number(tok, 0, 255)));
+        return if (c >= 'A' and c <= 'D') c else '-';
+    }
+
+    /// Whether a run graded `new` goes on record over a chapter's saved result. One rule for every
+    /// chapter: the record is the best grade flown, and among runs of equal grade the latest, so a first
+    /// completion always counts, a better or equal run replaces what is saved (with the figures that
+    /// belong to it), and a worse run changes nothing.
+    pub fn supersedes(new: u8, done: bool, saved: u8) bool {
+        return !done or saved < 'A' or saved > 'D' or new <= saved;
     }
 
     pub fn format(sv: Save, buf: []u8) []const u8 {
@@ -146,6 +200,15 @@ pub const App = struct {
     /// Set by --chapter: every playable chapter can be entered regardless of the save.
     unlock_all: bool = false,
     recorded: bool = false,
+    title_sel: TitleItem = .begin,
+    /// The briefing was opened from the route map, so backing out of it returns there.
+    briefing_from_map: bool = false,
+    /// The player chose Quit. The application acts on it; nothing here can end the process.
+    want_quit: bool = false,
+    /// The last attempt to write the save file failed. The failure is reported once, when it starts.
+    save_failed: bool = false,
+    /// Messages printed about the save file so far.
+    save_reports: u32 = 0,
     /// Set when rendering the app icon: the title backdrop with a mark instead of text.
     icon_mode: bool = false,
     /// Set when the pointer should be captured (play) or released (menus).
@@ -188,11 +251,16 @@ pub const App = struct {
     }
 
     fn locateSave(app: *App) void {
-        const home = util.env("HOME") orelse return;
-        const dir = std.fmt.bufPrintSentinel(&app.save_path, "{s}/Library/Application Support/Dentro del cuerpo", .{home}, 0) catch return;
-        util.makeDir(dir.ptr);
-        const full = std.fmt.bufPrintSentinel(&app.save_path, "{s}/Library/Application Support/Dentro del cuerpo/save.txt", .{home}, 0) catch return;
+        const home = util.env("HOME") orelse return app.reportSave("HOME is not set, so there is nowhere to keep a save file", "");
+        const full = std.fmt.bufPrintSentinel(&app.save_path, "{s}/" ++ save_dir ++ "/save.txt", .{home}, 0) catch return app.reportSave("the path to the save file is too long", "");
         app.save_path_len = full.len;
+    }
+
+    /// One line on stderr about the save file. Tests count the reports instead of printing them.
+    fn reportSave(app: *App, what: []const u8, path: []const u8) void {
+        app.save_reports += 1;
+        if (@import("builtin").is_test) return;
+        std.debug.print("save: {s}{s}{s}. Progress and the language choice will not outlast this session.\n", .{ what, if (path.len > 0) ": " else "", path });
     }
 
     fn loadSave(app: *App) void {
@@ -203,13 +271,29 @@ pub const App = struct {
         if (Save.parse(data)) |sv| app.save = sv;
     }
 
+    /// Write the save file: its directory is created with every missing parent, and the file is replaced
+    /// in one step, so it is never seen half written. A failure is reported when it first happens and not
+    /// again while it lasts; the game carries on with what it has in memory and tries again at the next save.
     fn writeSave(app: *App) void {
         if (app.save_path_len == 0) return;
         var buf: [256]u8 = undefined;
         const text = app.save.format(&buf);
-        if (text.len == 0) return;
-        const path: [*:0]const u8 = @ptrCast(&app.save_path);
-        _ = util.writeFile(path, text);
+        const path = app.save_path[0..app.save_path_len];
+        const dir = path[0 .. std.mem.lastIndexOfScalar(u8, path, '/') orelse 0];
+        const problem: ?[]const u8 = if (text.len == 0)
+            "the save could not be encoded"
+        else if (!util.makeDirs(dir))
+            "the save directory could not be created"
+        else if (!util.writeFileAtomic(path, text))
+            "the save file could not be written"
+        else
+            null;
+        if (problem) |what| {
+            if (!app.save_failed) app.reportSave(what, if (text.len == 0) "" else path);
+            app.save_failed = true;
+        } else {
+            app.save_failed = false;
+        }
     }
 
     // ------------------------------------------------------------------ decorative cells
@@ -332,10 +416,10 @@ pub const App = struct {
     fn recordCompletion(app: *App) void {
         const s = &app.sim;
         if (app.chapter == 1) {
-            if (!app.save.ch2_done or s.grade() < app.save.grade2) app.save.grade2 = s.grade();
+            if (Save.supersedes(s.grade(), app.save.ch2_done, app.save.grade2)) app.save.grade2 = s.grade();
             app.save.ch2_done = true;
         } else {
-            if (!app.save.ch1_done or s.grade() <= app.save.grade or app.save.grade == '-') {
+            if (Save.supersedes(s.grade(), app.save.ch1_done, app.save.grade)) {
                 app.save.grade = s.grade();
                 app.save.emboli = s.stats.emboli_escaped;
                 app.save.stability = s.stability;
@@ -366,13 +450,35 @@ pub const App = struct {
         app.want_capture = false;
     }
 
+    /// Whether the game can be paused now: while a chapter is on screen, except on the debrief. The
+    /// chapter is over there and recorded, and there is nothing left for the pause menu to resume or
+    /// relaunch.
+    pub fn canPause(app: *const App) bool {
+        return app.screen == .play and app.sim.mode != .complete;
+    }
+
+    /// Pause for a reason the player did not choose: the window lost focus, or the controller in use
+    /// went away. It follows the same rule as the pause key, so it does nothing where that does nothing.
+    pub fn autoPause(app: *App) void {
+        if (app.canPause()) app.openPause();
+    }
+
     fn toTitle(app: *App) void {
         app.sim = game.Sim.init();
         app.parkForTitle();
         app.seedCells();
         app.screen = .title;
+        app.title_sel = .begin;
         app.screen_t = 0;
         app.want_capture = false;
+    }
+
+    fn openBriefing(app: *App, from_map: bool) void {
+        app.chapter = 0;
+        app.screen = .briefing;
+        app.screen_t = 0;
+        app.briefing_page = 0;
+        app.briefing_from_map = from_map;
     }
 
     pub fn step(app: *App, controls_in: game.Controls, ui: UiInput, dt: f32) void {
@@ -388,16 +494,22 @@ pub const App = struct {
                 app.sim.yaw = -0.16 + 0.05 * @sin(app.time * 0.21);
                 app.sim.pitch = -0.1 + 0.03 * @sin(app.time * 0.17);
                 app.updateCells(dt);
+                const n = TitleItem.count;
+                const at = @intFromEnum(app.title_sel);
+                if (ui.down) app.title_sel = @enumFromInt((at + 1) % n);
+                if (ui.up) app.title_sel = @enumFromInt((at + n - 1) % n);
                 if (ui.language or ui.left or ui.right) app.cycleLanguage();
-                if (ui.confirm) {
-                    app.chapter = 0;
-                    app.screen = .briefing;
-                    app.screen_t = 0;
-                    app.briefing_page = 0;
-                } else if (ui.map) {
-                    app.screen = .map;
-                    app.screen_t = 0;
-                }
+                // A key of its own first, then whatever is selected.
+                const choice: ?TitleItem = if (ui.map) .map else if (ui.confirm) app.title_sel else null;
+                if (choice) |item| switch (item) {
+                    .begin => app.openBriefing(false),
+                    .map => {
+                        app.screen = .map;
+                        app.screen_t = 0;
+                    },
+                    .language => app.cycleLanguage(),
+                    .quit => app.want_quit = true,
+                };
             },
             .briefing => {
                 app.sim.clock += dt;
@@ -408,7 +520,9 @@ pub const App = struct {
                     app.screen_t = 0;
                     if (app.briefing_page >= strings.briefing.pages.len) app.startChapter(0);
                 } else if (ui.back or ui.cancel) {
-                    app.screen = .title;
+                    // Back to where the briefing was opened from.
+                    app.screen = if (app.briefing_from_map) .map else .title;
+                    app.screen_t = 0;
                 }
             },
             .map => {
@@ -418,13 +532,7 @@ pub const App = struct {
                 if (ui.up) app.map_sel = (app.map_sel + campaign.chapters.len - 1) % campaign.chapters.len;
                 if (ui.confirm and app.chapterUnlocked(app.map_sel)) {
                     app.chapter = @intCast(app.map_sel);
-                    if (app.chapter == 0) {
-                        app.screen = .briefing;
-                        app.briefing_page = 0;
-                        app.screen_t = 0;
-                    } else {
-                        app.startChapter(0);
-                    }
+                    if (app.chapter == 0) app.openBriefing(true) else app.startChapter(0);
                 } else if (ui.back or ui.cancel) {
                     app.toTitle();
                 }
@@ -460,15 +568,19 @@ pub const App = struct {
                     },
                     .restart => app.startChapter(app.sim.stats.retries + 1),
                     .leave => app.toTitle(),
+                    .quit => app.want_quit = true,
                     .language => app.cycleLanguage(),
                 };
             },
             .play => {
                 const s = &app.sim;
-                if ((ui.back or ui.pause) and s.mode != .complete) {
+                if ((ui.back or ui.pause) and app.canPause()) {
                     app.openPause();
                     return;
                 }
+                // A completion is recorded once, when the debrief comes up. Whatever takes the chapter out
+                // of that state (a restart, a checkpoint restored) makes the next completion a new one.
+                if (s.mode != .complete) app.recorded = false;
                 if (app.bot) |*b| controls = b.think(s, dt);
                 s.ambient_focus = app.ambientFocus();
                 switch (s.mode) {
@@ -688,7 +800,8 @@ test "every entry of the pause menu can be selected and chosen without a key of 
         .{ .item = .retry, .downs = 1 },
         .{ .item = .restart, .downs = 2 },
         .{ .item = .leave, .downs = 3 },
-        .{ .item = .language, .downs = 4 },
+        .{ .item = .quit, .downs = 4 },
+        .{ .item = .language, .downs = 5 },
     }) |case| {
         app.init(false, .en);
         app.chapter = 1;
@@ -700,7 +813,9 @@ test "every entry of the pause menu can be selected and chosen without a key of 
         try std.testing.expectEqual(PauseItem.resume_game, app.pause_sel);
         for (0..case.downs) |_| app.step(.{}, .{ .down = true }, dt);
         try std.testing.expectEqual(case.item, app.pause_sel);
+        try std.testing.expect(!app.want_quit);
         app.step(.{}, .{ .confirm = true }, dt);
+        try std.testing.expectEqual(case.item == .quit, app.want_quit);
         switch (case.item) {
             .resume_game => {
                 try std.testing.expectEqual(Screen.play, app.screen);
@@ -718,6 +833,11 @@ test "every entry of the pause menu can be selected and chosen without a key of 
                 try std.testing.expect(app.sim.voice.current == null or app.sim.stats.time < 0.1);
             },
             .leave => try std.testing.expectEqual(Screen.title, app.screen),
+            .quit => {
+                // Quitting is the application's to do; the game only asks for it.
+                try std.testing.expect(app.want_quit);
+                try std.testing.expectEqual(Screen.pause, app.screen);
+            },
             .language => {
                 try std.testing.expectEqual(Screen.pause, app.screen);
                 try std.testing.expectEqual(Lang.uk, app.lang);
@@ -774,6 +894,23 @@ test "a controller's cancel backs out of menus and does nothing in flight; its p
     try std.testing.expectEqual(Screen.briefing, app.screen);
     app.step(.{}, .{ .cancel = true }, dt);
     try std.testing.expectEqual(Screen.title, app.screen);
+    // Entered from the route map, the briefing backs out to the route map, for Esc and for B alike.
+    inline for (.{ UiInput{ .back = true }, UiInput{ .cancel = true } }) |back| {
+        app.step(.{}, .{ .map = true }, dt);
+        try std.testing.expectEqual(@as(usize, 0), app.map_sel);
+        app.step(.{}, .{ .confirm = true }, dt);
+        try std.testing.expectEqual(Screen.briefing, app.screen);
+        app.step(.{}, .{ .confirm = true }, dt);
+        try std.testing.expectEqual(@as(usize, 1), app.briefing_page);
+        app.step(.{}, back, dt);
+        try std.testing.expectEqual(Screen.map, app.screen);
+        app.step(.{}, back, dt);
+        try std.testing.expectEqual(Screen.title, app.screen);
+    }
+    // And opened from the title again, it backs out to the title.
+    app.step(.{}, .{ .confirm = true }, dt);
+    app.step(.{}, .{ .back = true }, dt);
+    try std.testing.expectEqual(Screen.title, app.screen);
     // in flight the cancel button is the one that descends: it must not open the pause menu
     app.startChapter(0);
     app.step(.{}, .{ .cancel = true }, dt);
@@ -782,4 +919,308 @@ test "a controller's cancel backs out of menus and does nothing in flight; its p
     try std.testing.expectEqual(Screen.pause, app.screen);
     app.step(.{}, .{ .pause = true }, dt);
     try std.testing.expectEqual(Screen.play, app.screen);
+}
+
+fn gradeIsValid(c: u8) bool {
+    return c == '-' or (c >= 'A' and c <= 'D');
+}
+
+/// What every `Save` the parser returns must satisfy, whatever the file held.
+fn saveIsValid(sv: Save) bool {
+    return gradeIsValid(sv.grade) and gradeIsValid(sv.grade2) and
+        sv.stability >= 0 and sv.stability <= 100 and sv.time >= 0 and std.math.isFinite(sv.time);
+}
+
+test "the save parser is total: any bytes give a valid save or none, and never trap" {
+    // The two files from the bug report, which trapped in a safe build and were undefined in a fast one.
+    inline for (.{ "1 66 1e30 81.5 1 9 312.4 1 65 uk", "1 66 2 81.5 1 inf 312.4", "1 nan -inf nan 1 -1e30 nan nan nan", "1 1e30 2 1e30 1 9 -1e30 1 -1e30" }) |text| {
+        const sv = Save.parse(text) orelse return error.TestUnexpectedResult;
+        try std.testing.expect(saveIsValid(sv));
+    }
+    // Out-of-range numbers are clamped into the field, not wrapped.
+    const big = Save.parse("1 66 1e30 1e30 1 inf 1e30 1 65").?;
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), big.emboli);
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), big.atlas);
+    try std.testing.expectEqual(@as(f32, 100), big.stability);
+    // A grade that is not a grade is no grade.
+    const odd = Save.parse("1 33 0 50 0 0 10 1 126").?;
+    try std.testing.expectEqual(@as(u8, '-'), odd.grade);
+    try std.testing.expectEqual(@as(u8, '-'), odd.grade2);
+
+    const words = [_][]const u8{
+        "0",   "1",    "-1",        "66",        "65",         "45",     "81.5", "312.4",  "uk",  "en",  "xx",
+        "inf", "-inf", "nan",       "NaN",       "infinity",   "1e30",   "-1e30", "1e39",  "1e-45", "1e400", "-0",
+        "4294967295", "4294967296", "2147483648", "-2147483649", "18446744073709551616", "0x1p63", "0x", "1_0", "+", "-", ".",
+        "e",   "1e",   "1e+",       "..",        "1.2.3",      "\x00",   "\xff\xfe", "９", "",
+    };
+    var rng = m.Rng.init(20261112);
+    var buf: [600]u8 = undefined;
+    var out: [128]u8 = undefined;
+    var parsed: usize = 0;
+    for (0..30_000) |round| {
+        var n: usize = 0;
+        switch (round % 3) {
+            // bytes with no structure at all
+            0 => {
+                n = rng.below(buf.len);
+                for (buf[0..n]) |*b| b.* = @truncate(rng.next());
+            },
+            // the right shape with hostile fields
+            1 => {
+                const fields = rng.below(14);
+                for (0..fields) |_| {
+                    const w = words[rng.below(words.len)];
+                    @memcpy(buf[n..][0..w.len], w);
+                    n += w.len;
+                    buf[n] = if (rng.below(8) == 0) '\n' else ' ';
+                    n += 1;
+                }
+            },
+            // a real save with a few bytes overwritten, dropped or repeated
+            else => {
+                const good = "1 66 2 81.5 1 9 312.4 1 65 uk\n";
+                @memcpy(buf[0..good.len], good);
+                n = good.len;
+                for (0..1 + rng.below(4)) |_| {
+                    const at = rng.below(@intCast(n));
+                    switch (rng.below(3)) {
+                        0 => buf[at] = @truncate(rng.next()),
+                        1 => n = at,
+                        else => {
+                            const w = words[rng.below(words.len)];
+                            @memcpy(buf[at..][0..w.len], w);
+                            n = @max(n, at + w.len);
+                        },
+                    }
+                    if (n == 0) break;
+                }
+            },
+        }
+        const sv = Save.parse(buf[0..n]) orelse continue;
+        parsed += 1;
+        try std.testing.expect(saveIsValid(sv));
+        // What was read can be written, and what is written reads back the same.
+        const text = sv.format(&out);
+        try std.testing.expect(text.len > 0);
+        try std.testing.expectEqualDeep(sv, Save.parse(text).?);
+    }
+    // The generators do reach the parser's accepting path.
+    try std.testing.expect(parsed > 3000);
+}
+
+test "the title screen's entries can each be selected and chosen, and Begin is the one a first press takes" {
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+    const Case = struct { item: TitleItem, downs: usize };
+    for ([_]Case{
+        .{ .item = .begin, .downs = 0 },
+        .{ .item = .map, .downs = 1 },
+        .{ .item = .language, .downs = 2 },
+        .{ .item = .quit, .downs = 3 },
+    }) |case| {
+        app.init(false, .en);
+        try std.testing.expectEqual(TitleItem.begin, app.title_sel);
+        for (0..case.downs) |_| app.step(.{}, .{ .down = true }, dt);
+        try std.testing.expectEqual(case.item, app.title_sel);
+        app.step(.{}, .{ .confirm = true }, dt);
+        try std.testing.expectEqual(case.item == .quit, app.want_quit);
+        switch (case.item) {
+            .begin => try std.testing.expectEqual(Screen.briefing, app.screen),
+            .map => try std.testing.expectEqual(Screen.map, app.screen),
+            .language => {
+                try std.testing.expectEqual(Lang.uk, app.lang);
+                try std.testing.expectEqual(Screen.title, app.screen);
+            },
+            .quit => try std.testing.expectEqual(Screen.title, app.screen),
+        }
+    }
+    // The selection wraps, the route map keeps its own key whatever is selected, and coming back to the
+    // title puts the selection on Begin again.
+    app.init(false, .en);
+    app.step(.{}, .{ .up = true }, dt);
+    try std.testing.expectEqual(TitleItem.quit, app.title_sel);
+    app.step(.{}, .{ .map = true }, dt);
+    try std.testing.expectEqual(Screen.map, app.screen);
+    try std.testing.expect(!app.want_quit);
+    app.step(.{}, .{ .back = true }, dt);
+    try std.testing.expectEqual(Screen.title, app.screen);
+    try std.testing.expectEqual(TitleItem.begin, app.title_sel);
+}
+
+/// Bring the chapter being flown to its debrief with the grade `stability` earns on a clean run.
+fn finishWith(app: *App, stability: f32) void {
+    const dt: f32 = 1.0 / 60.0;
+    for (0..10) |_| app.step(.{}, .{}, dt);
+    app.sim.stability = stability;
+    app.sim.stats.retries = 0;
+    app.sim.setStage(.done);
+    for (0..5) |_| app.step(.{}, .{}, dt);
+}
+
+test "the debrief cannot be paused, and a chapter finished again after any relaunch is recorded again" {
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+    for (0..2) |ch| {
+        app.init(false, .en);
+        app.chapter = @intCast(ch);
+        app.startChapter(0);
+        // Mid-chapter, losing focus or the controller pauses.
+        for (0..10) |_| app.step(.{}, .{}, dt);
+        app.autoPause();
+        try std.testing.expectEqual(Screen.pause, app.screen);
+        app.step(.{}, .{ .back = true }, dt);
+        try std.testing.expectEqual(Screen.play, app.screen);
+
+        finishWith(app, 40);
+        const saved = if (ch == 0) &app.save.grade else &app.save.grade2;
+        try std.testing.expectEqual(game.Mode.complete, app.sim.mode);
+        try std.testing.expectEqual(@as(u8, 'D'), saved.*);
+        // On the debrief neither the pause key nor a lost focus opens the pause menu.
+        try std.testing.expect(!app.canPause());
+        app.autoPause();
+        app.step(.{}, .{ .back = true }, dt);
+        app.step(.{}, .{ .pause = true }, dt);
+        try std.testing.expectEqual(Screen.play, app.screen);
+
+        // The state the bug needed: a pause menu over a finished chapter, and Relaunch chosen in it. The
+        // menu can no longer be reached from there, and if it were, the next completion would still count.
+        app.openPause();
+        app.step(.{}, .{ .retry = true }, dt);
+        try std.testing.expectEqual(Screen.play, app.screen);
+        try std.testing.expectEqual(game.Mode.playing, app.sim.mode);
+        finishWith(app, 100);
+        try std.testing.expectEqual(@as(u8, 'A'), app.sim.grade());
+        try std.testing.expectEqual(@as(u8, 'A'), saved.*);
+    }
+}
+
+test "one rule decides which run is on record, in both chapters: the best grade, and the latest of equals" {
+    try std.testing.expect(Save.supersedes('C', false, '-'));
+    try std.testing.expect(Save.supersedes('D', true, '-'));
+    try std.testing.expect(Save.supersedes('A', true, 'B'));
+    try std.testing.expect(Save.supersedes('B', true, 'B'));
+    try std.testing.expect(!Save.supersedes('C', true, 'B'));
+
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    for (0..2) |ch| {
+        app.init(false, .en);
+        const saved = if (ch == 0) &app.save.grade else &app.save.grade2;
+        const Run = struct { stability: f32, grade: u8, on_record: u8 };
+        for ([_]Run{
+            .{ .stability = 75, .grade = 'B', .on_record = 'B' }, // first completion
+            .{ .stability = 55, .grade = 'C', .on_record = 'B' }, // worse: ignored
+            .{ .stability = 72, .grade = 'B', .on_record = 'B' }, // equal: replaces, with its own figures
+            .{ .stability = 95, .grade = 'A', .on_record = 'A' }, // better: replaces
+        }) |run| {
+            app.chapter = @intCast(ch);
+            app.startChapter(0);
+            finishWith(app, run.stability);
+            try std.testing.expectEqual(run.grade, app.sim.grade());
+            try std.testing.expectEqual(run.on_record, saved.*);
+            if (ch == 0) try std.testing.expectEqual(@as(f32, if (run.grade == 'C') 75 else run.stability), app.save.stability);
+        }
+    }
+}
+
+extern "c" fn link(from: [*:0]const u8, to: [*:0]const u8) c_int;
+extern "c" fn chmod(path: [*:0]const u8, mode: c_uint) c_int;
+
+/// A scratch home directory for one test, with HOME pointing at it until `leave`.
+const ScratchHome = struct {
+    dir: [64:0]u8 = undefined,
+    len: usize = 0,
+    old: [512:0]u8 = undefined,
+    had_old: bool = false,
+
+    fn enter(sh: *ScratchHome) !void {
+        const template = "/tmp/dentro-test-XXXXXX";
+        @memcpy(sh.dir[0..template.len], template);
+        sh.dir[template.len] = 0;
+        sh.len = std.mem.span(mkdtemp(&sh.dir) orelse return error.SkipZigTest).len;
+        if (util.env("HOME")) |h| {
+            @memcpy(sh.old[0..h.len], h);
+            sh.old[h.len] = 0;
+            sh.had_old = true;
+        }
+        _ = setenv("HOME", &sh.dir, 1);
+    }
+
+    fn path(sh: *const ScratchHome, buf: []u8, rel: []const u8) [:0]const u8 {
+        return std.fmt.bufPrintSentinel(buf, "{s}/{s}", .{ sh.dir[0..sh.len], rel }, 0) catch unreachable;
+    }
+
+    /// Remove what the tests leave behind, deepest first, and put HOME back.
+    fn leave(sh: *ScratchHome, files: []const []const u8, dirs: []const []const u8) void {
+        var buf: [600]u8 = undefined;
+        for (files) |f| _ = unlink(sh.path(&buf, f).ptr);
+        for (dirs) |d| _ = rmdir(sh.path(&buf, d).ptr);
+        _ = rmdir(&sh.dir);
+        if (sh.had_old) _ = setenv("HOME", &sh.old, 1);
+    }
+};
+
+test "a save is written under a home that has no Library directory yet, and replaces the file whole" {
+    var sh: ScratchHome = .{};
+    try sh.enter();
+    defer sh.leave(&.{ save_dir ++ "/save.txt", save_dir ++ "/save.old" }, &.{ save_dir, "Library/Application Support", "Library" });
+    var b1: [600]u8 = undefined;
+    var b2: [600]u8 = undefined;
+    var file: [256]u8 = undefined;
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+
+    // A new account, or a sandbox: nothing under the home directory at all. Launching creates nothing.
+    app.init(true, .uk);
+    try std.testing.expect(!util.isDir(sh.path(&b1, "Library").ptr));
+    // The first thing worth saving creates the directory with its parents and writes the file.
+    app.step(.{}, .{ .language = true }, dt);
+    const save_path = sh.path(&b1, save_dir ++ "/save.txt");
+    try std.testing.expectEqualStrings("0 45 0 0.0 0 0 0.0 0 45 en\n", util.readFile(save_path.ptr, &file).?);
+    try std.testing.expect(!app.save_failed);
+    try std.testing.expectEqual(@as(u32, 0), app.save_reports);
+
+    // The next save replaces the file rather than rewriting it in place: a second name for the old file
+    // still reads the old contents afterwards, which is what a reader or a crash mid-write would see.
+    const old_name = sh.path(&b2, save_dir ++ "/save.old");
+    try std.testing.expectEqual(@as(c_int, 0), link(save_path.ptr, old_name.ptr));
+    app.step(.{}, .{ .language = true }, dt);
+    try std.testing.expectEqualStrings("0 45 0 0.0 0 0 0.0 0 45 uk\n", util.readFile(save_path.ptr, &file).?);
+    try std.testing.expectEqualStrings("0 45 0 0.0 0 0 0.0 0 45 en\n", util.readFile(old_name.ptr, &file).?);
+
+    // Nothing but the save and the test's own link is left in the directory: no temporary file.
+    _ = unlink(old_name.ptr);
+    _ = unlink(save_path.ptr);
+    try std.testing.expectEqual(@as(c_int, 0), rmdir(sh.path(&b2, save_dir).ptr));
+}
+
+test "a save that cannot be written is reported once, and saving resumes when it can" {
+    var sh: ScratchHome = .{};
+    try sh.enter();
+    defer sh.leave(&.{ "Library", save_dir ++ "/save.txt" }, &.{ save_dir, "Library/Application Support", "Library" });
+    var b1: [600]u8 = undefined;
+    var file: [256]u8 = undefined;
+    const app = try std.testing.allocator.create(App);
+    defer std.testing.allocator.destroy(app);
+    const dt: f32 = 1.0 / 60.0;
+
+    // "Library" is a file, so the save directory cannot be created under it.
+    const blocker = sh.path(&b1, "Library");
+    try std.testing.expect(util.writeFile(blocker.ptr, "in the way"));
+    app.init(true, .en);
+    for (0..5) |_| app.step(.{}, .{ .language = true }, dt);
+    try std.testing.expect(app.save_failed);
+    try std.testing.expectEqual(@as(u32, 1), app.save_reports);
+    // The game itself carries on: the language did change each time.
+    try std.testing.expectEqual(Lang.uk, app.lang);
+
+    // The obstacle goes away: the next save succeeds, quietly, and a later failure would be reported anew.
+    _ = unlink(blocker.ptr);
+    app.step(.{}, .{ .language = true }, dt);
+    try std.testing.expect(!app.save_failed);
+    try std.testing.expectEqual(@as(u32, 1), app.save_reports);
+    try std.testing.expectEqualStrings("0 45 0 0.0 0 0 0.0 0 45 en\n", util.readFile(sh.path(&b1, save_dir ++ "/save.txt").ptr, &file).?);
 }

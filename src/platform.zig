@@ -289,6 +289,11 @@ pub const Gamepad = struct {
 
 var quit_requested: bool = false;
 var lost_focus: bool = false;
+var menu_probe_hits: u32 = 0;
+
+fn menuProbe(_: id, _: SEL, _: id) callconv(.c) void {
+    menu_probe_hits += 1;
+}
 
 fn windowWillClose(_: id, _: SEL, _: id) callconv(.c) void {
     quit_requested = true;
@@ -341,13 +346,28 @@ pub fn preferredLanguages(buf: []u8) []const u8 {
 /// Titles of the two items in the application menu.
 pub const MenuTitles = struct { fullscreen: [*:0]const u8, quit: [*:0]const u8 };
 
+/// The Cmd bit of an event's modifier flags.
+pub const cmd_flag: u64 = 1 << 20;
+
+/// Where to put the cursor so that it sits at the centre of a window. `frame` is the window's frame as
+/// AppKit gives it: in points, y up, origin at the bottom left of the primary display. The answer is in
+/// the coordinates `CGWarpMouseCursorPosition` takes: y down, origin at the top left of the primary
+/// display. Both spaces span every display, so the flip is about the height of the primary display, the
+/// one at index 0 of `NSScreen.screens`, whichever display the window is on.
+pub fn warpTarget(frame: objc.Rect, primary_height: f64) objc.Point {
+    return .{ .x = frame.x + frame.w * 0.5, .y = primary_height - (frame.y + frame.h * 0.5) };
+}
+
 pub const Platform = struct {
     app: id,
     window: id,
     view: id,
     fullscreen_item: id,
     quit_item: id,
+    delegate: id = null,
     captured: bool = false,
+    /// Keys whose press the menu bar took as a shortcut. Their repeats are nobody's until the key comes up.
+    menu_keys: [128]bool = @splat(false),
     input: Input = .{},
     /// The game controller this frame, as the device reports it; `pump` refreshes it from `pad_source`.
     /// This struct is all the rest of the program knows of a controller.
@@ -364,6 +384,7 @@ pub const Platform = struct {
         objc.addMethod(Delegate, "windowDidResignKey:", &windowDidResignKey, "v@:@");
         objc.addMethod(Delegate, "applicationShouldTerminate:", &shouldTerminate, "Q@:@");
         objc.addMethod(Delegate, "applicationShouldTerminateAfterLastWindowClosed:", &shouldTerminateAfterLastWindowClosed, "B@:@");
+        objc.addMethod(Delegate, "ddcMenuProbe:", &menuProbe, "v@:@");
         objc.registerClass(Delegate);
         const delegate = objc.send(fn (id, SEL) callconv(.c) id, objc.send(fn (id, SEL) callconv(.c) id, Delegate, "alloc", .{}), "init", .{});
         objc.setObj(app, "setDelegate:", delegate);
@@ -396,7 +417,7 @@ pub const Platform = struct {
         objc.call(app, "finishLaunching");
         objc.setObj(window, "makeKeyAndOrderFront:", null);
         objc.setB(app, "activateIgnoringOtherApps:", true);
-        return .{ .app = app, .window = window, .view = view, .fullscreen_item = fs_item, .quit_item = quit_item, .gamepad = Gamepad.init() };
+        return .{ .app = app, .window = window, .view = view, .fullscreen_item = fs_item, .quit_item = quit_item, .delegate = delegate, .gamepad = Gamepad.init() };
     }
 
     /// True while this window is the one the keyboard types into.
@@ -438,15 +459,36 @@ pub const Platform = struct {
         objc.setObj(p.window, "toggleFullScreen:", null);
     }
 
+    /// Quit as the Quit menu item does: AppKit runs `applicationShouldTerminate:` and exits the process.
+    pub fn quit(p: *Platform) void {
+        objc.setObj(p.app, "terminate:", null);
+    }
+
+    /// For the input test. While `on`, the Full Screen menu item counts its activations instead of acting,
+    /// so the test can press Cmd+F and see the shortcut arrive without the window changing mode.
+    pub fn probeFullscreenItem(p: *Platform, on: bool) void {
+        objc.setObj(p.fullscreen_item, "setTarget:", if (on) p.delegate else null);
+        objc.send(fn (id, SEL, SEL) callconv(.c) void, p.fullscreen_item, "setAction:", .{objc.sel(if (on) "ddcMenuProbe:" else "toggleFullScreen:")});
+    }
+
+    pub fn menuProbeHits(_: *Platform) u32 {
+        return menu_probe_hits;
+    }
+
     /// Hide and freeze the cursor so mouse deltas drive the look direction.
     pub fn capture(p: *Platform, on: bool) void {
         if (on == p.captured) return;
         p.captured = on;
         if (on) {
-            const f = objc.send(fn (id, SEL) callconv(.c) objc.Rect, p.window, "frame", .{});
-            const screen = objc.get(objc.class("NSScreen"), "mainScreen");
-            const sf = objc.send(fn (id, SEL) callconv(.c) objc.Rect, screen, "frame", .{});
-            _ = CGWarpMouseCursorPosition(.{ .x = f.x + f.w * 0.5, .y = sf.h - (f.y + f.h * 0.5) });
+            // The primary display is the first of `screens`. `mainScreen` is the one with the key window,
+            // which is a different display, of a different height, when the game is on a second monitor.
+            const screens = objc.get(objc.class("NSScreen"), "screens");
+            if (objc.send(fn (id, SEL) callconv(.c) u64, screens, "count", .{}) > 0) {
+                const primary = objc.send(fn (id, SEL, u64) callconv(.c) id, screens, "objectAtIndex:", .{@as(u64, 0)});
+                const pf = objc.send(fn (id, SEL) callconv(.c) objc.Rect, primary, "frame", .{});
+                const f = objc.send(fn (id, SEL) callconv(.c) objc.Rect, p.window, "frame", .{});
+                _ = CGWarpMouseCursorPosition(warpTarget(f, pf.h));
+            }
             _ = CGAssociateMouseAndMouseCursorPosition(0);
             objc.call(objc.class("NSCursor"), "hide");
         } else {
@@ -462,17 +504,31 @@ pub const Platform = struct {
             const ev = objc.send(fn (id, SEL, u64, id, id, bool) callconv(.c) id, p.app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ std.math.maxInt(u64), null, NSDefaultRunLoopMode, true }) orelse break;
             const ty = objc.send(fn (id, SEL) callconv(.c) u64, ev, "type", .{});
             const flags = objc.send(fn (id, SEL) callconv(.c) u64, ev, "modifierFlags", .{});
-            const cmd = flags & (1 << 20) != 0;
+            const cmd = flags & cmd_flag != 0;
             var forward = true;
             switch (ty) {
                 10, 11 => { // key down / up
+                    // Key events stop here. With no text field to take them AppKit would only beep, and it
+                    // discards a key-up that arrives while Cmd is held. What AppKit would have done with a
+                    // key pressed under Cmd is done directly: the menu bar is offered it, which is where
+                    // Cmd+F and Cmd+Q are. A press the menu takes is not the game's, and neither are its
+                    // repeats. Every other press is recorded whatever the modifiers, and every release is
+                    // recorded without exception: a key held through Cmd+F and let go before Cmd comes up
+                    // with the Cmd flag set, and dropping it left the key down for good.
+                    forward = false;
                     const code = objc.send(fn (id, SEL) callconv(.c) u16, ev, "keyCode", .{});
-                    if (!cmd) {
-                        forward = false;
-                        if (code < 128) {
-                            const is_down = ty == 10;
-                            if (is_down and !in.keys[code]) in.pressed[code] = true;
-                            in.keys[code] = is_down;
+                    const is_down = ty == 10;
+                    if (code < 128) {
+                        if (!is_down) {
+                            p.menu_keys[code] = false;
+                            in.keys[code] = false;
+                        } else if (!p.menu_keys[code]) {
+                            if (cmd and !in.keys[code] and objc.send(fn (id, SEL, id) callconv(.c) bool, objc.get(p.app, "mainMenu"), "performKeyEquivalent:", .{ev})) {
+                                p.menu_keys[code] = true;
+                            } else {
+                                if (!in.keys[code]) in.pressed[code] = true;
+                                in.keys[code] = true;
+                            }
                         }
                     }
                 },
@@ -509,7 +565,10 @@ pub const Platform = struct {
         }
         const lost = lost_focus;
         lost_focus = false;
-        if (lost) in.releaseAll();
+        if (lost) {
+            in.releaseAll();
+            p.menu_keys = @splat(false);
+        }
         return lost;
     }
 
@@ -540,18 +599,39 @@ pub const Platform = struct {
     /// Post a synthetic key event into this application's own queue (used by the end-to-end demo run, so
     /// scripted input travels the same path as the keyboard without touching other applications).
     pub fn postKey(p: *Platform, key: Key, is_down: bool) void {
+        p.postKeyWith(key, is_down, 0, "");
+    }
+
+    /// `postKey` with modifier flags and the character the key types, which is what a menu shortcut is
+    /// matched on.
+    pub fn postKeyWith(p: *Platform, key: Key, is_down: bool, flags: u64, chars: [*:0]const u8) void {
         const ev = objc.send(fn (id, SEL, u64, objc.Point, u64, f64, i64, id, id, id, bool, u16) callconv(.c) id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{
             @as(u64, if (is_down) 10 else 11),
             objc.Point{ .x = 0, .y = 0 },
-            0,
+            flags,
             now(),
             objc.send(fn (id, SEL) callconv(.c) i64, p.window, "windowNumber", .{}),
             null,
-            objc.nsString(""),
-            objc.nsString(""),
+            objc.nsString(chars),
+            objc.nsString(chars),
             false,
             @as(u16, @intFromEnum(key)),
         });
         if (ev != null) objc.send(fn (id, SEL, id, bool) callconv(.c) void, p.app, "postEvent:atStart:", .{ ev, false });
     }
 };
+
+test "the capture warp flips about the primary display, whichever display the window is on" {
+    // A window on the primary display (1512 x 982 points): its centre, measured from the top.
+    const on_primary = warpTarget(.{ .x = 36, .y = 41, .w = 1440, .h = 900 }, 982);
+    try std.testing.expectEqual(@as(f64, 756), on_primary.x);
+    try std.testing.expectEqual(@as(f64, 491), on_primary.y);
+    // A 2560 x 1440 display standing to the right of it with the bottom edges level: in AppKit's space it
+    // spans x 1512..4072, y 0..1440, and in the space the cursor is warped in its top edge is at y = -458.
+    // A full-screen window there has its centre 720 points below that top edge.
+    const on_second = warpTarget(.{ .x = 1512, .y = 0, .w = 2560, .h = 1440 }, 982);
+    try std.testing.expectEqual(@as(f64, 2792), on_second.x);
+    try std.testing.expectEqual(@as(f64, -458 + 720), on_second.y);
+    // Flipping about that display's own height, as the code once did, lands 458 points lower, off centre.
+    try std.testing.expect(warpTarget(.{ .x = 1512, .y = 0, .w = 2560, .h = 1440 }, 1440).y != on_second.y);
+}

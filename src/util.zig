@@ -28,6 +28,60 @@ pub fn makeDir(path: [*:0]const u8) void {
     _ = mkdir(path, 0o755);
 }
 
+extern "c" fn rename(from: [*:0]const u8, to: [*:0]const u8) c_int;
+extern "c" fn remove(path: [*:0]const u8) c_int;
+extern "c" fn fflush(f: *FILE) c_int;
+extern "c" fn fileno(f: *FILE) c_int;
+extern "c" fn fsync(fd: c_int) c_int;
+extern "c" fn getpid() c_int;
+extern "c" fn opendir(path: [*:0]const u8) ?*anyopaque;
+extern "c" fn closedir(dir: *anyopaque) c_int;
+
+pub fn isDir(path: [*:0]const u8) bool {
+    const d = opendir(path) orelse return false;
+    _ = closedir(d);
+    return true;
+}
+
+/// Create `path` and every missing directory above it. True if `path` is a directory afterwards.
+pub fn makeDirs(path: []const u8) bool {
+    var buf: [1024]u8 = undefined;
+    if (path.len == 0 or path.len >= buf.len) return false;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    const z: [*:0]const u8 = @ptrCast(&buf);
+    if (isDir(z)) return true;
+    // Each prefix that ends before a separator, shortest first, then the whole path. A component that
+    // exists already makes mkdir fail, which is fine; whether the whole succeeded is read off at the end.
+    var i: usize = 1;
+    while (i < path.len) : (i += 1) {
+        if (path[i] != '/') continue;
+        buf[i] = 0;
+        _ = mkdir(z, 0o755);
+        buf[i] = '/';
+    }
+    _ = mkdir(z, 0o755);
+    return isDir(z);
+}
+
+/// Replace the file at `path` with `bytes` so that a reader, or a crash at any moment, sees either the
+/// old contents or the new and never a part of either: the bytes go to a temporary file beside it, are
+/// flushed to the disk, and the file is renamed over `path`. The directory must exist.
+pub fn writeFileAtomic(path: []const u8, bytes: []const u8) bool {
+    var tmp_buf: [1100]u8 = undefined;
+    var path_buf: [1024]u8 = undefined;
+    const tmp = std.fmt.bufPrintSentinel(&tmp_buf, "{s}.{d}.tmp", .{ path, getpid() }, 0) catch return false;
+    const dest = std.fmt.bufPrintSentinel(&path_buf, "{s}", .{path}, 0) catch return false;
+    const f = fopen(tmp.ptr, "wb") orelse return false;
+    var ok = fwrite(bytes.ptr, 1, bytes.len, f) == bytes.len;
+    ok = fflush(f) == 0 and ok;
+    ok = fsync(fileno(f)) == 0 and ok;
+    ok = fclose(f) == 0 and ok;
+    ok = ok and rename(tmp.ptr, dest.ptr) == 0;
+    if (!ok) _ = remove(tmp.ptr);
+    return ok;
+}
+
 pub fn env(name: [*:0]const u8) ?[]const u8 {
     const p = getenv(name) orelse return null;
     return std.mem.span(p);

@@ -248,7 +248,7 @@ pub const chapters = [_]Chapter{
         .site = .{ .en = "Tonsillar crypt to olfactory cleft", .uk = "Від крипти мигдалика до нюхової щілини" },
         .route = .{
             .en = "Back up the afferent lymphatic through its valves → palatine tonsil → crypt → oropharynx.",
-            .uk = "Назад привідною лімфатичною судиною крізь її клапани → піднебінний мигдалик → крипта → ротоглотка.",
+            .uk = "Назад приносною лімфатичною судиною крізь її клапани → піднебінний мигдалик → крипта → ротоглотка.",
         },
         .read = .{
             .en = "The mucociliary escalator: metachronal waves point to the throat; the swallow wave.",
@@ -274,7 +274,7 @@ pub const chapters = [_]Chapter{
         .site = .{ .en = "Third ventricle", .uk = "Третій шлуночок" },
         .route = .{
             .en = "Olfactory filum → cribriform plate → subarachnoid space → lamina terminalis → third ventricle.",
-            .uk = "Нюхова нитка → решітчаста пластинка → субарахноїдальний простір → кінцева пластинка → третій шлуночок.",
+            .uk = "Нюхова нитка → дірчаста пластинка → субарахноїдальний простір → кінцева пластинка → третій шлуночок.",
         },
         .read = .{
             .en = "CSF pulsation and flow from the choroid plexus through the foramina; the fornix, which must not be touched.",
@@ -325,7 +325,7 @@ pub const chapters = [_]Chapter{
         },
         .read = .{
             .en = "The travelling wave on the basilar membrane: pitch is a place.",
-            .uk = "Біжна хвиля на базилярній мембрані: висота тону — це місце.",
+            .uk = "Біжуча хвиля на базилярній мембрані: висота тону — це місце.",
         },
         .objective = .{
             .en = "Hidden chapter. Found by waiting at the torus tubarius through one swallow in the pharynx.",

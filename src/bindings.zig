@@ -77,6 +77,7 @@ pub const Action = enum(u8) {
     retry,
     restart,
     leave,
+    quit,
 
     pub const count = @typeInfo(Action).@"enum".field_names.len;
 };
@@ -130,6 +131,7 @@ pub fn binding(a: Action) Binding {
         .retry => .{ .keys = K.retry, .pad = .menu },
         .restart => .{ .keys = K.restart, .pad = .menu },
         .leave => .{ .keys = K.leave, .pad = .menu },
+        .quit => .{ .keys = K.quit, .pad = .menu },
     };
 }
 

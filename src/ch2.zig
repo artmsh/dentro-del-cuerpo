@@ -512,7 +512,7 @@ pub fn punched(s: *Sim, idx: u16, dir: Vec3) void {
 pub fn shotHit(s: *Sim, sh: *game.Shot, idx: u16, at: Vec3) bool {
     const g = &s.g;
     const e = &s.ents[idx];
-    const dmg: f32 = if (sh.lance) 3 else 1;
+    const dmg: f32 = if (sh.lance) game.lance_factor else 1;
     const arm = &s.arms[sh.arm];
     switch (e.kind) {
         .infected => {

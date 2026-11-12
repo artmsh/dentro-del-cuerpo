@@ -171,6 +171,9 @@ pub const Mapper = struct {
 /// gyroscope and the trackpads arrive as mouse movement while the player's hands are on the controller.
 pub const Tracker = struct {
     device: bindings.Device = .kbm,
+    /// True for the one frame in which the controller the prompts were on is found to be gone. A
+    /// controller nobody was using can come and go unremarked, and losing focus is not losing the controller.
+    lost_pad: bool = false,
 
     /// What the keyboard and mouse did this frame: a key or mouse button went down, or one is held.
     pub const Keys = struct {
@@ -183,6 +186,7 @@ pub const Tracker = struct {
         const pad_pressed = sample.connected and sample.anyPressed();
         const pad_held = sample.connected and (sample.down.count() > 0 or sample.deflected());
         const on_pad = t.device.isPad();
+        t.lost_pad = on_pad and !sample.connected;
         if (on_pad and !sample.connected) {
             // The controller is gone; the keyboard is what is left.
             t.device = .kbm;
@@ -630,7 +634,27 @@ test "prompts return to the keyboard when the controller is unplugged, not when 
     st.family = .playstation;
     _ = f.update(st, true);
     try expectEqual(bindings.Device.playstation, t.update(.{}, &f.update(st, false)));
+    try expect(!t.lost_pad);
     try expectEqual(bindings.Device.kbm, t.update(.{}, &f.update(.{}, true)));
+    try expect(t.lost_pad);
+    // The loss is reported for that frame only.
+    _ = t.update(.{}, &f.update(.{}, true));
+    try expect(!t.lost_pad);
+}
+
+test "only the loss of the controller in use is a loss: one nobody touched can go unremarked" {
+    var t: Tracker = .{};
+    var f: pad.Filter = .{};
+    // Attached and idle while the player is on the keyboard, then unplugged.
+    try expectEqual(bindings.Device.kbm, t.update(.{ .pressed = true }, &f.update(idle(), true)));
+    try expectEqual(bindings.Device.kbm, t.update(.{}, &f.update(.{}, true)));
+    try expect(!t.lost_pad);
+    // Picked up and used, then gone.
+    _ = f.update(idle(), true);
+    try expectEqual(bindings.Device.xbox, t.update(.{}, &f.update(with(&.{.a}), true)));
+    try expect(!t.lost_pad);
+    try expectEqual(bindings.Device.kbm, t.update(.{}, &f.update(.{}, true)));
+    try expect(t.lost_pad);
 }
 
 test "the puppet's controller state maps back to the controls it was asked for" {
