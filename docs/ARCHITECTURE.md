@@ -82,29 +82,32 @@ branch, so the post pass names level 0 where Metal leaves it to the sampler, and
 before the branch that decides whether to use it. The back buffer is BGRA8 without an sRGB view on both
 systems and the shader applies the gamma itself.
 
-Three differences are in arithmetic, and were found only by putting the two systems' frames side by side.
-The Voronoi cell hash and the film grain both keep the fraction of 43758 times the sine of an argument
-that reaches the tens and hundreds of thousands, which makes every bit of that sine count. Metal on Apple's
-GPUs returns the true sine for such arguments. Direct3D specifies `sin` only between -100π and 100π, and
-WARP's results outside that range were poor enough that the grain came out as diagonal stripes and the
-epithelial cells of chapter 2 were uneven. The HLSL file therefore has its own `sinExact` for those two
-call sites: it reduces the argument to a fraction of a turn in 32-bit integer arithmetic, using 1/2π to 64
-binary places, and evaluates a polynomial on the remaining quarter turn, which is accurate to 2·10⁻⁷.
-With that the cells were as even as on the Mac but were still different cells, because the argument of
-the hash differed in its last bit. It is a two-term dot product, which Metal's compiler turns into one
-multiplication and one fused multiply-add; writing `fma(p.y, 311.7, p.x * 127.1)` in the Metal file leaves
-every frame unchanged, and the other order changes most of them. Direct3D leaves fusing to the driver, so
-`dotFused` in the HLSL file builds the same single rounding out of additions whose rounding errors are kept
-(the second constant is supplied in three eight-bit pieces so that each partial product is exact). The
-third was the remainder that wraps a cell's column around a villus or the vessel: the HLSL compiler makes
-`fmod` out of a division, the fraction of the quotient and a multiplication, which returns 5.9999995 where
-the remainder is 6, so `wholeMod` takes it in integers. Integer
-operations and correctly rounded single additions and multiplications are what every Direct3D
-implementation is required to compute alike, and `dotFused` is marked `precise` so that neither the
-compiler nor a driver may rearrange it, so the cells fall where they do on the Mac on any conforming
-graphics card. The parity
-test lists the changed lines as exceptions and carries transcriptions of the first two functions, one
-checked against the true sine and the other bit for bit against a fused multiply-add.
+The patterns that look random are computed in integers in both files. The Voronoi cells of the vessel
+wall and the gut epithelium, the lattice behind the value noise of every mottled surface, and the film
+grain each need a hash: a number that looks random and is the same whenever it is asked for the same cell,
+lattice point or pixel. The usual shader idiom takes the fraction of a sine, or of a product of fractions,
+multiplied by a large constant, and the first version of both files used it. Such a hash turns a
+difference in the last bit of its argument into a different result, and graphics APIs do not fix the last
+bit of floating-point work: Direct3D specifies `sin` only between -100π and 100π, leaves it to the driver
+whether a multiplication and an addition are fused into one rounding, and compiles `fmod` into a division
+and a multiplication whose remainder of two whole numbers is not always whole. On WARP this showed as film
+grain in diagonal stripes and as cells laid out differently from the Mac's. On an NVIDIA card it showed as
+a fault: the driver rounded the argument of the cell hash differently at the three places where `voronoi`
+asks for it, so a cell's border was measured against a displaced copy of the cell's own centre, the layout
+was uneven and whole cells were drawn dark. An interim version reproduced Metal's rounding in the HLSL file
+with a sine reduced in integers and a fused multiply-add assembled from error-free additions, which made
+WARP agree with the Mac and did not survive that driver. The hashes are therefore the PCG hashes of
+Jarzynski and Olano ("Hash Functions for GPU Rendering", 2020) applied to the whole-number coordinates as
+32-bit integers, and the column of a cell on a pattern that closes around a tube is wrapped by an integer
+remainder. Integer arithmetic has one answer on every GPU, so a cell has the same hash wherever it is asked
+for and every machine draws the same cells, the same mottling and, for a given frame time, the same grain.
+What remains in floating point is smooth (the interpolation between lattice values, the distances inside a
+cell, the sines that move a surface), and there a different last bit moves a colour by less than can be
+seen. Frames from two GPUs are consequently alike without being equal byte for byte, and nothing in CI
+assumes they are. The parity test refuses a hash that contains a sine, a fraction, a remainder or a dot
+product, and carries transcriptions of both hashes whose output it checks for uniformity and for the
+absence of any relation between neighbouring cells, pixels and frames, which in the grain would be visible
+as stripes.
 
 The Direct3D device can be taken away while the game runs (a driver update, a remote-desktop session, a
 laptop switching graphics cards). The backend keeps the shader source, the mesh data and the font atlas on
@@ -413,8 +416,9 @@ in a real window, and it checks the packaged executable's subsystem, resources a
 line, since the simulation is meant to play out identically on both, and a release is published only when
 all three have passed. Each job checks that its zip holds the game's two licence files. The release job
 can be run again for the same commit: a re-run has the same run number and therefore the same version, so
-when the release already exists its files are replaced instead of the job failing on the tag. The WARP frames are kept as a build artifact; they are how the Direct3D renderer was
-compared with the Metal one, frame against frame, without a Windows machine.
+when the release already exists its files are replaced instead of the job failing on the tag. The WARP frames are kept as a build artifact so that the Direct3D
+renderer's output can be looked at beside the Metal one's; no job compares frames between the two systems
+numerically, because they are not expected to be equal to the byte.
 
 ## Build and packaging
 

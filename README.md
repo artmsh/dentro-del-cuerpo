@@ -200,12 +200,14 @@ vein that should not be in circulating blood) is already in chapter 1.
 ## Limitations
 
 - Apple Silicon Macs and x64 Windows only: there is no build for Intel Macs, Windows on ARM or Linux.
-- The Windows version has so far run only on CI machines, which have a desktop session but no graphics
-  card, no sound device and no controller. There it passes the same tests as the macOS version, its
-  scripted playthroughs print the same summary line for line, and its frames, drawn by Direct3D's software
-  renderer, were compared with the Metal ones screen by screen in both languages. It has not yet been
-  played on a physical Windows machine, so frame rate on real graphics cards, sound output, mouse feel,
-  full screen and behaviour across monitors of different DPI are unconfirmed.
+- The Windows version has been run almost entirely on CI machines, which have a desktop session but no
+  graphics card, no sound device and no controller. There it passes the same tests as the macOS version,
+  its scripted playthroughs print the same summary line for line, and its frames, drawn by Direct3D's
+  software renderer, were looked at beside the Metal ones screen by screen in both languages. On one
+  physical machine (Windows 11, an NVIDIA card) the scripted playthrough and the offscreen render of every
+  screen have been run on the card and on the software renderer. It has not yet been played by hand, so
+  frame rate in play, sound output, mouse feel, full screen and behaviour across monitors of different DPI
+  are unconfirmed, as is the picture on AMD and Intel cards.
 - On Windows the DualShock 4 and DualSense code is tested against the controllers' documented report
   layouts and has not been run against a physical controller.
 - The Windows executable is not code-signed, so SmartScreen warns on first launch.
@@ -265,7 +267,7 @@ directory cannot be made, a frame cannot be written or a chapter is not flown to
 rely on its status.
 
 ```text
-Build Summary: 12/12 steps succeeded; 148/148 tests passed
+Build Summary: 12/12 steps succeeded; 150/150 tests passed
 …
 selftest ch2: completed=true stage=done sim_time=86.8s deaths=0 stability=100.0 grade=A atlas=3
 …
