@@ -267,7 +267,7 @@ directory cannot be made, a frame cannot be written or a chapter is not flown to
 rely on its status.
 
 ```text
-Build Summary: 12/12 steps succeeded; 150/150 tests passed
+Build Summary: 12/12 steps succeeded; 151/151 tests passed
 …
 selftest ch2: completed=true stage=done sim_time=86.8s deaths=0 stability=100.0 grade=A atlas=3
 …

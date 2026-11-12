@@ -415,7 +415,8 @@ system-preference path testable without changing system settings.
 
 Scripted and bot-driven modes never read or write the save file.
 
-CI runs all of this on both systems for every push (`.github/workflows/ci.yml`). The Windows job runs on a
+CI runs all of this on both systems for every push to `main` and every pull request, and on request for
+any other branch (`.github/workflows/ci.yml`). The Windows job runs on a
 GitHub-hosted Windows Server machine, which has a desktop session but no graphics card, no sound device
 and no controller. It runs `zig build test` natively, the release executable's `--selftest`, `--shots` in
 both languages through WARP, the same render with a forced device loss, and `--inputtest` and `--padtest`
