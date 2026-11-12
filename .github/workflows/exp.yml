@@ -19,7 +19,7 @@ jobs:
           version: 0.17.1
       - run: zig build -Doptimize=ReleaseFast
       - run: |
-          for v in F G H; do
+          for v in I J K; do
             python .github/exp/variant.py src/shaders/shaders.hlsl "zig-out/Dentro del cuerpo/shaders/shaders.hlsl" $v
             DENTRO_GPU_LOG=1 "$EXE" --software --chapter 2 --lang uk --shots out/$v 2>&1 | grep -v '^wrote ' || true
             mkdir -p keep

@@ -20,4 +20,11 @@ elif v == 'G':
     rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(albedo, 1.0);')
 elif v == 'H':
     rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(mott, band, vo.z, 1.0);')
+elif v == 'I':
+    rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(smoothstep(0.0, 0.1, vo.y), saturate(vo.y * 10.0), vo.y * 3.0, 1.0);')
+elif v == 'J':
+    rep('        float edge = lerp(1.0, smoothstep(0.0, 0.1, vo.y), near);' if hlsl else '        float edge = mix(1.0, smoothstep(0.0, 0.1, vo.y), near);',
+        '        float e_t = saturate(vo.y * 10.0); float edge = 1.0 + (e_t * e_t * (3.0 - 2.0 * e_t) - 1.0) * near;')
+elif v == 'K':
+    rep('        N = normalize(N - (1.0 - edge) * 0.5 * V);', '        return float4(edge, 1.0 + (smoothstep(0.0, 0.1, vo.y) - 1.0) * near, smoothstep(0.0, 0.1, vo.y), 1.0);')
 open(dst, 'w', newline='').write(s)
