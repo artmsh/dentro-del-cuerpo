@@ -40,7 +40,11 @@ jobs:
           codesign --verify --strict "zig-out/Dentro del cuerpo.app"
           otool -l zig-out/bin/dentro | grep -A3 LC_BUILD_VERSION | grep -q 'minos 14.0'
       - name: Package
-        run: ditto -c -k --keepParent "zig-out/Dentro del cuerpo.app" Dentro-del-cuerpo-macos-arm64.zip
+        run: |
+          ditto -c -k --keepParent "zig-out/Dentro del cuerpo.app" Dentro-del-cuerpo-macos-arm64.zip
+          unzip -l Dentro-del-cuerpo-macos-arm64.zip > contents.txt
+          grep -q 'Resources/licenses/LICENSE.txt$' contents.txt
+          grep -q 'Resources/licenses/LICENSE-ARTWORK.txt$' contents.txt
       - uses: actions/upload-artifact@v7
         with:
           name: release-macos-arm64
@@ -82,16 +86,14 @@ jobs:
       - name: Render both chapters in both languages
         run: |
           for lang in en uk; do
-            mkdir -p shots/$lang
             "$EXE" --software --lang $lang --shots shots/$lang 2>&1 | grep -v '^wrote '
             (cd shots/$lang && sha256sum *.bmp > ../sha256-$lang.txt)
-            test "$(wc -l < shots/sha256-$lang.txt)" -ge 80
+            test "$(wc -l < shots/sha256-$lang.txt)" -ge 90
           done
       # The same run with the Direct3D device thrown away and rebuilt part of the way through has to
       # produce the same frames, byte for byte.
       - name: Render again across a lost device
         run: |
-          mkdir -p shots/lost
           DENTRO_FORCE_DEVICE_LOSS=20 "$EXE" --software --lang en --shots shots/lost 2>&1 | grep -v '^wrote '
           (cd shots/lost && sha256sum *.bmp > ../sha256-lost.txt)
           diff shots/sha256-en.txt shots/sha256-lost.txt
@@ -102,14 +104,17 @@ jobs:
       - name: Window and controller path
         run: |
           "$EXE" --software --padtest
+      # Also after a failure, so that the frames of a run that went wrong can be looked at without
+      # downloading them as bitmaps.
       - name: Convert the frames to JPEG
+        if: always()
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
           $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
           $quality = New-Object System.Drawing.Imaging.EncoderParameters 1
           $quality.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]88)
-          Get-ChildItem shots -Recurse -Filter *.bmp | ForEach-Object {
+          Get-ChildItem shots -Recurse -Filter *.bmp -ErrorAction SilentlyContinue | ForEach-Object {
             $image = [System.Drawing.Image]::FromFile($_.FullName)
             $image.Save(($_.FullName -replace '\.bmp$', '.jpg'), $codec, $quality)
             $image.Dispose()
@@ -119,7 +124,10 @@ jobs:
         run: |
           cd zig-out
           7z a -tzip ../Dentro-del-cuerpo-windows-x64.zip "Dentro del cuerpo"
-          7z l ../Dentro-del-cuerpo-windows-x64.zip
+          7z l ../Dentro-del-cuerpo-windows-x64.zip | tee ../contents.txt
+          for f in 'Dentro del cuerpo.exe' LICENSE.txt LICENSE-ARTWORK.txt README.txt shaders.hlsl NotoSans-OFL.txt DejaVuSans-LICENSE.txt stb_truetype-LICENSE.txt; do
+            grep -qF "$f" ../contents.txt
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows-x64
@@ -162,13 +170,22 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
+      # A re-run of this job has the same run number, so the release it would create may already be
+      # there, whole or with some of its files; then the files are put in place of whatever it has.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$VERSION" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Dentro del cuerpo $VERSION (alpha)" \
-            --generate-notes \
-            --notes "Built from ${GITHUB_SHA::7}. Installation: https://github.com/$GITHUB_REPOSITORY#installation"
+          ls -l dist
+          test -f dist/Dentro-del-cuerpo-macos-arm64.zip
+          test -f dist/Dentro-del-cuerpo-windows-x64.zip
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "v$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "v$VERSION" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Dentro del cuerpo $VERSION (alpha)" \
+              --generate-notes \
+              --notes "Built from ${GITHUB_SHA::7}. Installation: https://github.com/$GITHUB_REPOSITORY#installation"
+          fi

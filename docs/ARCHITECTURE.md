@@ -89,13 +89,29 @@ writes the save file. Scripted modes
 have no save file to write and default to English, so their output is the same on every machine. Layout
 that depends on text measures it: panels and plates take their width from the string, and single-line
 slots with a fixed width shrink the type until the string fits. Paragraphs wrap on spaces but never
-directly before a dash.
+directly before a dash. Text that types itself out (subtitles, the briefing) is laid out once at its full
+length and revealed within that layout (`Renderer.paragraphRevealed`), so a word appears on the line it
+will end on instead of starting on one line and jumping to the next when it outgrows it.
 
 ## Input
 
 Keyboard and mouse events arrive through the AppKit event pump in `src/platform.zig` and are turned into
-the game's actions by `gather` in `src/main.zig`. A game controller takes a different route, laid out so
-that a second platform has one small thing to supply. `src/pad.zig` defines `pad.State`: whether a
+the game's actions by `gather` in `src/main.zig`. The pump records key events itself and never forwards
+them to AppKit, which would beep at keys no view handles. A key-up is always recorded, whatever modifiers
+are held, because a key that was recorded going down must be seen coming up: releasing an arrow key
+between pressing Cmd+F and letting go of Cmd would otherwise leave the view turning until the key was
+tapped again. A key-down under Cmd is first offered to the menu bar (`performKeyEquivalent:`), which is
+what keeps Cmd+F and Cmd+Q working; if the menu takes it the game does not see the key, and its repeats
+are dropped until the key comes up, and if the menu has no use for it the key is recorded like any other.
+When the mouse is captured the cursor is warped to the centre of the window, and the warp is the one place
+where two coordinate spaces meet: AppKit's window frame has its origin at the bottom left of the primary
+display with y up, `CGWarpMouseCursorPosition` takes a point from the top left of the primary display with
+y down, and both span all displays. The flip is therefore about the height of `NSScreen.screens[0]`, not of
+`mainScreen`, which is the display of the key window and gives a wrong point as soon as the window is on a
+second display of a different height (`platform.warpTarget`, unit-tested; not run on two displays).
+
+A game controller takes a different route, laid out so that a second platform has one small thing to
+supply. `src/pad.zig` defines `pad.State`: whether a
 controller is attached, its family (Xbox, PlayStation or generic), two sticks, two analog triggers and a
 set of sixteen buttons, all as the device reports them. The module imports nothing but the standard
 library. A platform backend fills that struct once a frame into `Platform.pad` and does nothing else; the
@@ -143,7 +159,12 @@ the prompts to it at once, and a held control (a key kept down, a stick past its
 while the other device is idle, so steering with a stick and tapping a key does not make the prompts
 flicker. Mouse movement is deliberately not an input to that decision, because a handheld delivers its
 gyroscope and trackpads as mouse movement while the player's hands are on the controller. Unplugging the
-controller returns the prompts to the keyboard; losing focus does not.
+controller returns the prompts to the keyboard; losing focus does not. The tracker also reports, for one
+frame, that the controller the prompts were following has gone, and the main loop pauses the game on that
+report as it does when the window loses focus. Both go through `App.autoPause`, which applies the rule of
+the pause key (`App.canPause`: a chapter is on screen and is not on its debrief), so an automatic pause
+cannot open the pause menu anywhere the player could not have opened it. That matters on the debrief,
+where the chapter is already recorded and the menu's relaunch entry would restart a finished run.
 
 The layout itself is one table in `src/bindings.zig`: each `Action` has a keyboard label and a controller
 control. Strings do not spell out controls. They refer to actions (`{@examine}`, `{@arm_left}`), and
@@ -191,18 +212,29 @@ The simulation being headless makes five layers possible.
   chapter can be finished with only what a controller can express: a turn rate with a ceiling, climb and
   descent as buttons, tools reached by stepping.
 - `dentro --shots <dir>` renders offscreen through the real GPU pipeline and writes one image per screen:
-  the title, the route map with each chapter selected, the briefing pages, every stage of both chapters,
-  the upgrade, failure and debrief cards, the pause screen, the language switch, and the longest line,
-  hint and atlas entry in the subtitle box. With `--lang uk` it does so in Ukrainian, and with
-  `--prompts kbm|xbox|ps` with the prompts written for that device, which is how text fit is checked for
-  each of the six combinations.
+  the title and its menu, the route map with each chapter selected, the briefing pages, every stage of
+  both chapters, the upgrade, failure and debrief cards, the pause screen with and without the tether row,
+  the language switch, and the longest line, hint and atlas entry in the subtitle box. The stages are
+  photographed on a timer while the scripted pilot flies, and the pilot passes through some of them in less
+  than the interval, so the run also keeps a copy of the application as it stood when each stage began.
+  When a stage ends without a frame, the run goes back to that copy with the pilot held off, steps it
+  until Dr. Marín's line for the stage is on screen, writes the frame and resumes from where it was; `App` being a plain value
+  makes that a pair of struct copies, and coverage does not depend on a list of stages kept by hand. With
+  `--lang uk` it does so in Ukrainian, and with `--prompts kbm|xbox|ps` with the prompts written for that
+  device, which is how text fit is checked for each of the six combinations. The run creates its directory
+  and exits with a non-zero status if the directory cannot be made, a frame cannot be written or a chapter
+  is not completed.
 - `dentro --inputtest` opens the window and posts synthetic `NSEvent` key events to the app's own queue, so
   the real input path is exercised without touching other applications. It includes the language key and
-  reads the menu bar back to see that it followed.
-- `dentro --padtest` opens the window and plays from the title screen with a controller alone: the route
-  map, the briefing, flight in chapter 1 (both sticks, both triggers and a Sync Strike, tool stepping,
-  climb, descent, boost, identify, hint, skip), the pause menu and its language entry, a disconnection with
-  a trigger held, and the tether in chapter 2. It also checks which device the prompts follow, including
+  reads the menu bar back to see that it followed, and it covers the keys under Cmd: an arrow key released
+  while Cmd is held stops the turn, a key the menu bar has no shortcut for reaches the game with Cmd down,
+  and Cmd+F reaches the Full Screen menu item exactly once without also being read as `F`. For that last
+  check the item is pointed at a counter for a few frames, so the window does not change mode.
+- `dentro --padtest` opens the window and plays from the title screen with a controller alone: the title
+  menu, the route map, the briefing, flight in chapter 1 (both sticks, both triggers and a Sync Strike,
+  tool stepping, climb, descent, boost, identify, hint, skip), the pause menu with its language and quit
+  entries, a disconnection with a trigger held, after which the game must have paused itself and the arm
+  must be at rest on reconnection, and the tether in chapter 2. It also checks which device the prompts follow, including
   that posted mouse-moved events do not take them from the controller. The controller is synthetic but
   not a stub. The GameController framework can create a controller object that belongs to no device and
   whose elements a program may set; the test writes its script onto such an object and `Platform.pump`
@@ -214,26 +246,49 @@ The simulation being headless makes five layers possible.
   With `--pad` the pilot holds the same framework-made controller instead of handing its controls to the
   game.
 
-`--chapter N` selects the chapter for `--demo` and `--shots`, and opens it directly in normal play.
-`--lang` applies to every mode. Cocoa's own `-AppleLanguages "(uk)"` argument is passed through, which
-makes the system-preference path testable without changing system settings.
+The command line is parsed by `src/cli.zig`, apart from acting on it, so that the rules are unit-tested:
+an option that needs a value is refused without one (a following argument that begins with a dash is not a
+value), two different modes are refused, and so is an option combined with a mode in which it would be
+ignored, since silence there reads as success. `--chapter N` selects the chapter for `--demo` and `--shots`
+and opens it directly in normal play; `--lang` applies to every mode that shows text, which excludes
+`--selftest` and `--icon`; `--prompts` applies wherever prompts are drawn except `--padtest`, which checks
+the device they follow; `--pad` belongs to `--demo`. A refusal prints its reason and the usage and exits
+with 2, and `--help` exits with 0. `zig build test` runs the binary with a handful of such lines and
+checks the exit status and the message, because the status is decided in `main`, outside what a unit test
+of the parser reaches. Cocoa's own `-AppleLanguages "(uk)"` argument is passed through, which makes the
+system-preference path testable without changing system settings.
 
 Scripted and bot-driven modes never read or write the save file.
 
 ## Build and packaging
 
 `zig build` produces `zig-out/bin/dentro` and assembles `zig-out/Dentro del cuerpo.app` (binary, Info.plist,
-icon, shader source), then seals the bundle with an ad-hoc signature. The fonts are inside the binary, so
+icon, shader source), then seals the bundle with an ad-hoc signature. The bundle is signed where it is
+installed: the path given to `codesign` is resolved against the install prefix when the step runs, so
+`zig build --prefix DIR` seals `DIR/Dentro del cuerpo.app`, and a `codesign --verify --strict` step after
+it fails the build if the seal does not match the bundle's contents. The fonts are inside the binary, so
 the bundle carries no font files, only their licence texts under `Resources/licenses/`. `Info.plist` declares both localisations (`CFBundleLocalizations`), the
 key macOS reads to offer an application its own language setting, and that it supports extended gamepads
 (`GCSupportedGameControllers`, `GCSupportsControllerUserInteraction`), which is how macOS knows the game
 can be driven from a controller. The icon is rendered by the game
-itself (`dentro --icon`) and checked in as `res/AppIcon.icns`. The save file is
-`~/Library/Application Support/Dentro del cuerpo/save.txt`.
+itself (`dentro --icon`) and checked in as `res/AppIcon.icns`.
+
+The save file is `~/Library/Application Support/Dentro del cuerpo/save.txt`, one line of space-separated
+fields. Reading it is total: `Save.parse` accepts any bytes, clamps each number to the range its field can
+hold and reads a field it cannot make sense of as zero or as no grade, so a damaged or hand-edited file
+yields a valid save, or the default one, and never a trap (a float outside the integer range used to be converted unchecked, which panics in a safe
+build and is undefined in a fast one). A fuzz-style test feeds it random bytes, mutated real saves and
+extreme numerals. Writing creates the directory and any missing parents, writes the bytes to a temporary
+file beside the save, flushes it to disk and renames it over the save, so a crash leaves the old file or
+the new one. A failed save is reported on stderr once per run of failures instead of once per attempt, and
+play continues. For each chapter the file keeps the best grade flown and, among runs of equal grade, the
+latest (`Save.supersedes`); the two chapters used to differ on equal grades.
 
 Quitting needs one piece of care: AppKit's `terminate:` calls `exit()` from inside the event pump, so the
 cleanup that must precede exit (stopping the audio thread, re-associating the mouse) runs from
-`applicationShouldTerminate:` rather than after the main loop.
+`applicationShouldTerminate:` rather than after the main loop. The `Quit game` entry of the title and
+pause menus, which is how a controller quits, sends the same `terminate:` and so takes the same path as
+Cmd+Q.
 
 ## Source layout
 
@@ -245,6 +300,7 @@ cleanup that must precede exit (stopping the audio thread, re-associating the mo
 | `src/guide.zig`, `src/campaign.zig` | the atlas and comms queue; the chapter table (both bilingual) |
 | `src/i18n.zig`, `src/strings.zig`, `src/l10n.zig` | languages, templates and plurals; the string catalogue; the tests that walk all text |
 | `src/bot.zig` | scripted pilot used by the tests and `--demo` |
+| `src/main.zig`, `src/cli.zig`, `src/app.zig` | entry point and the modes; command-line parsing; screens, menus and the save file |
 | `src/draw.zig`, `src/render.zig`, `src/gpu.zig`, `src/shaders/` | scene, arms and HUD; batching; Metal |
 | `src/pad.zig`, `src/bindings.zig`, `src/input.zig` | controller state and its shaping; the layout and the names of controls per device; controller input as actions, and the device the prompts follow |
 | `src/platform.zig`, `src/audio.zig`, `src/objc.zig` | window, keyboard, mouse, game controller and system language; synthesiser; runtime bridge |

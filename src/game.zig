@@ -28,6 +28,11 @@ pub const drill_reach: f32 = 24;
 pub const punch_reach: f32 = 28;
 pub const punch_delay: f32 = 0.12;
 pub const sync_window: f32 = 0.12;
+/// What a Sync Strike is worth. Two punches landing as one do this many times the damage of a single
+/// punch to something brittle; two rounds merged into a lance do the damage of this many rounds. The
+/// upgrade card and Marín's line quote both figures, and a test holds the words to these numbers.
+pub const sync_punch_factor: f32 = 10;
+pub const lance_factor: f32 = 3;
 pub const clot_radius: f32 = 340;
 
 pub const Tool = enum(u8) {
@@ -526,10 +531,17 @@ pub const Sim = struct {
 
     pub fn locationCm(s: *const Sim) f32 {
         if (s.chapter == 1) return ch2.locationCm(s);
-        return switch (s.station) {
-            0 => 31.2 - s.pos.z / 10000.0,
-            1 => 18.9 - (s.pos.z - station_b_z) / 10000.0,
-            else => @max(0, (vein_mod.z_exit - s.pos.z) / 10000.0),
+        return veinLocationCm(s.station, s.pos.z);
+    }
+
+    /// Centimetres of vein between a point of the chapter 1 model and the femoral junction. The model
+    /// is three short stretches of a vein some thirty centimetres long, one per station, joined by the
+    /// transits.
+    pub fn veinLocationCm(station: u8, z: f32) f32 {
+        return switch (station) {
+            0 => 31.2 - z / 10000.0,
+            1 => 18.9 - (z - station_b_z) / 10000.0,
+            else => @max(0, (vein_mod.z_exit - z) / 10000.0),
         };
     }
 
@@ -593,7 +605,7 @@ pub const Sim = struct {
                 s.say(L.fit_the_drill_to_one_arm);
                 s.waypoint = null;
             },
-            .transit1 => s.beginTransit(station_b_z),
+            .transit1 => s.beginTransit(0),
             .v2_approach => {
                 s.station = 1;
                 s.say(L.next_valve);
@@ -625,7 +637,7 @@ pub const Sim = struct {
                 s.say(L.put_both_arms_on_punch);
                 s.waypoint = if (s.findRing(1)) |e| e.pos else null;
             },
-            .transit2 => s.beginTransit(station_c_z),
+            .transit2 => s.beginTransit(1),
             .septum_find => {
                 s.station = 2;
                 s.say(L.last_stretch);
@@ -659,17 +671,32 @@ pub const Sim = struct {
         return null;
     }
 
-    fn beginTransit(s: *Sim, to_z: f32) void {
+    /// Where each of the chapter's two transits begins (its marker ring) and where it sets the drone down.
+    pub const transits = [2]struct { from_z: f32, to_z: f32 }{
+        .{ .from_z = ring1_z, .to_z = station_b_z },
+        .{ .from_z = ring2_z, .to_z = station_c_z },
+    };
+
+    /// How far transit `which` carries the drone, in centimetres of vein, as the HUD's location readout
+    /// measures it: the reading at the marker less the reading on arrival. The stations stand for
+    /// stretches of the vein further apart than the model is long, so this is not the distance in world
+    /// units.
+    pub fn transitCm(which: usize) f32 {
+        const t = transits[which];
+        return veinLocationCm(@intCast(which), t.from_z) - veinLocationCm(@intCast(which + 1), t.to_z);
+    }
+
+    fn beginTransit(s: *Sim, which: usize) void {
         s.mode = .transit;
         s.transit_t = 0;
         s.transit_from = s.pos;
-        s.transit_to_z = to_z;
+        s.transit_to_z = transits[which].to_z;
         s.transit_look = .{ s.yaw, s.pitch };
         s.vrel = .{};
         s.latched = false;
         s.sound(.transit, 0, 1);
         s.voice.clear();
-        s.say(L.tempo_link_down);
+        s.say(L.tempo_link_down[which]);
     }
 
     pub fn hintText(s: *const Sim) Text {
@@ -1213,7 +1240,7 @@ pub const Sim = struct {
                     s.splitEmbolus(@intCast(idx), d.norm());
                 },
                 .phlebolith => {
-                    const dmg: f32 = if (sync) 10 else 1;
+                    const dmg: f32 = if (sync) sync_punch_factor else 1;
                     e.hp -= dmg;
                     e.flash = 1;
                     s.burst(hit_at, if (sync) 40 else 8, if (sync) 220 else 90, .{ 1, 0.9, 0.7, 1 }, 3, 0.6);
@@ -1463,7 +1490,7 @@ pub const Sim = struct {
 
     fn shotHit(s: *Sim, sh: *Shot, idx: u16, at: Vec3) bool {
         const e = &s.ents[idx];
-        const dmg: f32 = if (sh.lance) 3 else 1;
+        const dmg: f32 = if (sh.lance) lance_factor else 1;
         const arm = &s.arms[sh.arm];
         switch (e.kind) {
             .cocci => {
@@ -2148,4 +2175,136 @@ test "rounds into the wall cost the patient" {
     for (0..120) |_| s.update(.{ .arm = .{ true, false } }, 1.0 / 120.0);
     try std.testing.expect(s.stats.tissue_hits > 0);
     try std.testing.expect(s.stability < before);
+}
+
+/// The cardinal numbers the script spells out, as Marín says them at the start of a sentence or inside one.
+const number_words = [_]struct { n: u32, en: []const u8, uk: []const u8 }{
+    .{ .n = 3, .en = "three", .uk = "три" },
+    .{ .n = 10, .en = "ten", .uk = "десять" },
+    .{ .n = 11, .en = "eleven", .uk = "одинадцять" },
+    .{ .n = 12, .en = "twelve", .uk = "дванадцять" },
+    .{ .n = 17, .en = "seventeen", .uk = "сімнадцять" },
+    .{ .n = 18, .en = "eighteen", .uk = "вісімнадцять" },
+    .{ .n = 19, .en = "nineteen", .uk = "дев’ятнадцять" },
+};
+
+/// True if `word` is one of the words of `text`, with either case of its first letter (Latin or Cyrillic).
+fn saysWord(text: []const u8, word: []const u8) bool {
+    var capital: [64]u8 = undefined;
+    @memcpy(capital[0..word.len], word);
+    if (word[0] >= 'a' and word[0] <= 'z') {
+        capital[0] = word[0] - 32;
+    } else if (word[0] == 0xD0 and word[1] >= 0xB0 and word[1] <= 0xBF) {
+        capital[1] = word[1] - 0x20; // а..п
+    } else if (word[0] == 0xD1 and word[1] >= 0x80 and word[1] <= 0x8F) {
+        capital[0] = 0xD0; // р..я
+        capital[1] = word[1] + 0x20;
+    }
+    var it = std.mem.tokenizeAny(u8, text, " .,;:!?");
+    while (it.next()) |tok| {
+        if (std.mem.eql(u8, tok, word) or std.mem.eql(u8, tok, capital[0..word.len])) return true;
+    }
+    return false;
+}
+
+fn wordFor(n: u32) !@TypeOf(number_words[0]) {
+    for (number_words) |w| {
+        if (w.n == n) return w;
+    }
+    std.debug.print("no number word for {d}: add it to number_words\n", .{n});
+    return error.TestUnexpectedResult;
+}
+
+test "the distance Marín gives for each transit is the distance the HUD will show it cover" {
+    // The geometry: marker to arrival, read off the same function the HUD's location readout uses.
+    try std.testing.expectApproxEqAbs(@as(f32, 11.37), Sim.transitCm(0), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 17.87), Sim.transitCm(1), 0.01);
+    for (0..2) |which| {
+        const cm: u32 = @intFromFloat(@round(Sim.transitCm(which)));
+        const w = try wordFor(cm);
+        const line = L.tempo_link_down[which];
+        try std.testing.expect(saysWord(line.en, w.en));
+        try std.testing.expect(saysWord(line.uk, w.uk));
+        // and names no other distance: no other number word stands before "centimetres"
+        for (number_words) |other| {
+            if (other.n == cm or other.n == 3) continue;
+            try std.testing.expect(!saysWord(line.en, other.en));
+            try std.testing.expect(!saysWord(line.uk, other.uk));
+        }
+    }
+
+    // The same thing flown: enter each transit at its marker and compare what the HUD reads before and
+    // after with the line that was spoken on the way.
+    var s = Sim.init();
+    s.in_bore = false;
+    for (0..2) |which| {
+        s.mode = .playing;
+        s.station = @intCast(which);
+        s.pos = Vein.center(Sim.transits[which].from_z);
+        const before = s.locationCm();
+        s.setStage(if (which == 0) .transit1 else .transit2);
+        try std.testing.expectEqual(Mode.transit, s.mode);
+        const spoken = s.voice.current.?;
+        try std.testing.expectEqualStrings(L.tempo_link_down[which].en, spoken.en);
+        var guard: usize = 0;
+        while (s.mode == .transit and guard < 2000) : (guard += 1) s.update(.{}, 1.0 / 120.0);
+        try std.testing.expectEqual(Mode.playing, s.mode);
+        const covered = before - s.locationCm();
+        const w = try wordFor(@intFromFloat(@round(covered)));
+        try std.testing.expect(saysWord(spoken.en, w.en));
+        try std.testing.expect(saysWord(spoken.uk, w.uk));
+    }
+}
+
+test "the upgrade card and Marín quote the Sync Strike's real multipliers" {
+    // What the rule does, measured: one punch against two in sync on the stone, one round against a lance.
+    var s = Sim.init();
+    s.in_bore = false;
+    s.stage = .septum_break;
+    s.station = 2;
+    const stone = s.find(.phlebolith).?;
+    s.pos = stone.pos.add(v3(0, 0, -(stone.radius + 12)));
+    s.yaw = 0;
+    s.pitch = 0;
+    s.sides = .{};
+    s.arms[0].tool = .punch;
+    s.arms[1].tool = .punch;
+    const dt: f32 = 1.0 / 120.0;
+    const hp0 = stone.hp;
+    s.update(.{ .arm = .{ true, false } }, dt);
+    for (0..80) |_| s.update(.{}, dt);
+    const single = hp0 - s.find(.phlebolith).?.hp;
+    s.has_sync = true;
+    s.update(.{ .arm = .{ true, true } }, dt);
+    for (0..80) |_| s.update(.{}, dt);
+    const synced = hp0 - single - s.find(.phlebolith).?.hp;
+    try std.testing.expectEqual(@as(u32, 1), s.stats.sync_strikes);
+    try std.testing.expectEqual(sync_punch_factor, synced / single);
+
+    // The words. "So many times as hard" for the punch, a count of rounds for the lance, each spelled out
+    // in both languages on the card, and the punch figure again in the line that announces the upgrade.
+    const Times = struct { n: u32, en: []const u8, uk: []const u8 };
+    const times = [_]Times{
+        .{ .n = 3, .en = "three times", .uk = "утричі" },
+        .{ .n = 5, .en = "five times", .uk = "уп’ятеро" },
+        .{ .n = 10, .en = "ten times", .uk = "удесятеро" },
+    };
+    const punch: Times = for (times) |t| {
+        if (t.n == @as(u32, @intFromFloat(sync_punch_factor))) break t;
+    } else return error.TestUnexpectedResult;
+    const lance = try wordFor(@intFromFloat(lance_factor));
+    const card = strings.card.sync_body;
+    const line = L.sync_servo_is_live;
+    inline for (.{ card, line }) |t| {
+        try std.testing.expect(std.mem.indexOf(u8, t.en, punch.en) != null);
+        try std.testing.expect(std.mem.indexOf(u8, t.uk, punch.uk) != null);
+        // and no other multiplier
+        for (times) |other| {
+            if (other.n == punch.n) continue;
+            try std.testing.expect(std.mem.indexOf(u8, t.en, other.en) == null);
+            try std.testing.expect(std.mem.indexOf(u8, t.uk, other.uk) == null);
+        }
+    }
+    try std.testing.expect(std.mem.indexOf(u8, card.en, lance.en) != null);
+    try std.testing.expect(std.mem.indexOf(u8, card.uk, lance.uk) != null);
 }

@@ -94,7 +94,7 @@ fn hasEnglishWord(s: []const u8) bool {
 
 /// Text that is deliberately the same in every language although it contains Latin words: the binomial,
 /// names printed on the keyboard, and the two PlayStation buttons that go by their product names.
-const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Esc", "Enter", "Shift", "Tab", "Cmd+F", "Create", "Options" };
+const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Esc", "Enter", "Shift", "Tab", "Cmd+F", "Cmd+Q", "Create", "Options" };
 
 /// The wordings of a text: the one for keyboard and mouse, then the one for a controller if it has its own.
 fn wordingsOf(t: Text) struct { list: [2]i18n.Wording, len: usize } {

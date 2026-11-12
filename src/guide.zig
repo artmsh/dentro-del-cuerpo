@@ -215,7 +215,7 @@ pub fn entry(t: Topic) Entry {
             .size = .{ .en = "0.38 mm", .uk = "0,38 мм" },
             .short = .{
                 .en = "Phlebolith. A vein stone: old thrombus turned to calcium.",
-                .uk = "Флеболіт. Венний камінь: старий тромб, що звапнів.",
+                .uk = "Флеболіт. Венозний камінь: старий тромб, що звапнів.",
             },
             .deep = .{
                 .en = "Calcium phosphate — hard and brittle. Rounds do nothing and the drill skates. It breaks on impact, and only when both arms land together.",

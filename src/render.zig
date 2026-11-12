@@ -138,6 +138,60 @@ pub const Meshes = struct {
     }
 };
 
+/// Line height of a paragraph, in units of the type size.
+pub const line_spacing: f32 = 1.28;
+
+pub fn widthOf(f: *const font_mod.Font, face: font_mod.Face, size: f32, s: []const u8) f32 {
+    const k = size / font_mod.base_px;
+    var w: f32 = 0;
+    var i: usize = 0;
+    while (i < s.len) {
+        w += f.glyph(face, utf8.next(s, &i)).adv * k;
+    }
+    return w;
+}
+
+/// The lines of a word-wrapped paragraph, one per call. The text is wrapped whole; each line is returned
+/// cut off at `shown` bytes into the text, so lines past that point come back empty. A line breaks at a
+/// space when the next word would pass `max_w`, never directly before a dash, and always at a newline.
+pub const Lines = struct {
+    font: *const font_mod.Font,
+    face: font_mod.Face,
+    size: f32,
+    max_w: f32,
+    text: []const u8,
+    /// How much of `text` is visible, in bytes.
+    shown: usize,
+    start: usize = 0,
+
+    pub fn next(it: *Lines) ?[]const u8 {
+        const s = it.text;
+        if (it.start >= s.len) return null;
+        const start = it.start;
+        var stop = start;
+        var last_break: ?usize = null;
+        while (stop < s.len and s[stop] != '\n') {
+            if (utf8.breakable(s, stop)) {
+                if (widthOf(it.font, it.face, it.size, s[start..stop]) > it.max_w) break;
+                last_break = stop;
+            }
+            stop += 1;
+        }
+        var cut = stop;
+        if (widthOf(it.font, it.face, it.size, s[start..stop]) > it.max_w) {
+            if (last_break) |lb| cut = lb;
+        }
+        var resume_at = cut;
+        while (resume_at < s.len and (s[resume_at] == ' ' or s[resume_at] == '\n')) {
+            resume_at += 1;
+            if (s[resume_at - 1] == '\n') break;
+        }
+        // A line the width cannot break (one word wider than the box) still has to end.
+        it.start = if (resume_at > start) resume_at else s.len;
+        return s[start..@max(start, @min(cut, it.shown))];
+    }
+};
+
 pub const Renderer = struct {
     g: *gpu.Gpu,
     font: font_mod.Font,
@@ -277,13 +331,7 @@ pub const Renderer = struct {
     }
 
     pub fn textWidth(r: *Renderer, face: font_mod.Face, size: f32, s: []const u8) f32 {
-        const k = size / font_mod.base_px;
-        var w: f32 = 0;
-        var i: usize = 0;
-        while (i < s.len) {
-            w += r.font.glyph(face, utf8.next(s, &i)).adv * k;
-        }
-        return w;
+        return widthOf(&r.font, face, size, s);
     }
 
     /// Draw one line of text with its top at `y`. Returns the advance width.
@@ -317,30 +365,19 @@ pub const Renderer = struct {
     /// Word-wrapped paragraph; a dash stays on the line of the word before it. Returns the y below the last
     /// line.
     pub fn paragraph(r: *Renderer, face: font_mod.Face, x: f32, y: f32, max_w: f32, size: f32, color: Color, s: []const u8) f32 {
+        return r.paragraphRevealed(face, x, y, max_w, size, color, s, s.len);
+    }
+
+    /// `paragraph` for text that types itself out: the whole of `s` is laid out, and of that layout only
+    /// the first `shown` bytes are drawn. Every word is therefore on its final line from its first letter.
+    /// Wrapping only what has been typed so far would put a word at the end of a line and move it to the
+    /// next when it grew too long for it. Returns the y below the last line of the whole paragraph.
+    pub fn paragraphRevealed(r: *Renderer, face: font_mod.Face, x: f32, y: f32, max_w: f32, size: f32, color: Color, s: []const u8, shown: usize) f32 {
         var line_y = y;
-        const lh = size * 1.28;
-        var start: usize = 0;
-        while (start < s.len) {
-            var stop = start;
-            var last_break: ?usize = null;
-            while (stop < s.len and s[stop] != '\n') {
-                if (utf8.breakable(s, stop)) {
-                    if (r.textWidth(face, size, s[start..stop]) > max_w) break;
-                    last_break = stop;
-                }
-                stop += 1;
-            }
-            var cut = stop;
-            if (r.textWidth(face, size, s[start..stop]) > max_w) {
-                if (last_break) |lb| cut = lb;
-            }
-            _ = r.text(face, x, line_y, size, color, s[start..cut]);
-            line_y += lh;
-            start = cut;
-            while (start < s.len and (s[start] == ' ' or s[start] == '\n')) {
-                start += 1;
-                if (s[start - 1] == '\n') break;
-            }
+        var lines: Lines = .{ .font = &r.font, .face = face, .size = size, .max_w = max_w, .text = s, .shown = shown };
+        while (lines.next()) |visible| {
+            if (visible.len > 0) _ = r.text(face, x, line_y, size, color, visible);
+            line_y += size * line_spacing;
         }
         return line_y;
     }
@@ -357,3 +394,61 @@ pub const Renderer = struct {
         return r.g.submit(&.{ .scene = scene, .arm = arm, .post = post, .batches = r.batches[0..r.nb], .instance_count = r.ninst, .dyn_count = r.ndyn, .part_count = r.npart, .hud_count = r.nhud }, wait);
     }
 };
+
+test "a paragraph that types itself out never moves a word once it has appeared" {
+    const strings = @import("strings.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const font = try font_mod.Font.build(arena.allocator());
+    // The subtitle box, and a line long enough to wrap several times, in each language.
+    const size: f32 = 20;
+    const max_w: f32 = 760;
+    var moved_before_the_fix: usize = 0;
+    inline for (.{ strings.line.each_arm_carries_three_tools.en, strings.line.each_arm_carries_three_tools.uk, strings.briefing.pages[1].uk }) |text| {
+        // The final layout: where each byte of the text ends up.
+        var final_line: [1024]u16 = undefined;
+        var final_starts: [32]usize = undefined;
+        var count: usize = 0;
+        var whole: Lines = .{ .font = &font, .face = .regular, .size = size, .max_w = max_w, .text = text, .shown = text.len };
+        while (whole.next()) |line| : (count += 1) {
+            const at = @intFromPtr(line.ptr) - @intFromPtr(text.ptr);
+            final_starts[count] = at;
+            for (at..at + line.len) |i| final_line[i] = @intCast(count);
+            try std.testing.expect(widthOf(&font, .regular, size, line) <= max_w);
+        }
+        try std.testing.expect(count >= 3);
+
+        var shown: usize = 0;
+        while (shown <= text.len) : (shown += 1) {
+            if (shown < text.len and (text[shown] & 0xC0) == 0x80) continue; // inside a code point
+            // What is drawn with `shown` bytes revealed: every visible line starts where the final layout
+            // starts that line and is a prefix of it, so no letter is ever on a line it will later leave.
+            var partial: Lines = .{ .font = &font, .face = .regular, .size = size, .max_w = max_w, .text = text, .shown = shown };
+            var n: usize = 0;
+            var drawn: usize = 0;
+            while (partial.next()) |line| : (n += 1) {
+                if (line.len == 0) continue;
+                const at = @intFromPtr(line.ptr) - @intFromPtr(text.ptr);
+                try std.testing.expectEqual(final_starts[n], at);
+                try std.testing.expect(at + line.len <= shown);
+                drawn = at + line.len;
+            }
+            try std.testing.expectEqual(count, n);
+            // Everything revealed so far is drawn, up to the spaces a line break swallows.
+            try std.testing.expect(std.mem.trim(u8, text[drawn..shown], " \n").len == 0);
+
+            // The way it was done before: wrap only the revealed prefix. Count the moments at which that
+            // puts a letter on a line other than its final one, to show this text does exercise the case.
+            var naive: Lines = .{ .font = &font, .face = .regular, .size = size, .max_w = max_w, .text = text[0..shown], .shown = shown };
+            var k: usize = 0;
+            var jumped = false;
+            while (naive.next()) |line| : (k += 1) {
+                if (line.len == 0) continue;
+                const at = @intFromPtr(line.ptr) - @intFromPtr(text.ptr);
+                if (final_line[at + line.len - 1] != k) jumped = true;
+            }
+            if (jumped) moved_before_the_fix += 1;
+        }
+    }
+    try std.testing.expect(moved_before_the_fix > 0);
+}

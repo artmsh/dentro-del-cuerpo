@@ -18,6 +18,9 @@ const MenuTitles = common.MenuTitles;
 /// Windows has no Cmd key; the pause screen prints this in place of the catalogue's shortcut.
 pub const fullscreen_key: ?[]const u8 = "Alt+Enter";
 
+/// Alt+Enter and Alt+F4 are handled in `Platform.onKey`; F11 is a second full-screen key with no modifier.
+pub const shortcut: common.Shortcut = .{ .modifier = "Alt", .fullscreen = .enter, .fullscreen_name = "Enter" };
+
 /// The window handle; the Direct3D backend makes a swap chain for it.
 pub const Surface = w.HWND;
 
@@ -36,6 +39,8 @@ const cmd_fullscreen: usize = 0x0010;
 const icon_resource: usize = 1;
 
 var quit_requested = false;
+var fullscreen_probe = false;
+var fullscreen_probe_hits: u32 = 0;
 var lost_focus = false;
 var on_terminate: ?*const fn () void = null;
 /// The platform the window procedure writes input into. Set when the window is shown; messages that
@@ -357,10 +362,10 @@ pub const Platform = struct {
         p.retitle(w.SC_CLOSE, std.mem.span(menu.quit), "Alt+F4");
     }
 
-    fn retitle(p: *Platform, command: usize, title: []const u8, shortcut: []const u8) void {
+    fn retitle(p: *Platform, command: usize, title: []const u8, keys: []const u8) void {
         var text: [200]u8 = undefined;
         var wide: [200]u16 = undefined;
-        const s = std.fmt.bufPrint(&text, "{s}\t{s}", .{ title, shortcut }) catch return;
+        const s = std.fmt.bufPrint(&text, "{s}\t{s}", .{ title, keys }) catch return;
         const ws = w.toWide(&wide, s) orelse return;
         _ = w.ModifyMenuW(p.menu, @intCast(command), w.MF_BYCOMMAND | w.MF_STRING, command, ws.ptr);
     }
@@ -392,6 +397,10 @@ pub const Platform = struct {
     /// sized to the monitor, which the flip-model swap chain presents without a mode change. Leaving
     /// puts back the frame and the position the window had.
     pub fn toggleFullscreen(p: *Platform) void {
+        if (fullscreen_probe) {
+            fullscreen_probe_hits += 1;
+            return;
+        }
         const flags = w.SWP_NOOWNERZORDER | w.SWP_FRAMECHANGED;
         if (!p.fullscreen) {
             var mi: w.MONITORINFO = .{};
@@ -408,6 +417,22 @@ pub const Platform = struct {
             p.fullscreen = false;
         }
         if (p.captured) p.clip(true);
+    }
+
+    /// Quit as Alt+F4 and the system menu's Close do: the window is asked to close, the main loop sees
+    /// the request on its next turn and leaves through its own cleanup.
+    pub fn quit(p: *Platform) void {
+        _ = w.PostMessageW(p.hwnd, w.WM_CLOSE, 0, 0);
+    }
+
+    /// For the input test. While `on`, the full-screen command counts its activations instead of acting,
+    /// so the test can press Alt+Enter and see the shortcut arrive without the window changing mode.
+    pub fn probeFullscreen(_: *Platform, on: bool) void {
+        fullscreen_probe = on;
+    }
+
+    pub fn fullscreenProbeHits(_: *Platform) u32 {
+        return fullscreen_probe_hits;
     }
 
     /// Hide the cursor and keep it inside the window so mouse movement drives the look direction. The
@@ -473,13 +498,25 @@ pub const Platform = struct {
     /// Post a key message into this window's own queue (used by the scripted runs, so their input travels
     /// the same path as the keyboard's without touching other applications).
     pub fn postKey(p: *Platform, key: Key, is_down: bool) void {
+        p.postKeyMessage(key, is_down, false);
+    }
+
+    /// `postKey` with Alt held: the message Windows sends then is WM_SYSKEYDOWN or WM_SYSKEYUP, with the
+    /// context bit set.
+    pub fn postSystemKey(p: *Platform, key: Key, is_down: bool) void {
+        p.postKeyMessage(key, is_down, true);
+    }
+
+    fn postKeyMessage(p: *Platform, key: Key, is_down: bool, alt: bool) void {
         const scan = keymap.toScan(key);
         const code: u32 = scan.code;
         const vk = w.MapVirtualKeyW(code | (if (scan.extended) @as(u32, 0xE000) else 0), w.MAPVK_VSC_TO_VK_EX);
         var lp: usize = 1 | (@as(usize, code) << 16);
         if (scan.extended) lp |= 1 << 24;
+        if (alt) lp |= 1 << 29;
         if (!is_down) lp |= (1 << 30) | (1 << 31);
-        _ = w.PostMessageW(p.hwnd, if (is_down) w.WM_KEYDOWN else w.WM_KEYUP, vk, @bitCast(lp));
+        const msg: u32 = if (alt) (if (is_down) w.WM_SYSKEYDOWN else w.WM_SYSKEYUP) else (if (is_down) w.WM_KEYDOWN else w.WM_KEYUP);
+        _ = w.PostMessageW(p.hwnd, msg, vk, @bitCast(lp));
     }
 
     // ------------------------------------------------------------------------ messages

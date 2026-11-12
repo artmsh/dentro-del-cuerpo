@@ -111,9 +111,14 @@ zig build -Doptimize=ReleaseFast          # builds zig-out/Dentro del cuerpo.app
 open "zig-out/Dentro del cuerpo.app"      # or double-click it in Finder
 ```
 
-`zig build run -- --fullscreen` runs the bare binary. Cmd+F toggles full screen, Cmd+Q quits. Chapter 2
-unlocks on the route map when chapter 1 is finished; `--chapter 2` opens it directly. Progress is saved to
-`~/Library/Application Support/Dentro del cuerpo/save.txt`.
+`zig build run -- --fullscreen` runs the bare binary, and `zig build --prefix DIR` assembles and signs the
+bundle under `DIR` instead of `zig-out`. Cmd+F toggles full screen; Cmd+Q quits, as does the `Quit game`
+entry of the title and pause menus. Chapter 2 unlocks on the route map when chapter 1 is finished;
+`--chapter 2` opens it directly. Progress is saved to
+`~/Library/Application Support/Dentro del cuerpo/save.txt`, which keeps for each chapter the best grade
+flown and, among runs of equal grade, the latest. The file is replaced whole on every save, so an
+interrupted write leaves the previous one, and a save that cannot be written is reported once on stderr
+while play goes on.
 
 The game starts in Ukrainian if Ukrainian comes before English in the system's list of preferred languages,
 and in English otherwise. `Tab` on the title or pause screen switches the language at once and the choice is
@@ -135,10 +140,10 @@ kept in the save file; `--lang en` or `--lang uk` sets it for one run without ch
 | Ask Dr. Marín for a hint (three levels per objective) | `H` | `Y` |
 | Skip the current comms line | `Tab` | `View` |
 | Pause, and resume | `Esc` | `Menu` |
-| In the pause menu: resume, relaunch from checkpoint, restart chapter, leave to title | `↑ ↓` and `Enter`, or `Esc`, `R`, `N`, `L` | d-pad or left stick and `A`; `B` resumes |
+| On the title screen: begin, route map, language, quit game | `↑ ↓` and `Enter`, or `M`, `Tab`, `Cmd+Q` | d-pad or left stick and `A`, or `Y`, `View` |
+| In the pause menu: resume, relaunch from checkpoint, restart chapter, leave to title, quit game | `↑ ↓` and `Enter`, or `Esc`, `R`, `N`, `L`, `Cmd+Q` | d-pad or left stick and `A`; `B` resumes |
 | Menus and cards: confirm, back | `Enter`, `Esc` | `A`, `B` |
 | Switch language (English, Ukrainian) on the title screen or the pause screen | `Tab` | `View`, or d-pad `←` `→` |
-| Route map (from the title) | `M` | `Y` |
 
 The controller column uses Xbox names. On a DualShock 4 or DualSense the same positions are `✕ ○ □ △` for
 `A B X Y`, `L1 R1 L2 R2` for `LB RB LT RT`, `L3 R3` for the stick clicks, `Create` (Share on a DualShock 4)
@@ -146,7 +151,10 @@ for `View` and `Options` for `Menu`, and the game's prompts use those names when
 one in use. The triggers act as buttons, pressed at 40% of their travel and released at 25%. Keyboard, mouse
 and controller are read together and their input is added, so the stick can fly while the mouse aims.
 Mouse movement alone never changes which device the prompts are written for, since on a handheld the
-gyroscope and trackpads arrive as mouse movement. `Cmd+F` and `Cmd+Q` have no controller equivalent.
+gyroscope and trackpads arrive as mouse movement. `Cmd+F` has no controller equivalent; a controller quits
+through the `Quit game` entry of the title and pause menus. The game pauses itself when its window loses
+focus and when the controller in use disconnects during a chapter. Back on a briefing returns to the screen
+it was opened from, the title or the route map.
 
 After the chapter 1 upgrade, triggering both arms within 0.12 s lands them as one Sync Strike.
 
@@ -162,16 +170,19 @@ vein that should not be in circulating blood) is already in chapter 1.
 - Apple Silicon and Metal only: there is no Intel, Windows or Linux build.
 - The control layout is fixed: there is no remapping of keys or controller buttons, no sensitivity or
   invert-Y setting for the right stick, and no rumble.
-- The controller code has not yet been run against a physical controller. It is tested through a
-  controller object that the GameController framework itself provides and the tests write to (see
-  [ARCHITECTURE.md](docs/ARCHITECTURE.md)), which covers reading and mapping but not how macOS discovers a
-  real device, names its family, or hands over the Create and Share button.
-- A controller cannot quit the application; `Leave to title` is as far as it goes.
+- Controller hardware coverage is one device: an Xbox Wireless Controller over Bluetooth, on which
+  discovery, family detection, every button, both sticks and both triggers were read through the game's own
+  reader. No PlayStation controller has been attached, so its family detection and the hand-over of the
+  Create and Share button are covered only by the automated tests, which drive a controller object that the
+  GameController framework itself provides (see [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+- The mouse-capture warp for a window on a second display follows Apple's documented coordinate spaces and
+  is unit-tested as arithmetic, but has not been run on a machine with two displays.
 
 ## Development
 
 ```sh
-zig build test                 # unit tests, translation checks, and a scripted pilot that must finish both chapters
+zig build test                 # unit tests, translation checks, a scripted pilot that must finish both chapters, and the binary's exit codes
+zig-out/bin/dentro --help      # the modes and options
 zig-out/bin/dentro --selftest  # the same playthroughs, with a printed summary
 zig-out/bin/dentro --shots DIR # offscreen GPU render of every screen and stage, one BMP each
 zig-out/bin/dentro --lang uk --shots DIR   # the same in Ukrainian
@@ -187,11 +198,18 @@ The scripted modes run in English unless `--lang` says otherwise, so their outpu
 machine; `--demo` follows the system like normal play. The tests fail on a string with no Ukrainian text, on
 placeholders that differ between the two languages, on any character that has no glyph in the font
 atlas, on an action with no controller binding, and on text shown to a controller player that names a key.
-`--prompts kbm|xbox|ps` fixes the device the prompts are written for in any mode; without it they follow
-the device last used.
+`--prompts kbm|xbox|ps` fixes the device the prompts are written for in normal play, `--demo`,
+`--inputtest` and `--shots`; without it they follow the device last used.
+
+The command line is checked before anything opens. An option that needs a value and has none, two
+different modes, or an option given with a mode in which it would do nothing (`--pad` without `--demo`,
+`--chapter` with `--selftest`) prints the reason and the usage and exits with status 2; `--help` and `-h`
+print the usage and exit with 0. `--shots` creates its directory if needed and exits with 1 when the
+directory cannot be made, a frame cannot be written or a chapter is not flown to its end, so a script can
+rely on its status.
 
 ```text
-Build Summary: 3/3 steps succeeded; 84/84 tests passed
+Build Summary: 12/12 steps succeeded; 101/101 tests passed
 …
 selftest ch2: completed=true stage=done sim_time=86.8s deaths=0 stability=100.0 grade=A atlas=3
 …

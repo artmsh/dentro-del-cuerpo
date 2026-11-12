@@ -55,6 +55,8 @@ pub const keys = struct {
     pub const retry: T = .{ .en = "R", .uk = "R" };
     pub const restart: T = .{ .en = "N", .uk = "N" };
     pub const leave: T = .{ .en = "L", .uk = "L" };
+    /// The menu bar's shortcut; the menus also list Quit as an entry, which is how a controller reaches it.
+    pub const quit: T = .{ .en = "Cmd+Q", .uk = "Cmd+Q" };
 };
 
 /// Names of a game controller's parts, as a prompt names them. The buttons are named as each family prints
@@ -104,7 +106,7 @@ pub const pad = struct {
 pub const hud = struct {
     pub const sync: T = .{ .en = "SYNC", .uk = "СИНХРО" };
     pub const tissue_damage: T = .{ .en = "TISSUE DAMAGE", .uk = "УШКОДЖЕННЯ ТКАНИНИ" };
-    pub const unidentified: T = .{ .en = "UNIDENTIFIED  —  {@examine}", .uk = "НЕРОЗПІЗНАНО  —  {@examine}" };
+    pub const unidentified: T = .{ .en = "UNIDENTIFIED  —  {@examine}", .uk = "НЕ РОЗПІЗНАНО  —  {@examine}" };
     /// Distance, then the entry's size.
     pub const focus: T = .{ .en = "{0}  ·  {1}", .uk = "{0}  ·  {1}" };
     pub const focus_more: T = .{ .en = "{0}  ·  {1}  ·  {@examine}: more", .uk = "{0}  ·  {1}  ·  {@examine}: докладніше" };
@@ -124,14 +126,14 @@ pub const hud = struct {
     pub const centimetres: T = .{ .en = "{0} cm", .uk = "{0} см" };
     pub const to_femoral_junction: T = .{ .en = "TO FEMORAL JUNCTION", .uk = "ДО СТЕГНОВОЇ ВЕНИ" };
     pub const past_duodenal_flexure: T = .{ .en = "PAST DUODENAL FLEXURE", .uk = "ВІД ДУОДЕНОЄЮНАЛЬНОГО ВИГИНУ" };
-    pub const flow_unit: T = .{ .en = "FLOW  µm/s at 1:100", .uk = "ПОТІК  мкм/с при 1:100" };
-    pub const stream_unit: T = .{ .en = "STREAM  µm/s at 1:100", .uk = "ТЕЧІЯ  мкм/с при 1:100" };
+    pub const flow_unit: T = .{ .en = "FLOW  µm/s at 1:100", .uk = "ПОТІК  мкм/с у масштабі 1:100" };
+    pub const stream_unit: T = .{ .en = "STREAM  µm/s at 1:100", .uk = "ТЕЧІЯ  мкм/с у масштабі 1:100" };
     pub const contraction_overhead: T = .{ .en = "CONTRACTION — STAY BETWEEN THE VILLI", .uk = "СКОРОЧЕННЯ — ЗАЛИШАЙТЕСЯ МІЖ ВОРСИНКАМИ" };
     pub const contraction_in: T = .{ .en = "CONTRACTION RING IN {0} s", .uk = "КІЛЬЦЕ СКОРОЧЕННЯ ЧЕРЕЗ {0} с" };
     pub const ring_passed: T = .{ .en = "RING PASSED", .uk = "КІЛЬЦЕ ПРОЙШЛО" };
     pub const tethered: T = .{ .en = "TETHERED  ·  {@tether} releases", .uk = "НА ТРОСІ  ·  {@tether} — відпустити" };
     pub const lumen_open: T = .{ .en = "LUMEN OPEN", .uk = "ПРОСВІТ ВІДКРИТИЙ" };
-    pub const no_flow: T = .{ .en = "NO FLOW — VEIN OBSTRUCTED", .uk = "ТЕЧІЇ НЕМАЄ — ВЕНУ ПЕРЕКРИТО" };
+    pub const no_flow: T = .{ .en = "NO FLOW — VEIN OBSTRUCTED", .uk = "ПОТОКУ НЕМАЄ — ВЕНУ ПЕРЕКРИТО" };
     pub const reflux: T = .{ .en = "REFLUX — VALVES SHUT", .uk = "РЕФЛЮКС — КЛАПАНИ ЗАКРИТІ" };
     pub const valves_closing: T = .{ .en = "VALVES CLOSING IN {0} s", .uk = "КЛАПАНИ ЗАКРИЮТЬСЯ ЧЕРЕЗ {0} с" };
     pub const valves_open: T = .{ .en = "VALVES OPEN  ·  {0} s", .uk = "КЛАПАНИ ВІДКРИТІ  ·  {0} с" };
@@ -206,8 +208,8 @@ pub const card = struct {
     pub const sync_kicker: T = .{ .en = "FIELD CALIBRATION COMPLETE  —  UPGRADE", .uk = "ПОЛЬОВЕ КАЛІБРУВАННЯ ЗАВЕРШЕНО  —  ПОКРАЩЕННЯ" };
     pub const sync_name: T = .{ .en = "SYNC SERVO", .uk = "СИНХРОСЕРВО" };
     pub const sync_body: T = .{
-        .en = "Trigger both arms within a tenth of a second and they land as one Sync Strike: three times the effect, with a shockwave that clears small organisms around you. Two punches shatter calcium. Two rounds merge into a lance that pierces.",
-        .uk = "Запустіть обидві руки з різницею до десятої частки секунди — і вони спрацюють як один синхроудар: утричі сильніший, з ударною хвилею, що змітає дрібні організми довкола. Два удари розбивають кальцій. Два заряди зливаються у спис, що пробиває наскрізь.",
+        .en = "Trigger both arms within a tenth of a second and they land as one Sync Strike. Two punches hit ten times as hard as one, enough to shatter calcium, with a shockwave that clears small organisms around you. Two rounds merge into a lance that pierces and does the damage of three.",
+        .uk = "Запустіть обидві руки з різницею до десятої частки секунди — і вони спрацюють як один синхроудар. Два удари б’ють удесятеро сильніше за один — досить, щоб розбити кальцій, — і здіймають ударну хвилю, що змітає дрібні організми довкола. Два заряди зливаються у спис, що пробиває наскрізь і завдає шкоди, як три заряди.",
     };
     pub const install: T = .{ .en = "{@confirm} — install", .uk = "{@confirm} — встановити" };
 
@@ -247,6 +249,8 @@ pub const card = struct {
     pub const note_gut_flora: T = .{ .en = "The virus is cleared, and so is some of what kept other things out.", .uk = "Вірус усунено — а разом із ним і частину того, що не пускало сюди інших." };
     pub const note_gut_spread: T = .{ .en = "Cleared. What spread will slow her recovery by a day or two.", .uk = "Усунено. Те, що встигло поширитися, затримає її одужання на день-два." };
     pub const to_route_map: T = .{ .en = "{@confirm} — route map", .uk = "{@confirm} — карта маршруту" };
+    /// The caption beside the grade letter on the debrief.
+    pub const grade: T = .{ .en = "GRADE", .uk = "ОЦІНКА" };
 };
 
 pub const pause = struct {
@@ -259,6 +263,7 @@ pub const pause = struct {
         .{ .en = "Relaunch from last checkpoint", .uk = "Перезапуск з останньої контрольної точки" },
         .{ .en = "Restart chapter", .uk = "Почати розділ заново" },
         .{ .en = "Leave to title", .uk = "Вийти на титульний екран" },
+        .{ .en = "Quit game", .uk = "Вийти з гри" },
     };
     /// How to choose an option without its own key.
     pub const choose: T = .{ .en = "{@nav} select    {@confirm} choose", .uk = "{@nav} вибір    {@confirm} обрати" };
@@ -292,6 +297,11 @@ pub const pause = struct {
         .{ .{ .en = "{@hint}", .uk = "{@hint}" }, .{ .en = "Hint", .uk = "Підказка" } },
         .{ .{ .en = "{@skip}", .uk = "{@skip}" }, .{ .en = "Skip the current line", .uk = "Пропустити поточну репліку" } },
     };
+    /// The chapter 2 upgrade, listed once the drone carries it.
+    pub const tether = [2]T{
+        .{ .en = "{@tether}", .uk = "{@tether}" },
+        .{ .en = "Mucus Tether: attach to tissue, release on nothing", .uk = "Муциновий трос: зачепитися за тканину; у порожнечу — відпустити" },
+    };
     /// A control that exists only on the keyboard: the menu bar's shortcut. It is listed when the prompts
     /// are for the keyboard.
     pub const fullscreen = [2]T{ .{ .en = "Cmd+F", .uk = "Cmd+F" }, .{ .en = "Full screen", .uk = "На весь екран" } };
@@ -305,8 +315,13 @@ pub const language = struct {
 
 pub const title = struct {
     pub const tagline: T = .{ .en = "I N S I D E   T H E   B O D Y", .uk = "У С Е Р Е Д И Н І   Т І Л А" };
-    pub const begin: T = .{ .en = "{@confirm} — begin", .uk = "{@confirm} — почати" };
-    pub const route_map: T = .{ .en = "{@map} — route map", .uk = "{@map} — карта маршруту" };
+    /// The entries, in the order `app.TitleItem` lists them, apart from the language switch, which is
+    /// drawn from `language` below.
+    pub const begin: T = .{ .en = "Begin", .uk = "Почати" };
+    pub const route_map: T = .{ .en = "Route map", .uk = "Карта маршруту" };
+    pub const quit: T = .{ .en = "Quit game", .uk = "Вийти з гри" };
+    /// How to choose an entry.
+    pub const choose: T = .{ .en = "{@nav} select    {@confirm} choose", .uk = "{@nav} вибір    {@confirm} обрати" };
     pub const progress_one: T = .{ .en = "Chapter 1 complete  ·  grade {0}  ·  chapter 2 is open on the route map — {@map}", .uk = "Розділ 1 завершено  ·  оцінка {0}  ·  розділ 2 відкрито на карті маршруту — {@map}" };
     pub const progress_two: T = .{ .en = "Chapters 1 and 2 complete  ·  grades {0} and {1}  ·  {@map} for the route map", .uk = "Розділи 1 і 2 завершено  ·  оцінки {0} і {1}  ·  {@map} — карта маршруту" };
     pub const backdrop: T = .{ .en = "Right great saphenous vein, 3.6 mm across. Every disc is a red blood cell, 7.8 µm.", .uk = "Права велика підшкірна вена, 3,6 мм у діаметрі. Кожен диск — еритроцит, 7,8 мкм." };
@@ -319,11 +334,11 @@ pub const briefing = struct {
     pub const pages = [_]T{
         .{
             .en = "Patient: 58, colloid cyst of the third ventricle. It plugs the foramina of Monro without warning; the next time may be the last. She is septic from an infected clot in her right leg, and she will not survive open surgery.\n\nSo we go in through the leg.",
-            .uk = "Пацієнтка: 58 років, колоїдна кіста третього шлуночка. Вона без попередження перекриває отвори Монро; наступний раз може стати останнім. У неї сепсис від інфікованого тромбу в правій нозі, і відкритої операції вона не переживе.\n\nТому ми заходимо через ногу.",
+            .uk = "Пацієнтка: 58 років, колоїдна кіста третього шлуночка. Кіста без попередження перекриває отвори Монро; наступний раз може стати останнім. У неї сепсис від інфікованого тромбу в правій нозі, і відкритої операції вона не переживе.\n\nТому ми заходимо через ногу.",
         },
         .{
             .en = "You fly a drone the size of a red blood cell: eight micrometres. Two arms, each fitted with a punch, a drill or a lytic emitter, each on its own trigger.\n\nYour display removes ninety-nine red cells in a hundred, or blood would be a wall. Your link runs at one-hundredth speed, so a second of your time is ten milliseconds of hers.",
-            .uk = "Ви керуєте дроном завбільшки з еритроцит: вісім мікрометрів. Дві руки, на кожній — ударник, свердло або літичний випромінювач, у кожної свій спуск.\n\nВаш дисплей прибирає дев’яносто дев’ять еритроцитів зі ста, інакше кров була б суцільною стіною. Зв’язок працює в масштабі часу один до ста: секунда вашого часу — це десять мілісекунд її.",
+            .uk = "Ви керуєте дроном завбільшки з еритроцит: вісім мікрометрів. Дві руки, на кожній — ударник, свердло або літичний випромінювач, у кожної свій спуск.\n\nВаш дисплей прибирає дев’яносто дев’ять еритроцитів зі ста, інакше кров була б суцільною стіною. Зв’язок працює в масштабі часу один до ста: секунда вашого часу — це десять мілісекунд її часу.",
         },
         .{
             .en = "Every stop between here and the brain removes something that would kill her before the operation, and teaches the drone something it needs at the end. First stop is the clot.\n\nI'm Elena Marín. I'll be on comms the whole way. Point at anything and press {@examine} — I'll tell you what it is.",
@@ -441,8 +456,8 @@ pub const line = struct {
         .uk = "Стулка рухається. Клапан знову працює, і тиск у її нозі вже падає.",
     };
     pub const sync_servo_is_live: T = .{
-        .en = "Sync Servo is live. Trigger both arms within a tenth of a second and they land as one blow, three times as hard.",
-        .uk = "Синхросерво ввімкнено. Запустіть обидві руки з різницею до десятої частки секунди — і вони вдарять як одна, утричі сильніше.",
+        .en = "Sync Servo is live. Trigger both arms within a tenth of a second and they land as one blow, ten times as hard.",
+        .uk = "Синхросерво ввімкнено. Запустіть обидві руки з різницею до десятої частки секунди — і вони вдарять як одна, удесятеро сильніше.",
     };
     pub const put_both_arms_on_punch: T = .{ .en = "Put both arms on Punch and try it on the way to the marker.", .uk = "Поставте обидві руки на «Удар» і спробуйте дорогою до маркера." };
     pub const last_stretch: T = .{
@@ -463,9 +478,17 @@ pub const line = struct {
         .en = "Fine grit. The lung capillaries will catch it and macrophages will clear it. Ride the flow out.",
         .uk = "Дрібний пісок. Його затримають капіляри легень і приберуть макрофаги. Виходьте за течією.",
     };
-    pub const tempo_link_down: T = .{
-        .en = "Tempo link down. Twelve centimetres in three seconds — don't blink.",
-        .uk = "Вимикаю сповільнення часу. Дванадцять сантиметрів за три секунди — не кліпайте.",
+    /// The two transits of chapter 1, in order. Each names the distance its transit covers, in whole
+    /// centimetres as the HUD's location readout measures it; a test in game.zig holds the two together.
+    pub const tempo_link_down = [2]T{
+        .{
+            .en = "Tempo link down. Eleven centimetres in three seconds — don't blink.",
+            .uk = "Вимикаю сповільнення часу. Одинадцять сантиметрів за три секунди — не кліпайте.",
+        },
+        .{
+            .en = "Tempo link down again. Eighteen centimetres in three seconds — hold on.",
+            .uk = "Знову вимикаю сповільнення часу. Вісімнадцять сантиметрів за три секунди — тримайтеся.",
+        },
     };
     pub const reflux_back_off: T = .{ .en = "Reflux — the cusps are closing. Back off!", .uk = "Рефлюкс — стулки змикаються. Назад!" };
     pub const nothing_under_your_reticle: T = .{
@@ -530,8 +553,8 @@ pub const line = struct {
         .uk = "От ви й на місці. Стегнова вена, серце, легені, знову серце, вниз аортою і назовні з капіляра. Вона нічого з цього не відчула.",
     };
     pub const this_is_the_jejunum: T = .{
-        .en = "This is the jejunum, the first stretch of small intestine. You came out of the tip of one of these fingers.",
-        .uk = "Це порожня кишка, верхній відділ тонкої кишки. Ви вийшли з кінчика одного з цих пальців.",
+        .en = "This is the jejunum, the middle stretch of the small intestine, just past the duodenum. You came out of the tip of one of these fingers.",
+        .uk = "Це порожня кишка, середній відділ тонкої кишки, одразу за дванадцятипалою. Ви вийшли з кінчика одного з цих пальців.",
     };
     pub const look_around_before_you_move: T = .{
         .en = "Look around before you move. Put your reticle on one of the fingers and press {@examine}.",
@@ -589,7 +612,7 @@ pub const line = struct {
     };
     pub const youre_on_a_tip: T = .{ .en = "You're on a tip — get down between them!", .uk = "Ви на верхівці — спускайтеся між ворсинки!" };
     pub const the_stream_has_you: T = .{ .en = "The stream has you. Tether to the floor!", .uk = "Вас зносить течією. Чіпляйтеся тросом за дно!" };
-    pub const nothing_to_hide_behind_here: T = .{ .en = "Nothing to hide behind here. Back downstream, into the villi.", .uk = "Тут нема за що сховатися. Назад за течією, у ворсинки." };
+    pub const nothing_to_hide_behind_here: T = .{ .en = "Nothing to hide behind here. Back downstream, into the villi.", .uk = "Тут нема за чим сховатися. Назад за течією, у ворсинки." };
     pub const youre_in_the_stream: T = .{ .en = "You're in the stream. Down, between the villi.", .uk = "Ви в потоці. Униз, між ворсинки." };
     pub const holding_feel_that: T = .{
         .en = "Holding. Feel that? The stream is still there and you are not moving.",
@@ -727,7 +750,7 @@ pub const hint = struct {
         },
         .{
             .en = "Fly toward the marker, aim at a sheet until the reticle reads UNIDENTIFIED, press {@examine}.",
-            .uk = "Летіть до маркера, цільтеся в пластинку, доки під прицілом не з’явиться НЕРОЗПІЗНАНО, і натисніть {@examine}.",
+            .uk = "Летіть до маркера, цільтеся в пластинку, доки під прицілом не з’явиться НЕ РОЗПІЗНАНО, і натисніть {@examine}.",
         },
     };
     pub const valve1_pass = [3]T{
@@ -788,7 +811,7 @@ pub const hint = struct {
         },
         .{
             .en = "Press {@tool_right} once: the right arm goes from PUNCH to DRILL. Leave the left on SHOOT. Then fly to the ring.",
-            .uk = "Натисніть {@tool_right} один раз: права рука перемкнеться з УДАРУ на СВЕРДЛО. На лівій залиште ПОСТРІЛ. Потім летіть до кільця.",
+            .uk = "Натисніть {@tool_right} один раз: права рука перемкнеться з УДАР на СВЕРДЛО. На лівій залиште ПОСТРІЛ. Потім летіть до кільця.",
         },
     };
     pub const v2_approach = [3]T{
@@ -830,7 +853,7 @@ pub const hint = struct {
         },
         .{
             .en = "Fly up to a cable and hold the drill on it for three seconds. Keep the other arm on Shoot for whatever comes at you.",
-            .uk = "Підлетіть до тяжа й тримайте на ньому свердло три секунди. Другу руку залиште на «Пострілі» — для всього, що на вас полетить.",
+            .uk = "Підлетіть до тяжа й тримайте на ньому свердло три секунди. Другу руку залиште на «Постріл» — для всього, що на вас полетить.",
         },
         .{
             .en = "Follow the marker to a cable, press the drill against it and hold. When fragments break off, shoot each one three times before it reaches the stream.",
@@ -940,7 +963,7 @@ pub const hint = struct {
         },
         .{
             .en = "Fly to the diamond marker, hold Space until you are just above the tops of the villi, press {@examine}. Swollen magenta cells appear on the infected tips.",
-            .uk = "Летіть до ромбового маркера, утримуйте пробіл, доки не опинитеся трохи вище від верхівок ворсинок, і натисніть {@examine}. На заражених верхівках проявляться набряклі пурпурові клітини.",
+            .uk = "Летіть до ромбового маркера, утримуйте Пробіл, доки не опинитеся трохи вище від верхівок ворсинок, і натисніть {@examine}. На заражених верхівках проявляться набряклі пурпурові клітини.",
             .pad = &.{
                 .en = "Fly to the diamond marker, hold {@up} until you are just above the tops of the villi, press {@examine}. Swollen magenta cells appear on the infected tips.",
                 .uk = "Летіть до ромбового маркера, утримуйте {@up}, доки не опинитеся трохи вище від верхівок ворсинок, і натисніть {@examine}. На заражених верхівках проявляться набряклі пурпурові клітини.",
@@ -972,10 +995,10 @@ pub const hint = struct {
             .uk = "Одна рука — «Свердло», друга — «Постріл». Тримайте свердло в куполі, а щойно він розкриється, стріляйте другою рукою.",
         },
         .{
-            .en = "Fly up to the mucus dome on the marked villus. Hold the Drill key with the bit in it; when Marín calls it open, hold the Shoot key as well. Blebs will come at you: the drill holds its place if you look away to shoot them.",
+            .en = "Fly up to the mucus dome on the marked villus. Hold the Drill key with the bit in it; when I call it open, hold the Shoot key as well. Blebs will come at you: the drill holds its place if you look away to shoot them.",
             .uk = "Підлетіть до слизового купола на позначеній ворсинці. Утримуйте клавішу свердла, щоб воно працювало в куполі; коли я скажу, що він відкритий, утримуйте ще й клавішу пострілу. На вас полетять везикули: свердло лишиться на місці, якщо ви відвернетеся, щоб їх збити.",
             .pad = &.{
-                .en = "Fly up to the mucus dome on the marked villus. Hold the Drill trigger with the bit in it; when Marín calls it open, hold the Shoot trigger as well. Blebs will come at you: the drill holds its place if you look away to shoot them.",
+                .en = "Fly up to the mucus dome on the marked villus. Hold the Drill trigger with the bit in it; when I call it open, hold the Shoot trigger as well. Blebs will come at you: the drill holds its place if you look away to shoot them.",
                 .uk = "Підлетіть до слизового купола на позначеній ворсинці. Утримуйте тригер свердла, щоб воно працювало в куполі; коли я скажу, що він відкритий, утримуйте ще й тригер пострілу. На вас полетять везикули: свердло лишиться на місці, якщо ви відвернетеся, щоб їх збити.",
             },
         },

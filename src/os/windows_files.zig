@@ -28,6 +28,18 @@ pub fn writeFileParts(path: [*:0]const u8, parts: []const []const u8) bool {
     return true;
 }
 
+/// The handle is asked for at the time of the call, so this follows a console attached after startup,
+/// which the C runtime's descriptor 1 would not.
+pub fn writeStdout(bytes: []const u8) void {
+    const h = w.GetStdHandle(w.STD_OUTPUT_HANDLE) orelse return;
+    var rest = bytes;
+    while (rest.len > 0) {
+        var n: u32 = 0;
+        if (w.WriteFile(h, rest.ptr, @intCast(rest.len), &n, null) == 0 or n == 0) return;
+        rest = rest[n..];
+    }
+}
+
 pub fn readFile(path: [*:0]const u8, out: []u8) ?[]u8 {
     var buf: [paths.max_path]u16 = undefined;
     const name = wide(&buf, path) orelse return null;
@@ -49,16 +61,56 @@ pub fn makeDir(path: [*:0]const u8) void {
     _ = w.CreateDirectoryW(name.ptr, null);
 }
 
-pub fn removeFile(path: [*:0]const u8) void {
+pub fn isDir(path: [*:0]const u8) bool {
     var buf: [paths.max_path]u16 = undefined;
-    const name = wide(&buf, path) orelse return;
-    _ = w.DeleteFileW(name.ptr);
+    const name = wide(&buf, path) orelse return false;
+    const attrs = w.GetFileAttributesW(name.ptr);
+    return attrs != w.INVALID_FILE_ATTRIBUTES and attrs & w.FILE_ATTRIBUTE_DIRECTORY != 0;
 }
 
-pub fn removeDir(path: [*:0]const u8) void {
+/// The bytes go to a temporary file beside the destination and are flushed to the disk; MoveFileEx then
+/// replaces the destination in one step, and returns only when that too is on the disk.
+pub fn writeFileAtomic(path: []const u8, bytes: []const u8) bool {
+    var tmp8: [paths.max_path]u8 = undefined;
+    var tmp_buf: [paths.max_path]u16 = undefined;
+    var dest_buf: [paths.max_path]u16 = undefined;
+    const tmp_name = std.fmt.bufPrint(&tmp8, "{s}.{d}.tmp", .{ path, w.GetCurrentProcessId() }) catch return false;
+    const tmp = w.toWide(&tmp_buf, tmp_name) orelse return false;
+    const dest = w.toWide(&dest_buf, path) orelse return false;
+    const f = w.CreateFileW(tmp.ptr, w.GENERIC_WRITE, 0, null, w.CREATE_ALWAYS, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (f == w.invalid_handle) return false;
+    var ok = true;
+    var rest = bytes;
+    while (ok and rest.len > 0) {
+        var written: u32 = 0;
+        ok = w.WriteFile(f, rest.ptr, @intCast(@min(rest.len, 1 << 30)), &written, null) != 0 and written > 0;
+        if (ok) rest = rest[written..];
+    }
+    ok = w.FlushFileBuffers(f) != 0 and ok;
+    ok = w.CloseHandle(f) != 0 and ok;
+    ok = ok and w.MoveFileExW(tmp.ptr, dest.ptr, w.MOVEFILE_REPLACE_EXISTING | w.MOVEFILE_WRITE_THROUGH) != 0;
+    if (!ok) _ = w.DeleteFileW(tmp.ptr);
+    return ok;
+}
+
+pub fn removeFile(path: [*:0]const u8) bool {
     var buf: [paths.max_path]u16 = undefined;
-    const name = wide(&buf, path) orelse return;
-    _ = w.RemoveDirectoryW(name.ptr);
+    const name = wide(&buf, path) orelse return false;
+    return w.DeleteFileW(name.ptr) != 0;
+}
+
+pub fn removeDir(path: [*:0]const u8) bool {
+    var buf: [paths.max_path]u16 = undefined;
+    const name = wide(&buf, path) orelse return false;
+    return w.RemoveDirectoryW(name.ptr) != 0;
+}
+
+pub fn linkFile(from: [*:0]const u8, to: [*:0]const u8) bool {
+    var from_buf: [paths.max_path]u16 = undefined;
+    var to_buf: [paths.max_path]u16 = undefined;
+    const existing = wide(&from_buf, from) orelse return false;
+    const new = wide(&to_buf, to) orelse return false;
+    return w.CreateHardLinkW(new.ptr, existing.ptr, null) != 0;
 }
 
 pub fn envIsSet(name: [*:0]const u8) bool {
@@ -93,46 +145,30 @@ pub fn saveDirIn(out: []u8, root: []const u8) ?[:0]const u8 {
     return paths.winSaveDir(out, root);
 }
 
-pub const ScratchProfile = struct {
-    root: [paths.max_path:0]u8 = undefined,
-    root_len: usize = 0,
-    old: [paths.max_path]u16 = undefined,
-    old_len: ?usize = null,
+pub const no_profile_reason = "Windows did not say where application data is kept (%APPDATA%), so there is nowhere to keep a save file";
 
-    const appdata = std.unicode.utf8ToUtf16LeStringLiteral("APPDATA");
+/// The variable `profileRoot` reads first, which a scratch profile points somewhere else.
+pub const profile_var = "APPDATA";
 
-    /// Null if no temporary directory can be made, in which case the test is skipped.
-    pub fn begin(sp: *ScratchProfile) ?void {
-        var tmp: [paths.max_path]u16 = undefined;
-        const n = w.GetTempPathW(tmp.len, &tmp);
-        if (n == 0 or n >= tmp.len) return null;
-        var tmp8: [paths.max_path]u8 = undefined;
-        const base = w.fromWide(&tmp8, tmp[0..n]) orelse return null;
-        var qpc: i64 = 0;
-        _ = w.QueryPerformanceCounter(&qpc);
-        // GetTempPath ends in a separator. The name is unique to this process and moment.
-        const root = std.fmt.bufPrintSentinel(&sp.root, "{s}dentro-test-{d}-{x}", .{ base, w.GetCurrentProcessId(), @as(u64, @bitCast(qpc)) }, 0) catch return null;
-        sp.root_len = root.len;
-        makeDir(root.ptr);
-        const had = w.GetEnvironmentVariableW(appdata, &sp.old, sp.old.len);
-        if (had > 0 and had < sp.old.len) {
-            sp.old[had] = 0;
-            sp.old_len = had;
-        }
-        var wroot: [paths.max_path]u16 = undefined;
-        const wr = w.toWide(&wroot, root) orelse return null;
-        if (w.SetEnvironmentVariableW(appdata, wr.ptr) == 0) return null;
-    }
+pub fn setEnv(name: [*:0]const u8, value: ?[:0]const u8) bool {
+    var name_buf: [128]u16 = undefined;
+    var value_buf: [paths.max_path]u16 = undefined;
+    const wname = w.toWide(&name_buf, std.mem.span(name)) orelse return false;
+    const wvalue: ?w.LPCWSTR = if (value) |v| (w.toWide(&value_buf, v) orelse return false).ptr else null;
+    return w.SetEnvironmentVariableW(wname.ptr, wvalue) != 0;
+}
 
-    /// Restores the real profile and removes the scratch one, which holds at most the save file.
-    pub fn end(sp: *ScratchProfile) void {
-        if (sp.old_len) |n| {
-            _ = w.SetEnvironmentVariableW(appdata, sp.old[0..n :0].ptr);
-        } else _ = w.SetEnvironmentVariableW(appdata, null);
-        const root = sp.root[0..sp.root_len];
-        var bufs: [2][paths.max_path]u8 = undefined;
-        if (std.fmt.bufPrintSentinel(&bufs[0], "{s}\\" ++ paths.app_dir_name ++ "\\" ++ paths.save_file_name, .{root}, 0)) |p| removeFile(p.ptr) else |_| {}
-        if (std.fmt.bufPrintSentinel(&bufs[1], "{s}\\" ++ paths.app_dir_name, .{root}, 0)) |p| removeDir(p.ptr) else |_| {}
-        removeDir(sp.root[0..sp.root_len :0].ptr);
-    }
-};
+/// A new, empty directory under the user's temporary folder, named for this process and moment.
+pub fn makeTempDir(buf: []u8) ?[:0]const u8 {
+    var tmp: [paths.max_path]u16 = undefined;
+    const n = w.GetTempPathW(tmp.len, &tmp);
+    if (n == 0 or n >= tmp.len) return null;
+    var tmp8: [paths.max_path]u8 = undefined;
+    const base = w.fromWide(&tmp8, tmp[0..n]) orelse return null;
+    var qpc: i64 = 0;
+    _ = w.QueryPerformanceCounter(&qpc);
+    // GetTempPath ends in a separator.
+    const made = std.fmt.bufPrintSentinel(buf, "{s}dentro-test-{d}-{x}", .{ base, w.GetCurrentProcessId(), @as(u64, @bitCast(qpc)) }, 0) catch return null;
+    makeDir(made.ptr);
+    return if (isDir(made.ptr)) made else null;
+}

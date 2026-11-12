@@ -134,6 +134,17 @@ pub const PadSource = enum {
 pub const MenuTitles = struct { fullscreen: [*:0]const u8, quit: [*:0]const u8 };
 pub const MenuItem = enum { fullscreen, quit };
 
+/// The keys that are commands for the window rather than input for the game. A key pressed with `modifier`
+/// held is offered to the window first (the menu bar on a Mac, the window's own shortcuts on Windows) and
+/// reaches the game only if the window has no use for it; its release always reaches the game.
+pub const Shortcut = struct {
+    /// The modifier's name as the player knows it: "Cmd" or "Alt".
+    modifier: []const u8,
+    /// The key that toggles full screen when pressed with the modifier, and its legend.
+    fullscreen: Key,
+    fullscreen_name: []const u8,
+};
+
 /// Drawable size in pixels and the number of pixels per point.
 pub const PixelSize = struct { w: u32, h: u32, scale: f64 };
 
@@ -173,6 +184,8 @@ pub const reportFatal = backend.reportFatal;
 /// The keyboard shortcut for full screen, as the pause screen should print it; null for the one written
 /// in the string catalogue.
 pub const fullscreen_key: ?[]const u8 = backend.fullscreen_key;
+/// This platform's window shortcuts; see `Shortcut`.
+pub const shortcut: Shortcut = backend.shortcut;
 /// One line for the demo log: where controllers come from and whether that is available.
 pub const padBackendStatus = backend.padBackendStatus;
 

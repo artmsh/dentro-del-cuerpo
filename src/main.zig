@@ -8,6 +8,7 @@
 //!   dentro --selftest          headless: scripted pilot plays chapter 1, prints the timeline
 //!   dentro --shots <dir>       headless GPU: renders every screen offscreen and writes BMP frames
 //!   dentro --icon <file>       headless GPU: renders the app icon as a .png master or a Windows .ico
+//!   dentro --help              the usage text
 //!
 //! `--prompts kbm|xbox|ps` fixes the device the on-screen prompts are written for; without it they follow
 //! the device last used. `--lang en|uk` picks the language for the run. Without it the game uses the language the player chose in
@@ -38,98 +39,38 @@ const l10n = @import("l10n.zig");
 const pad = @import("pad.zig");
 const bindings = @import("bindings.zig");
 const input = @import("input.zig");
+const cli = @import("cli.zig");
 const Lang = i18n.Lang;
 const Text = i18n.Text;
 
-const Mode = enum { play, demo, inputtest, padtest, selftest, shots, icon };
-
-const usage = "usage: dentro [--fullscreen] [--software] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2] [--demo [--pad] | --inputtest | --padtest | --selftest | --shots <dir> | --icon <png|ico>]\n";
+const Mode = cli.Mode;
 
 pub fn main(init: std.process.Init) !void {
     platform.initProcess();
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
-    var mode: Mode = .play;
-    var shots_dir: []const u8 = ".";
-    var start_chapter: ?u8 = null;
-    var fullscreen = false;
-    var lang_arg: ?Lang = null;
-    var prompts_arg: ?bindings.Device = null;
-    var via_pad = false;
-    var software = false;
-    var i: usize = 1;
-    while (i < args.len) : (i += 1) {
-        const a = args[i];
-        const known = [_][]const u8{ "--selftest", "--demo", "--inputtest", "--padtest", "--pad", "--fullscreen", "--software", "--icon", "--shots", "--chapter", "--lang", "--prompts" };
-        var ok = false;
-        for (known) |k| ok = ok or std.mem.eql(u8, a, k);
-        // Cocoa reads "-AppleLanguages (uk)" and its kin from the command line as user defaults; they come
-        // with a value and are not this program's to judge.
-        if (std.mem.startsWith(u8, a, "-Apple")) {
-            i += 1;
-            continue;
-        }
-        // Finder passes -psn_… on some launch paths; anything else unknown is a mistake worth stopping for.
-        if (!ok and !std.mem.startsWith(u8, a, "-psn")) {
-            std.debug.print("unknown argument: {s}\n" ++ usage, .{a});
+    var why: [200]u8 = undefined;
+    const o = switch (cli.parse(args[@min(1, args.len)..], &why)) {
+        .run => |options| options,
+        .help => {
+            util.writeStdout(cli.usage);
+            return;
+        },
+        .bad => |reason| {
+            std.debug.print("dentro: {s}\n\n" ++ cli.usage, .{reason});
             std.process.exit(2);
-        }
-        if (std.mem.eql(u8, a, "--selftest")) mode = .selftest;
-        if (std.mem.eql(u8, a, "--demo")) mode = .demo;
-        if (std.mem.eql(u8, a, "--inputtest")) mode = .inputtest;
-        if (std.mem.eql(u8, a, "--padtest")) mode = .padtest;
-        if (std.mem.eql(u8, a, "--pad")) via_pad = true;
-        if (std.mem.eql(u8, a, "--prompts")) {
-            prompts_arg = if (i + 1 < args.len) bindings.Device.fromArg(args[i + 1]) else null;
-            if (prompts_arg == null) {
-                std.debug.print("--prompts takes kbm, xbox or ps\n", .{});
-                std.process.exit(2);
-            }
-            i += 1;
-            continue;
-        }
-        if (std.mem.eql(u8, a, "--fullscreen")) fullscreen = true;
-        if (std.mem.eql(u8, a, "--software")) software = true;
-        if (std.mem.eql(u8, a, "--chapter") and i + 1 < args.len) {
-            const n = std.fmt.parseInt(u8, args[i + 1], 10) catch 0;
-            if (n < 1 or n > 2) {
-                std.debug.print("--chapter takes 1 or 2 (the playable chapters)\n", .{});
-                std.process.exit(2);
-            }
-            start_chapter = n - 1;
-            i += 1;
-            continue;
-        }
-        if (std.mem.eql(u8, a, "--lang")) {
-            lang_arg = if (i + 1 < args.len) Lang.fromTag(args[i + 1]) else null;
-            if (lang_arg == null) {
-                std.debug.print("--lang takes en or uk\n", .{});
-                std.process.exit(2);
-            }
-            i += 1;
-            continue;
-        }
-        if (std.mem.eql(u8, a, "--icon") and i + 1 < args.len) {
-            mode = .icon;
-            shots_dir = args[i + 1];
-            i += 1;
-        }
-        if (std.mem.eql(u8, a, "--shots") and i + 1 < args.len) {
-            mode = .shots;
-            shots_dir = args[i + 1];
-            i += 1;
-        }
-    }
-    const gpu_options: gpu.Options = .{ .software = software };
-    const result = switch (mode) {
+        },
+    };
+    const gpu_options: gpu.Options = .{ .software = o.software };
+    const result = switch (o.mode) {
         .selftest => runSelftest(arena),
-        .shots => runShots(arena, gpu_options, shots_dir, start_chapter, lang_arg, prompts_arg orelse .kbm),
-        .icon => runIcon(arena, gpu_options, shots_dir),
-        else => runWindow(arena, mode, .{ .fullscreen = fullscreen, .start_chapter = start_chapter, .lang = lang_arg, .prompts = prompts_arg, .via_pad = via_pad, .gpu = gpu_options }),
+        .shots => runShots(arena, gpu_options, o.path, o.chapter, o.lang, o.prompts orelse .kbm),
+        .icon => runIcon(arena, gpu_options, o.path),
+        else => runWindow(arena, o.mode, .{ .fullscreen = o.fullscreen, .start_chapter = o.chapter, .lang = o.lang, .prompts = o.prompts, .via_pad = o.via_pad, .gpu = gpu_options }),
     };
     result catch |err| {
         // A player who double-clicked the game has no terminal to read the error from.
-        if (mode == .play) platform.reportFatal(@errorName(err));
+        if (o.mode == .play) platform.reportFatal(@errorName(err));
         return err;
     };
 }
@@ -239,6 +180,11 @@ fn longestDeep(lang: Lang) Text {
 fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, only: ?u8, lang: ?Lang, prompts: bindings.Device) !void {
     const pool = platform.scopeBegin();
     defer platform.scopeEnd(pool);
+    // A run that cannot write its frames is a failed run, and is found out before anything is rendered.
+    if (!util.makeDirs(dir)) {
+        std.debug.print("shots: cannot create the directory {s}\n", .{dir});
+        std.process.exit(1);
+    }
     const e = try arena.create(Engine);
     try e.init(arena, options, false, lang, .en);
     e.app.prompts = prompts;
@@ -258,19 +204,21 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
         px: []u8,
         dir: []const u8,
         n: u32 = 0,
-        failed: bool = false,
         fn snap(sh: *@This(), name: []const u8) void {
             const p2 = platform.scopeBegin();
             defer platform.scopeEnd(p2);
             _ = sh.e.renderFrame(1.0 / 60.0, true);
             sh.e.g.readback(sh.px);
-            var path: [600]u8 = undefined;
-            const full = std.fmt.bufPrintSentinel(&path, "{s}/{d:0>2}-{s}.bmp", .{ sh.dir, sh.n, name }, 0) catch return;
+            var path: [1200]u8 = undefined;
+            const full = std.fmt.bufPrintSentinel(&path, "{s}/{d:0>2}-{s}.bmp", .{ sh.dir, sh.n, name }, 0) catch {
+                std.debug.print("shots: the path for frame {d} ({s}) is too long\n", .{ sh.n, name });
+                std.process.exit(1);
+            };
+            // The first frame that cannot be written ends the run: the rest would fail the same way.
             const hdr = image.bmpHeader(sh.e.g.width, sh.e.g.height);
             if (!util.writeFileParts(full.ptr, &.{ &hdr, sh.px })) {
-                std.debug.print("could not write {s}\n", .{full});
-                sh.failed = true;
-                return;
+                std.debug.print("shots: could not write {s}\n", .{full});
+                std.process.exit(1);
             }
             std.debug.print("wrote {s}\n", .{full});
             sh.n += 1;
@@ -282,6 +230,9 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
     // then pressed until the run is back in its own language.
     for (0..150) |_| app.step(.{}, .{}, dt);
     sh.snap("title");
+    for (1..app_mod.TitleItem.count) |_| app.step(.{}, .{ .down = true }, dt);
+    sh.snap("title-quit-selected");
+    app.step(.{}, .{ .down = true }, dt);
     for (1..Lang.count) |_| {
         app.step(.{}, .{ .language = true }, dt);
         sh.snap("title-language-switched");
@@ -308,6 +259,9 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
     app.bot = .{};
     app.unlock_all = true;
     var all_done = true;
+    // The game as it stood when the current stage began, and room to set the present aside.
+    const at_entry = try arena.create(app_mod.App);
+    const present = try arena.create(app_mod.App);
     for (0..2) |ch| {
         if (only) |o| {
             if (o != ch) continue;
@@ -320,14 +274,35 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
         var t: f32 = 0;
         var done_mode: [6]bool = @splat(false);
         var ring_shot = false;
+        var stage_shot = false;
         while (t < 900) : (t += dt) {
             app.step(.{}, .{}, dt);
             const s = &app.sim;
             since += dt;
             if (last_stage == null or last_stage.? != s.stage) {
+                // The pilot is through some stages sooner than their frame is due (it identifies a villus
+                // in the step it arrives). Such a stage is photographed now from where it began: the game
+                // goes back to that moment with the pilot held off, runs until Marín starts the stage's
+                // own line, and is then put back exactly as it was, so the pilot's run is not disturbed.
+                if (last_stage) |missed| {
+                    if (!stage_shot) {
+                        present.* = app.*;
+                        app.* = at_entry.*;
+                        app.bot = null;
+                        const serial = s.voice.serial;
+                        var held: u32 = 0;
+                        while (held < 100 and s.stage == missed and (held < 12 or s.voice.serial == serial)) : (held += 1) app.step(.{}, .{}, dt);
+                        for (0..2) |_| app.step(.{}, .{}, dt);
+                        s.voice.age = 60;
+                        sh.snap(@tagName(missed));
+                        app.* = present.*;
+                    }
+                }
+                at_entry.* = app.*;
                 last_stage = s.stage;
                 since = 0;
                 extra = 0;
+                stage_shot = false;
             }
             const delay: f32 = switch (s.stage) {
                 .needle => 1.0,
@@ -340,7 +315,10 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
                 .g_exit => 0.8,
                 else => 1.4,
             };
-            if (since >= delay and since < delay + dt) sh.snap(@tagName(s.stage));
+            if (since >= delay and since < delay + dt) {
+                sh.snap(@tagName(s.stage));
+                stage_shot = true;
+            }
             const busy = s.stage == .treat or s.stage == .g_extrude or s.stage == .g_factory or s.stage == .g_flume or s.stage == .g_wave;
             const every: f32 = if (s.stage == .treat) 5.0 else 3.0;
             if (busy and since > delay + 1 and extra < 5 and @mod(since, every) < dt) {
@@ -447,8 +425,14 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
     app.step(.{}, .{ .language = true }, dt);
     for (1..app_mod.PauseItem.count) |_| app.step(.{}, .{ .down = true }, dt);
     sh.snap("pause-language-selected");
+    app.step(.{}, .{ .up = true }, dt);
+    sh.snap("pause-quit-selected");
+    // The control list gains a row once the drone carries the tether.
+    app.sim.has_tether = true;
+    sh.snap("pause-with-tether");
     std.debug.print("shots: {d} frames, chapters complete = {}\n", .{ sh.n, all_done });
-    if (sh.failed) return error.ShotWriteFailed;
+    // The frames are evidence only of a run that got to the end of what it was asked to fly.
+    if (!all_done) std.process.exit(1);
 }
 
 /// Render the app icon from the title backdrop and the reticle mark, 2048 px and clipped to a rounded
@@ -636,7 +620,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
             held_pad.set(&plat, puppet.drive(want, input.Context.of(app), dt));
         }
         const lost_focus = plat.pump();
-        if (lost_focus and app.screen == .play and mode == .play) app.openPause();
+        if (lost_focus and mode == .play) app.autoPause();
         const size = plat.pixelSize();
         if (size.w != e.g.width or size.h != e.g.height) e.g.resizeSurface(size.w, size.h, size.scale);
 
@@ -646,6 +630,9 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
         const gathered = gather(&plat.input, plat.captured, dt).merge(from_pad);
         const used = tracker.update(.{ .pressed = plat.input.anyPressed(), .held = plat.input.anyHeld() }, &mapper.sample);
         app.prompts = opts.prompts orelse used;
+        // The controller the player was flying with has gone (unplugged, out of battery, out of range):
+        // the game stops and waits rather than fly on with nobody at the controls.
+        if (tracker.lost_pad and (mode == .play or mode == .padtest)) app.autoPause();
 
         const steps: usize = @intFromFloat(m.clamp(@ceil(dt * 120.0), 1, 4));
         const sub = dt / @as(f32, @floatFromInt(steps));
@@ -667,6 +654,9 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
             if (app.comm_chirp) audio.play(audio_mod.comm_chirp, 0, 1);
         }
         plat.input.endFrame();
+        // Quit chosen from a menu ends the game the way the menu bar's Quit does. The scripted modes leave
+        // the request standing for their script to read.
+        if (app.want_quit and (mode == .play or mode == .demo)) plat.quit();
         plat.capture(app.want_capture and mode == .play);
         if (app.lang != menu_lang) {
             menu_lang = app.lang;
@@ -753,6 +743,9 @@ const InputTest = struct {
     saw_both: bool = false,
     saw_drill_and_shoot: bool = false,
     start_lang: Lang = .en,
+    yaw_after_release: f32 = 0,
+    saw_shortcut_down: bool = false,
+    menu_hits: u32 = 0,
 
     fn begin(it: *InputTest, app: *app_mod.App) void {
         _ = it;
@@ -803,6 +796,10 @@ const InputTest = struct {
         it.frame += 1;
         if (s.arms[0].held and s.arms[1].held) it.saw_both = true;
         if (s.arms[0].held and s.arms[1].held and s.arms[0].tool != s.arms[1].tool) it.saw_drill_and_shoot = true;
+        // The modifier that makes a key a command for the window (Cmd on a Mac, Alt on Windows), and the
+        // key that with it is the full-screen shortcut.
+        const sc = platform.shortcut;
+        if (plat.input.down(sc.fullscreen)) it.saw_shortcut_down = true;
         switch (it.frame) {
             20 => {
                 it.stone_hp = s.findConst(.phlebolith).?.hp;
@@ -845,12 +842,42 @@ const InputTest = struct {
             },
             230 => {
                 plat.postKey(.s, false);
-                plat.postKey(.left, false);
+                // The arrow key comes up while the modifier is down, as it does when the player lets go of
+                // it between pressing the full-screen shortcut and releasing the modifier.
+                plat.postSystemKey(.left, false);
                 it.check(s.pos.dist(it.start_pos) > 20, "S thrusts the drone backward");
                 it.check(@abs(s.yaw - it.start_yaw) > 0.3, "arrow keys turn the view");
                 plat.postKey(.t, true);
             },
             232 => plat.postKey(.t, false),
+            234 => {
+                it.check(!plat.input.down(.left), "a key released while " ++ sc.modifier ++ " is held is released");
+                it.yaw_after_release = s.yaw;
+            },
+            246 => {
+                it.check(@abs(s.yaw - it.yaw_after_release) < 0.01, "and the view has stopped turning");
+                // M and L do nothing in flight, so the key state can be read without the drone moving.
+                plat.postSystemKey(.m, true);
+            },
+            248 => {
+                it.check(plat.input.down(.m), "a key pressed while " ++ sc.modifier ++ " is held reaches the game, when it is not a shortcut of the window's");
+                plat.postSystemKey(.m, false);
+            },
+            250 => {
+                it.check(!plat.input.down(.m), "and its release does too");
+                // The full-screen shortcut belongs to the window. The command is pointed at a counter for
+                // these few frames, so the shortcut can be pressed without the window going full screen.
+                plat.probeFullscreen(true);
+                it.menu_hits = plat.fullscreenProbeHits();
+                it.saw_shortcut_down = false;
+                plat.postSystemKey(sc.fullscreen, true);
+            },
+            252 => plat.postSystemKey(sc.fullscreen, false),
+            254 => {
+                it.check(plat.fullscreenProbeHits() == it.menu_hits + 1, sc.modifier ++ "+" ++ sc.fullscreen_name ++ " reaches the full-screen command, once");
+                it.check(!it.saw_shortcut_down, "and is not also read as the " ++ sc.fullscreen_name ++ " key");
+                plat.probeFullscreen(false);
+            },
             260 => {
                 plat.postKey(.escape, true);
             },
@@ -1273,8 +1300,8 @@ const PadTest = struct {
             pt.check(app.screen == .pause and app.pause_sel == .resume_game, "Menu pauses, with Resume selected");
             pt.next();
         }
-        if (pt.at(&k) and pt.taps(.dpad_down, 4)) {
-            pt.check(app.pause_sel == .language, "d-pad down four times selects the language entry");
+        if (pt.at(&k) and pt.taps(.dpad_down, 5)) {
+            pt.check(app.pause_sel == .language, "d-pad down five times selects the language entry");
             pt.next();
         }
         if (pt.at(&k) and pt.tap(.a)) {
@@ -1288,8 +1315,8 @@ const PadTest = struct {
             pt.count0 = s.stats.retries;
             pt.next();
         }
-        if (pt.at(&k) and pt.taps(.dpad_up, 3)) {
-            pt.check(app.pause_sel == .retry, "d-pad up three times selects Relaunch from last checkpoint");
+        if (pt.at(&k) and pt.taps(.dpad_up, 4)) {
+            pt.check(app.pause_sel == .retry, "d-pad up four times selects Relaunch from last checkpoint");
             pt.next();
         }
         if (pt.at(&k) and pt.tap(.a)) {
@@ -1322,7 +1349,7 @@ const PadTest = struct {
         }
         if (pt.at(&k)) {
             if (pt.t >= 0.2) {
-                pt.check(!s.arms[1].held, "the controller disconnects with the trigger held: the arm stops");
+                pt.check(app.screen == .pause, "the controller in use disconnects in flight: the game pauses itself");
                 pt.check(app.prompts == .kbm, "and the prompts return to the keyboard");
                 pt.rest();
                 pt.unplugged = false;
@@ -1330,16 +1357,43 @@ const PadTest = struct {
                 pt.next();
             }
         }
-
-        // ------------------------------------------------------------------ leaving, and chapter 2 from the map
         if (pt.at(&k) and pt.t >= 0.2) pt.next();
+        if (pt.at(&k) and pt.tap(.start)) {
+            pt.check(app.screen == .play, "the controller comes back, and Menu resumes");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.t >= 0.2) {
+            pt.check(!s.arms[1].held, "the trigger that was held when it went is not held now: the arm is at rest");
+            pt.next();
+        }
+
+        // ------------------------------------------------------------------ quitting, leaving, and chapter 2 from the map
         if (pt.at(&k) and pt.tap(.start)) pt.next();
-        if (pt.at(&k) and pt.taps(.dpad_down, 3)) {
+        if (pt.at(&k) and pt.taps(.dpad_down, 4)) {
+            pt.check(app.screen == .pause and app.pause_sel == .quit, "d-pad down four times selects Quit game");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            // In play the application quits here; a scripted run leaves the request for its script to read.
+            pt.check(app.want_quit, "A chooses it: the game asks to quit");
+            app.want_quit = false;
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.dpad_up)) {
             pt.check(app.screen == .pause and app.pause_sel == .leave, "Leave to title is selected");
             pt.next();
         }
         if (pt.at(&k) and pt.tap(.a)) {
-            pt.check(app.screen == .title, "A chooses it: back on the title screen");
+            pt.check(app.screen == .title and app.title_sel == .begin, "A chooses it: back on the title screen, with Begin selected");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.taps(.dpad_down, 3)) {
+            pt.check(app.title_sel == .quit, "d-pad down three times on the title screen selects Quit");
+            pt.next();
+        }
+        if (pt.at(&k) and pt.tap(.a)) {
+            pt.check(app.want_quit and app.screen == .title, "A chooses it: the game asks to quit from the title screen too");
+            app.want_quit = false;
             pt.next();
         }
         if (pt.at(&k) and pt.tap(.y)) pt.next();
@@ -1411,5 +1465,8 @@ test {
     _ = @import("gpu.zig");
     _ = @import("image.zig");
     _ = @import("util.zig");
+    _ = @import("cli.zig");
+    _ = @import("render.zig");
+    _ = @import("draw.zig");
     _ = @import("platform.zig");
 }

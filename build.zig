@@ -43,13 +43,35 @@ pub fn build(b: *std.Build) void {
         .{ "font-symbols", "res/fonts/DejaVuSans.ttf" },
     }) |f| mod.addAnonymousImport(f[0], .{ .root_source_file = b.path(f[1]) });
 
-    const tests = b.addTest(.{ .root_module = mod });
-    b.step("test", "Unit tests (math, meshes, game rules, scripted chapter playthrough)").dependOn(&b.addRunArtifact(tests).step);
-
     const exe = switch (os) {
         .windows => windowsPackage(b, mod),
         else => macApp(b, mod),
     };
+
+    const tests = b.addTest(.{ .root_module = mod });
+    const test_step = b.step("test", "Unit tests (math, meshes, game rules, scripted chapter playthrough) and the command line's exit codes");
+    test_step.dependOn(&b.addRunArtifact(tests).step);
+    // The binary's own answer to a command line: 0 and the usage on stdout for help, 2 and the reason on
+    // stderr for arguments it refuses, 1 for a --shots run that cannot write its frames. None of these
+    // gets as far as opening a window or a GPU device. The last needs a path under which no directory
+    // can be made, which is a device name on either system.
+    const no_such_dir = if (os == .windows) "NUL\\frames" else "/dev/null/frames";
+    inline for (.{
+        .{ 0, "usage: dentro", &[_][]const u8{"--help"} },
+        .{ 0, "usage: dentro", &[_][]const u8{ "--demo", "-h" } },
+        .{ 2, "--chapter takes 1 or 2", &[_][]const u8{"--chapter"} },
+        .{ 2, "--shots takes a directory", &[_][]const u8{"--shots"} },
+        .{ 2, "--icon takes a file name", &[_][]const u8{"--icon"} },
+        .{ 2, "--pad goes with --demo", &[_][]const u8{"--pad"} },
+        .{ 2, "--chapter has no effect with --selftest", &[_][]const u8{ "--selftest", "--chapter", "2" } },
+        .{ 1, "cannot create the directory", &[_][]const u8{ "--shots", no_such_dir } },
+    }) |c| {
+        const cli = b.addRunArtifact(exe);
+        cli.addArgs(c[2]);
+        cli.expectExitCode(c[0]);
+        if (c[0] == 0) cli.expectStdOutMatch(c[1]) else cli.expectStdErrMatch(c[1]);
+        test_step.dependOn(&cli.step);
+    }
 
     const run = b.addRunArtifact(exe);
     run.addPassthruArgs();
@@ -58,22 +80,28 @@ pub fn build(b: *std.Build) void {
 
 /// zig-out/bin/dentro, and a Finder-launchable bundle with the shader source and icon it loads at runtime,
 /// sealed with an ad-hoc signature so Gatekeeper sees one consistent bundle rather than a bare
-/// linker-signed binary.
+/// linker-signed binary. The bundle is signed where it is installed, which `--prefix` moves, and the
+/// signature is then checked so that a bundle sealed in the wrong place or over the wrong contents fails
+/// the build.
 fn macApp(b: *std.Build, mod: *std.Build.Module) *std.Build.Step.Compile {
     const exe = b.addExecutable(.{ .name = "dentro", .root_module = mod });
     b.installArtifact(exe);
 
-    const app = b.step("app", "Assemble and sign zig-out/Dentro del cuerpo.app");
+    const app = b.step("app", "Assemble and sign Dentro del cuerpo.app under the install prefix");
+    const bundle: std.Build.LazyPath = .{ .relative = .{ .base = .install_prefix, .sub_path = "Dentro del cuerpo.app" } };
     const sign = b.addSystemCommand(&.{ "codesign", "--force", "--sign", "-", "--identifier", "game.dentro-del-cuerpo" });
-    sign.addArg("zig-out/Dentro del cuerpo.app"); // assumes the default install prefix
-    sign.setCwd(b.path("."));
+    sign.addDirectoryArg2(bundle, .{});
+    const verify = b.addSystemCommand(&.{ "codesign", "--verify", "--strict" });
+    verify.addDirectoryArg2(bundle, .{});
+    verify.step.dependOn(&sign.step);
     sign.step.dependOn(&b.addInstallFile(exe.getEmittedBin(), app_dir ++ "MacOS/dentro").step);
     sign.step.dependOn(&b.addInstallFile(b.path("res/Info.plist"), app_dir ++ "Info.plist").step);
     sign.step.dependOn(&b.addInstallFile(b.path("src/shaders/shaders.metal"), app_dir ++ "Resources/shaders/shaders.metal").step);
     sign.step.dependOn(&b.addInstallFile(b.path("res/AppIcon.icns"), app_dir ++ "Resources/AppIcon.icns").step);
-    // The fonts are inside the binary; their licences ask to travel with every copy, so they go in the bundle.
-    inline for (font_licences) |f| sign.step.dependOn(&b.addInstallFile(b.path(f[0]), app_dir ++ "Resources/licenses/" ++ f[1]).step);
-    app.dependOn(&sign.step);
+    // The game's own licences and those of what is compiled into the binary travel inside the bundle,
+    // since the bundle is all the release zip holds.
+    inline for (own_licences ++ font_licences) |f| sign.step.dependOn(&b.addInstallFile(b.path(f[0]), app_dir ++ "Resources/licenses/" ++ f[1]).step);
+    app.dependOn(&verify.step);
     b.getInstallStep().dependOn(app);
     return exe;
 }
@@ -136,11 +164,16 @@ fn windowsPackage(b: *std.Build, mod: *std.Build.Module) *std.Build.Step.Compile
     install.dependOn(&b.addInstallFile(exe.getEmittedBin(), dir ++ "Dentro del cuerpo.exe").step);
     install.dependOn(&b.addInstallFile(b.path("src/shaders/shaders.hlsl"), dir ++ "shaders/shaders.hlsl").step);
     install.dependOn(&b.addInstallFile(b.path("res/windows/README.txt"), dir ++ "README.txt").step);
-    install.dependOn(&b.addInstallFile(b.path("LICENSE"), dir ++ "LICENSE.txt").step);
-    install.dependOn(&b.addInstallFile(b.path("LICENSE-ARTWORK.txt"), dir ++ "LICENSE-ARTWORK.txt").step);
+    inline for (own_licences) |f| install.dependOn(&b.addInstallFile(b.path(f[0]), dir ++ f[1]).step);
     inline for (font_licences) |f| install.dependOn(&b.addInstallFile(b.path(f[0]), dir ++ "licenses/" ++ f[1]).step);
     return exe;
 }
+
+/// The game's own licences: Apache-2.0 for the code, CC BY 4.0 for the artwork and text.
+const own_licences = .{
+    .{ "LICENSE", "LICENSE.txt" },
+    .{ "LICENSE-ARTWORK.txt", "LICENSE-ARTWORK.txt" },
+};
 
 /// Licences of what is compiled into the binary; they ask to travel with every copy.
 const font_licences = .{
