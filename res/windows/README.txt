@@ -43,7 +43,8 @@ Confirm, back           Enter, Esc                 A, B
 Switch language         Tab (title, pause)         View, or d-pad left/right
 Route map (title)       M                          Y
 Full screen             Alt+Enter or F11
-Quit                    Alt+F4
+Quit                    Alt+F4, or Quit game       Quit game on the title
+                        in a menu                  and pause menus
 
 Xbox controllers and anything else that presents itself through XInput work
 without setup. DualShock 4 and DualSense controllers are read directly over

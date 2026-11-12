@@ -1,5 +1,5 @@
 <h1 align="center">Dentro del cuerpo</h1>
-<p align="center">A first-person macOS game: pilot a cell-sized drone through a patient's real anatomy, leg vein to brain.</p>
+<p align="center">A first-person game for macOS and Windows: pilot a cell-sized drone through a patient's real anatomy, leg vein to brain.</p>
 <p align="center">
   <b>Stage:</b> alpha · <b>Target:</b> personal project · <b>License:</b> Apache-2.0 (code), CC BY 4.0 (artwork)
   <br>
@@ -22,9 +22,10 @@
 > [DESIGN.md](docs/DESIGN.md) are playable.
 
 *Inside the Body.* A doctor pilots the drone in through a vein in the patient's right leg and organ by organ
-to the brain, treating what it finds on the way. It is playable in English and Ukrainian. Written in Zig over
-AppKit and Metal; the only third-party code is the vendored `stb_truetype.h`, which rasterises the bundled
-fonts.
+to the brain, treating what it finds on the way. It is playable in English and Ukrainian, on macOS and on
+Windows. It is written in Zig directly over each system's own interfaces, AppKit and Metal on macOS, Win32
+and Direct3D 11 on Windows, with no engine in between; the only third-party code is the vendored
+`stb_truetype.h`, which rasterises the bundled fonts.
 
 ## Rationale
 
@@ -78,24 +79,31 @@ game found: a shooter flown inside the human body.
 | Setting | real anatomy and pathogens (*S. aureus*, rotavirus) | fictional nanobot disease ("Rust") |
 | Movement | first person, two independently aimed arms | 6DoF ship, cockpit or third-person view |
 | Content | 2 chapters, about 5 minutes each | 12-mission campaign, 5 difficulty levels |
-| Platforms | macOS 14+ on Apple Silicon, built from source | Windows, macOS, Linux; $7.99 |
+| Platforms | macOS 14+ on Apple Silicon; Windows 10 and 11 on x64; free | Windows, macOS, Linux; $7.99 |
 | Input | keyboard and mouse; Xbox and PlayStation controllers; fixed layout | keyboard, mouse, gamepads; remappable |
-| Engine | none: Zig on AppKit and Metal | Godot |
+| Engine | none: Zig on AppKit and Metal, and on Win32 and Direct3D 11 | Godot |
 
-Cell Sword is the one to play for a finished campaign, remappable controls, or a Windows or Linux machine.
+Cell Sword is the one to play for a finished campaign, remappable controls, or a Linux machine.
 
 ## Requirements
 
-- An Apple Silicon Mac with macOS 14 or later.
-- Zig 0.17 to build from source.
+- macOS: an Apple Silicon Mac with macOS 14 or later.
+- Windows: 64-bit (x64) Windows 10 or 11 and a graphics card that supports Direct3D 11 at feature level
+  11_0, which is any card made since about 2010. Nothing has to be installed: the game uses only DLLs that
+  are part of Windows. On a machine with no such card it falls back to WARP, Windows' software renderer,
+  which draws the same picture slowly.
+- Zig 0.17 to build from source. The Windows version cross-compiles from macOS or any other host Zig runs
+  on, with no Windows SDK and no Visual Studio.
 
 ## Installation
 
-Download `Dentro-del-cuerpo-macos-arm64.zip` from the
-[latest release](https://github.com/artmsh/dentro-del-cuerpo/releases/latest) and unzip it. Every push to
-`main` that passes the tests is published there by [CI](.github/workflows/ci.yml).
+Every push to `main` that passes the tests on both platforms is published as a
+[release](https://github.com/artmsh/dentro-del-cuerpo/releases/latest) by [CI](.github/workflows/ci.yml),
+with one zip per platform.
 
-The app is signed ad hoc and not notarised by Apple, so macOS quarantines the download and refuses the first
+### macOS
+
+Download `Dentro-del-cuerpo-macos-arm64.zip` and unzip it. The app is signed ad hoc and not notarised by Apple, so macOS quarantines the download and refuses the first
 launch. Clear the quarantine flag once, or approve the app under System Settings → Privacy & Security →
 Open Anyway after the first refused launch:
 
@@ -113,15 +121,33 @@ open "zig-out/Dentro del cuerpo.app"      # or double-click it in Finder
 
 `zig build run -- --fullscreen` runs the bare binary, and `zig build --prefix DIR` assembles and signs the
 bundle under `DIR` instead of `zig-out`. Cmd+F toggles full screen; Cmd+Q quits, as does the `Quit game`
-entry of the title and pause menus. Chapter 2 unlocks on the route map when chapter 1 is finished;
-`--chapter 2` opens it directly. Progress is saved to
-`~/Library/Application Support/Dentro del cuerpo/save.txt`, which keeps for each chapter the best grade
-flown and, among runs of equal grade, the latest. The file is replaced whole on every save, so an
-interrupted write leaves the previous one, and a save that cannot be written is reported once on stderr
-while play goes on.
+entry of the title and pause menus. Progress is saved to
+`~/Library/Application Support/Dentro del cuerpo/save.txt`.
 
-The game starts in Ukrainian if Ukrainian comes before English in the system's list of preferred languages,
-and in English otherwise. `Tab` on the title or pause screen switches the language at once and the choice is
+### Windows
+
+Download `Dentro-del-cuerpo-windows-x64.zip`, unzip it anywhere and run `Dentro del cuerpo.exe` from the
+`Dentro del cuerpo` folder. The folder has to stay together, because the game compiles the shader file in
+its `shaders` subfolder at startup. The program is not code-signed, so the first launch is usually stopped
+by SmartScreen with "Windows protected your PC"; choose **More info** and then **Run anyway**. The zip also
+holds a `README.txt` with the controls.
+
+`Alt+Enter` or `F11` toggles full screen (a borderless window on the monitor the game is on). `Alt+F4`
+quits, as does the `Quit game` entry of the title and pause menus; full screen and quit are also in the
+window's system menu, in the game's language. Progress is saved to `%APPDATA%\Dentro del cuerpo\save.txt`,
+in the same format as on macOS. To build from source, on Windows or on any other machine with Zig:
+
+```sh
+zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast   # builds the folder zig-out/Dentro del cuerpo/
+```
+
+### Both
+
+Chapter 2 unlocks on the route map when chapter 1 is finished; `--chapter 2` opens it directly. The save
+file keeps for each chapter the best grade flown and, among runs of equal grade, the latest. It is replaced
+whole on every save, so an interrupted write leaves the previous one, and a save that cannot be written is
+reported once on stderr while play goes on. The game starts in Ukrainian if Ukrainian comes before English in the system's list of preferred languages (on
+Windows, the display languages under Settings → Time & language), and in English otherwise. `Tab` on the title or pause screen switches the language at once and the choice is
 kept in the save file; `--lang en` or `--lang uk` sets it for one run without changing what is saved.
 
 ## Controls
@@ -140,8 +166,8 @@ kept in the save file; `--lang en` or `--lang uk` sets it for one run without ch
 | Ask Dr. Marín for a hint (three levels per objective) | `H` | `Y` |
 | Skip the current comms line | `Tab` | `View` |
 | Pause, and resume | `Esc` | `Menu` |
-| On the title screen: begin, route map, language, quit game | `↑ ↓` and `Enter`, or `M`, `Tab`, `Cmd+Q` | d-pad or left stick and `A`, or `Y`, `View` |
-| In the pause menu: resume, relaunch from checkpoint, restart chapter, leave to title, quit game | `↑ ↓` and `Enter`, or `Esc`, `R`, `N`, `L`, `Cmd+Q` | d-pad or left stick and `A`; `B` resumes |
+| On the title screen: begin, route map, language, quit game | `↑ ↓` and `Enter`, or `M`, `Tab`, `Cmd+Q` (`Alt+F4` on Windows) | d-pad or left stick and `A`, or `Y`, `View` |
+| In the pause menu: resume, relaunch from checkpoint, restart chapter, leave to title, quit game | `↑ ↓` and `Enter`, or `Esc`, `R`, `N`, `L`, `Cmd+Q` (`Alt+F4`) | d-pad or left stick and `A`; `B` resumes |
 | Menus and cards: confirm, back | `Enter`, `Esc` | `A`, `B` |
 | Switch language (English, Ukrainian) on the title screen or the pause screen | `Tab` | `View`, or d-pad `←` `→` |
 
@@ -151,10 +177,16 @@ for `View` and `Options` for `Menu`, and the game's prompts use those names when
 one in use. The triggers act as buttons, pressed at 40% of their travel and released at 25%. Keyboard, mouse
 and controller are read together and their input is added, so the stick can fly while the mouse aims.
 Mouse movement alone never changes which device the prompts are written for, since on a handheld the
-gyroscope and trackpads arrive as mouse movement. `Cmd+F` has no controller equivalent; a controller quits
-through the `Quit game` entry of the title and pause menus. The game pauses itself when its window loses
-focus and when the controller in use disconnects during a chapter. Back on a briefing returns to the screen
-it was opened from, the title or the route map.
+gyroscope and trackpads arrive as mouse movement. The window's own shortcuts (`Cmd+F` and `Cmd+Q` on macOS,
+`Alt+Enter` or `F11` and `Alt+F4` on Windows) have no controller equivalent; a controller quits through the
+`Quit game` entry of the title and pause menus. The game pauses itself when its window loses focus and when
+the controller in use disconnects during a chapter. Back on a briefing returns to the screen it was opened
+from, the title or the route map.
+
+On Windows an Xbox controller, and anything else that presents itself through XInput, is read through
+XInput and gets Xbox names. A DualShock 4 or DualSense is read directly from its HID reports over USB or
+Bluetooth and gets PlayStation names; when Steam Input or a tool such as DS4Windows presents it as an XInput
+controller instead, the game listens to that one and the names are Xbox's.
 
 After the chapter 1 upgrade, triggering both arms within 0.12 s lands them as one Sync Strike.
 
@@ -167,16 +199,28 @@ vein that should not be in circulating blood) is already in chapter 1.
 
 ## Limitations
 
-- Apple Silicon and Metal only: there is no Intel, Windows or Linux build.
+- Apple Silicon Macs and x64 Windows only: there is no build for Intel Macs, Windows on ARM or Linux.
+- The Windows version has so far run only on CI machines, which have a desktop session but no graphics
+  card, no sound device and no controller. There it passes the same tests as the macOS version, its
+  scripted playthroughs print the same summary line for line, and its frames, drawn by Direct3D's software
+  renderer, were compared with the Metal ones screen by screen in both languages. It has not yet been
+  played on a physical Windows machine, so frame rate on real graphics cards, sound output, mouse feel,
+  full screen and behaviour across monitors of different DPI are unconfirmed.
+- On Windows the DualShock 4 and DualSense code is tested against the controllers' documented report
+  layouts and has not been run against a physical controller.
+- The Windows executable is not code-signed, so SmartScreen warns on first launch.
+- Under Steam, `Shift+Tab` opens the Steam overlay by default, and the game uses `Shift` for boost and `Tab`
+  to skip a comms line, so boosting while skipping a line opens the overlay. The overlay's shortcut can be
+  changed in Steam's settings; the game's keys cannot.
 - The control layout is fixed: there is no remapping of keys or controller buttons, no sensitivity or
   invert-Y setting for the right stick, and no rumble.
-- Controller hardware coverage is one device: an Xbox Wireless Controller over Bluetooth, on which
-  discovery, family detection, every button, both sticks and both triggers were read through the game's own
-  reader. No PlayStation controller has been attached, so its family detection and the hand-over of the
-  Create and Share button are covered only by the automated tests, which drive a controller object that the
-  GameController framework itself provides (see [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+- On macOS, controller hardware coverage is one device: an Xbox Wireless Controller over Bluetooth, on
+  which discovery, family detection, every button, both sticks and both triggers were read through the
+  game's own reader. No PlayStation controller has been attached, so its family detection and the hand-over
+  of the Create and Share button are covered only by the automated tests, which drive a controller object
+  that the GameController framework itself provides (see [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 - The mouse-capture warp for a window on a second display follows Apple's documented coordinate spaces and
-  is unit-tested as arithmetic, but has not been run on a machine with two displays.
+  is unit-tested as arithmetic, but has not been run on a Mac with two displays.
 
 ## Development
 
@@ -194,6 +238,18 @@ zig-out/bin/dentro --chapter 2 --demo
 zig-out/bin/dentro --demo --pad   # the same pilot, holding a controller instead of handing over its controls
 ```
 
+Every mode exists on Windows with the same flags; the program there is
+`zig-out/Dentro del cuerpo/Dentro del cuerpo.exe`, and `--software` makes it render with WARP instead of
+the graphics card, which is how CI, having no card, produces its frames. The executable is a GUI program
+and opens no console of its own, but started from a terminal the test modes print to it; `cmd.exe` does not
+wait for a GUI program unless it is started with `start /wait`, while PowerShell piping its output and Git
+Bash do.
+
+```sh
+zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast   # cross-build the Windows folder from macOS
+zig build test                                                 # on Windows as on macOS: the tests, natively
+```
+
 The scripted modes run in English unless `--lang` says otherwise, so their output does not depend on the
 machine; `--demo` follows the system like normal play. The tests fail on a string with no Ukrainian text, on
 placeholders that differ between the two languages, on any character that has no glyph in the font
@@ -209,7 +265,7 @@ directory cannot be made, a frame cannot be written or a chapter is not flown to
 rely on its status.
 
 ```text
-Build Summary: 12/12 steps succeeded; 101/101 tests passed
+Build Summary: 12/12 steps succeeded; 148/148 tests passed
 …
 selftest ch2: completed=true stage=done sim_time=86.8s deaths=0 stability=100.0 grade=A atlas=3
 …
@@ -226,7 +282,8 @@ Source code is licensed under [Apache-2.0](LICENSE). Artwork and writing (the ic
 [CC BY 4.0](LICENSE-ARTWORK.txt); attribute them to "Dentro del cuerpo" with a link to this repository.
 
 Third-party files are distributed under their own licences. The fonts are compiled into the binary, and
-their licence texts are copied into the app bundle under `Contents/Resources/licenses/`:
+their licence texts are copied into the app bundle under `Contents/Resources/licenses/` and into the Windows
+folder under `licenses`:
 
 | | | |
 |---|---|---|
