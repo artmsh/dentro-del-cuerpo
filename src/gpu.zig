@@ -149,6 +149,13 @@ comptime {
     std.debug.assert(@sizeOf(Post) == 64);
 }
 
+test {
+    // The Direct3D declarations check their own vtable layouts at compile time, and the two shader files
+    // are compared as text, so both are worth compiling on every host.
+    _ = @import("gpu/d3d11_api.zig");
+    _ = @import("gpu/shader_parity.zig");
+}
+
 test "the mip chain halves down to the last level with two rows, averaging with rounding" {
     const px = [_]u8{
         0,   255, 10, 20, 1, 1, 1, 2,

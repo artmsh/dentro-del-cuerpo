@@ -177,5 +177,10 @@ pub const fullscreen_key: ?[]const u8 = backend.fullscreen_key;
 pub const padBackendStatus = backend.padBackendStatus;
 
 test {
+    // The pure parts of every backend are tested on every host; none of them calls its operating system.
     _ = @import("platform/keymap.zig");
+    _ = @import("platform/win32.zig");
+    _ = @import("platform/xinput.zig");
+    _ = @import("platform/pshid.zig");
+    _ = @import("platform/padsel.zig");
 }
