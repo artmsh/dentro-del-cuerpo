@@ -39,14 +39,29 @@ pub const Style = struct {
     anim: f32 = 0,
 };
 
+/// One level of detail of a body of the ambient field: a mesh, and the least radius on the screen, in
+/// pixels of the scene image, it is drawn at. The levels keep a silhouette round at the sizes they are
+/// used at and their triangles several pixels across: a GPU shades whole 2x2 blocks of pixels for every
+/// triangle that touches one, so a body made of triangles smaller than that costs several times its
+/// area, and the field is thousands of bodies a few pixels wide.
+pub const Lod = struct { mesh: gpu.Mesh, px: f32 };
+
 /// Meshes shared by every chapter.
 pub const Meshes = struct {
     sphere: gpu.Mesh,
     sphere_lo: gpu.Mesh,
     red_cell: gpu.Mesh,
-    red_cell_lo: gpu.Mesh,
     white_cell: gpu.Mesh,
     platelet: gpu.Mesh,
+    /// The ambient field's bodies at each level of detail, finest first (see `Lod`): red cells,
+    /// platelets (flakes of debris in the gut), white cells, the gut's globs of mucus and its fat
+    /// droplets.
+    red_lods: [5]Lod,
+    platelet_lods: [3]Lod,
+    white_lods: [4]Lod,
+    mucus_lods: [4]Lod,
+    droplet_lods: [3]Lod,
+    crystal_lods: [1]Lod,
     cluster: [3]gpu.Mesh,
     blob: [3]gpu.Mesh,
     dome: gpu.Mesh,
@@ -85,13 +100,41 @@ pub const Meshes = struct {
         ms.sphere = b.sphere(16, 24);
         ms.sphere_lo = b.sphere(6, 8);
         ms.red_cell = b.redCell(7, 18);
-        ms.red_cell_lo = b.redCell(3, 8);
         ms.white_cell = b.blob(14, 20, 3.0, 0.07, 5.0, 1.0);
         ms.platelet = b.blob(6, 10, 9.0, 0.12, 2.0, 0.35);
         for (&ms.cluster, 0..) |*c, i| c.* = b.cluster(@intCast(5 + i), 11 + i * 7);
         ms.blob[0] = b.blob(24, 32, mesh_mod.clot_seed, mesh_mod.clot_amp, mesh_mod.clot_freq, 1.0);
         ms.blob[1] = b.blob(14, 20, 5.0, 0.35, 2.2, 0.85);
         ms.blob[2] = b.blob(14, 20, 8.0, 0.22, 2.8, 1.0);
+        ms.red_lods = .{
+            .{ .mesh = ms.red_cell, .px = 28 },
+            .{ .mesh = b.redCell(4, 12), .px = 12 },
+            .{ .mesh = b.redCell(2, 8), .px = 5 },
+            .{ .mesh = b.redCell(1, 6), .px = 2.5 },
+            .{ .mesh = b.redCell(1, 4), .px = 0 },
+        };
+        ms.platelet_lods = .{
+            .{ .mesh = ms.platelet, .px = 10 },
+            .{ .mesh = b.blob(4, 6, 9.0, 0.12, 2.0, 0.35), .px = 4 },
+            .{ .mesh = b.blob(3, 5, 9.0, 0.12, 2.0, 0.35), .px = 0 },
+        };
+        ms.white_lods = .{
+            .{ .mesh = ms.white_cell, .px = 30 },
+            .{ .mesh = b.blob(8, 12, 3.0, 0.07, 5.0, 1.0), .px = 12 },
+            .{ .mesh = b.blob(5, 8, 3.0, 0.07, 5.0, 1.0), .px = 5 },
+            .{ .mesh = b.blob(3, 5, 3.0, 0.07, 5.0, 1.0), .px = 0 },
+        };
+        ms.mucus_lods = .{
+            .{ .mesh = ms.blob[1], .px = 30 },
+            .{ .mesh = b.blob(8, 12, 5.0, 0.35, 2.2, 0.85), .px = 12 },
+            .{ .mesh = b.blob(5, 8, 5.0, 0.35, 2.2, 0.85), .px = 5 },
+            .{ .mesh = b.blob(3, 5, 5.0, 0.35, 2.2, 0.85), .px = 0 },
+        };
+        ms.droplet_lods = .{
+            .{ .mesh = ms.sphere_lo, .px = 8 },
+            .{ .mesh = b.sphere(3, 6), .px = 3 },
+            .{ .mesh = b.sphere(2, 4), .px = 0 },
+        };
         ms.dome = b.revolve(&domeProfile(), 22);
         ms.cylinder = b.revolve(&.{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 0.001 }, .{ 1, 1 }, .{ 1, 1.001 }, .{ 0, 1.001 } }, 16);
         ms.cone = b.revolve(&.{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 0.001 }, .{ 0.02, 1 } }, 16);
@@ -119,6 +162,7 @@ pub const Meshes = struct {
         }
         buildStomach(b, &ms);
         buildKidney(b, &ms);
+        ms.crystal_lods = .{.{ .mesh = ms.crystal, .px = 0 }};
         return ms;
     }
 
@@ -515,6 +559,12 @@ pub const Renderer = struct {
     cam_up: Vec3 = m.v3(0, 1, 0),
     cam_pos: Vec3 = .{},
 
+    /// Height in pixels of the image the scene is drawn into, which a backend may make smaller than the
+    /// output it is scaled up to.
+    pub fn sceneHeight(r: *const Renderer) f32 {
+        return @floatFromInt(if (@hasField(gpu.Gpu, "scene_h")) r.g.scene_h else r.g.height);
+    }
+
     pub fn begin(r: *Renderer) void {
         r.nb = 0;
         r.ninst = 0;
@@ -545,6 +595,27 @@ pub const Renderer = struct {
         if (r.nb >= gpu.max_batches) return;
         r.batches[r.nb] = .{ .pass = pass, .mesh = mesh, .first_instance = i, .instance_count = 1 };
         r.nb += 1;
+    }
+
+    /// Move the opaque batches among those listed from `from` up to `to` to the end of the list, keeping
+    /// their order. For a surface that encloses the scene and is dear to shade: drawn after everything
+    /// in front of it, it is shaded only where it shows.
+    pub fn drawLast(r: *Renderer, from: usize, to: usize) void {
+        var held: [64]gpu.Batch = undefined;
+        var n: usize = 0;
+        var out = from;
+        for (from..to) |i| {
+            const b = r.batches[i];
+            if (b.pass == .solid and n < held.len) {
+                held[n] = b;
+                n += 1;
+            } else {
+                r.batches[out] = b;
+                out += 1;
+            }
+        }
+        std.mem.copyForwards(gpu.Batch, r.batches[out .. r.nb - n], r.batches[to..r.nb]);
+        @memcpy(r.batches[r.nb - n .. r.nb], held[0..n]);
     }
 
     /// Reserve `n` vertices (a triangle list) of per-frame geometry drawn with an identity transform.

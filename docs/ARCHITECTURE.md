@@ -5,25 +5,37 @@ Recorded before implementation and kept current. Design intent (patient, route, 
 
 ## Constraints that drove the choices
 
-There are two targets: Apple Silicon Macs with macOS 14 or later, drawn with Metal, and x64 Windows 10
-and 11, drawn with Direct3D 11. Game and runtime code is Zig (0.17). The game was written for the Mac
-first. The workspace had no engine to reuse, but `~/projects/glance` already drives AppKit and Metal from
-Zig through `objc_msgSend`, and that pattern carried over; the Windows version follows the same idea with
-Win32 and COM.
+There are three targets: Apple Silicon Macs with macOS 14 or later, drawn with Metal; x64 Windows 10 and
+11, drawn with Direct3D 11; and one television, the Samsung QE65Q80D (Tizen 9, a 32-bit ARM system with a
+Mali-G51 GPU), drawn with OpenGL ES 3.0. Game and runtime code is Zig (0.17). The game was written for the
+Mac first. The workspace had no engine to reuse, but `~/projects/glance` already drives AppKit and Metal
+from Zig through `objc_msgSend`, and that pattern carried over; the Windows version follows the same idea
+with Win32 and COM. The television is the exception to working without an engine: the author's three other
+games for that television share a runtime, tvengine, that owns the Wayland surface, the pacing of frames
+to the display, the controllers, the remote and the audio stream, and that was measured and tuned on the
+device. The game uses it as a git submodule at `engine/` and keeps its own renderer.
 
 ## Platform seams
 
 Everything that touches an operating system sits behind four interfaces, and nothing else in the program
 imports a system API or asks which system it is on. Each interface is a neutral file that holds the types
-both sides share and selects an implementation at compile time with a `switch` on the target, so the
-choice is made in one place per seam and the shared code contains no platform conditionals.
+the implementations share and selects one at compile time with a `switch` on the target, so the choice is
+made in one place per seam and the shared code contains no platform conditionals.
 
-| Seam | Neutral file | macOS | Windows |
-|---|---|---|---|
-| Window, keys, mouse, controller, clock, system language | `src/platform.zig` | `platform/macos.zig` (AppKit, GameController) | `platform/windows.zig` (Win32, Raw Input, XInput) |
-| Drawing | `src/gpu.zig` | `gpu/metal.zig` | `gpu/d3d11.zig` |
-| Sound output | `src/audio.zig` (the synthesiser) | `audio/audioqueue.zig` | `audio/wasapi.zig` |
-| Files, environment, save folder | `src/util.zig` | `os/posix_files.zig` | `os/windows_files.zig` |
+| Seam | Neutral file | macOS | Windows | Television |
+|---|---|---|---|---|
+| Window, keys, mouse, controller, clock, system language | `src/platform.zig` | `platform/macos.zig` (AppKit, GameController) | `platform/windows.zig` (Win32, Raw Input, XInput) | the engine, through `src/tv.zig` and `platform/tvpad.zig` |
+| Drawing | `src/gpu.zig` | `gpu/metal.zig` | `gpu/d3d11.zig` | `gpu/gles.zig` |
+| Sound output | `src/audio.zig` (the synthesiser) | `audio/audioqueue.zig` | `audio/wasapi.zig` | `audio/tizen.zig`, into the engine's stream |
+| Files, environment, save folder | `src/util.zig` | `os/posix_files.zig` | `os/windows_files.zig` | `os/tv_files.zig` |
+
+On the television the first seam has a different shape, because the engine owns the loop: it calls the game
+once per refresh of the display and delivers controller events and the remote's keys between frames. The
+entry point there is `src/tv.zig` instead of `src/main.zig`, and it has no window to manage and no modes to
+choose between. What the two entry points do inside a frame is the same and lives once, in
+`src/runtime.zig`: building the renderer and the application, advancing the application by one displayed
+frame of input (one to four steps of the simulation, with one-shot actions applied to the first), and
+handing the synthesiser its continuous state.
 
 `platform.Key` names keys by physical position, after the legend on a US keyboard, and each backend maps
 its hardware codes to it in `platform/keymap.zig`: macOS virtual key codes, which are positional already,
@@ -32,7 +44,8 @@ therefore the same cluster of keys on a QWERTY, AZERTY or Ukrainian layout on bo
 is a struct with a fixed set of methods (`init`, `attach`, `resize`, `uploadMeshes`, `uploadFont`,
 `submit`, `readback`) and four CPU-side arrays the renderer fills each frame; `render.zig` describes a
 frame as batches and counts and does not know which API draws it. The audio seam is a pull: the output
-calls the synthesiser for interleaved float stereo at 48 kHz on its own thread. Images are encoded by
+calls the synthesiser for interleaved float stereo on its own thread, at 48 kHz on the desktops, and on the
+television from the game thread at the 22.05 kHz of the engine's stream (see Rendering stack). Images are encoded by
 `src/image.zig` with no system API (BMP for `--shots`, PNG and ICO for `--icon`), so the capture and icon
 tools are the same code everywhere.
 
@@ -57,9 +70,10 @@ are the same sequence of steps, and it has a software implementation (WARP) for 
 with no graphics card. The one piece of third-party code is `vendor/stb/stb_truetype.h`, checked in and
 compiled by the same `zig build` (see Text below).
 
-Shaders are one file per backend, `src/shaders/shaders.metal` and `src/shaders/shaders.hlsl`, compiled at
-launch: by `newLibraryWithSource:` on macOS and by `D3DCompile` from `d3dcompiler_47.dll`, a part of
-Windows, on Windows. Offline compilation would need the Metal toolchain component of Xcode or the Windows
+Shaders are one file per backend, `src/shaders/shaders.metal`, `src/shaders/shaders.hlsl` and
+`src/shaders/shaders.glsl`, compiled at launch: by `newLibraryWithSource:` on macOS, by `D3DCompile` from
+`d3dcompiler_47.dll`, a part of Windows, on Windows, and by the OpenGL ES driver on the television, where
+the source is always the copy embedded in the binary. Offline compilation would need the Metal toolchain component of Xcode or the Windows
 SDK's `fxc`, neither of which is guaranteed to be installed, and runtime compilation lets the shader file
 shipped beside the program be edited without rebuilding. The binary embeds the same source as a fallback
 when the file is not there.
@@ -71,8 +85,13 @@ order, and the functions that hold the look of the game (the noise helpers, the 
 function with every material, the particle and post-processing fragment functions) must be the same
 text line for line once the Metal spelling is rewritten in HLSL's (`mix` to `lerp`, `fract` to `frac`,
 `in.` to `IN.`, `sample` to `SampleLevel`). A change to the lighting made in one file and not the other
-fails `zig build test` on every platform. The vertex functions are exempt because they are where the two
-APIs differ. The differences that had to be handled are these. Metal's `vertex_id` and `instance_id`
+fails `zig build test` on every platform. The GLSL file is held to the Metal one in the same way. It
+defines Metal's type and function names as macros, so its shared functions are the Metal text with `in.`
+as `IN.` and the texture taps renamed, apart from a short list of lines where GLSL converts with a
+constructor or refuses an integer literal for a vector, and it holds three things the others do not, which
+the comparison steps over: a second set of the pattern functions that read baked textures, a `main` for
+each stage, and the pass that scales the scene to the output. The vertex functions are exempt because they
+are where the APIs differ. The differences that had to be handled are these. Metal's `vertex_id` and `instance_id`
 include the draw call's base vertex and base instance, and Direct3D's `SV_VertexID` and `SV_InstanceID` do
 not, so the Direct3D backend issues every draw from zero and passes the two bases in a small constant
 buffer that the vertex shader adds. Both APIs use a clip-space depth of 0 to 1 and put a texture's origin
@@ -127,12 +146,78 @@ material, the stone and its stalk the calcified one, whose crack glow shows the 
 crystals the cell material and the lumen of a duct unlit. The first-person arms are drawn after
 the world in the front slice of the depth range with their own projection, so they never clip into tissue.
 
+What is drawn is chosen so that little of it is wasted, on every platform, though it was the television that
+made it necessary. A triangle smaller than a pixel still makes the GPU shade the whole two-by-two block of
+pixels it touches, so a mesh much finer than the screen costs several times its visible area, and on the
+Mali-G51 that was the larger part of a frame. Each kind of drifting cell therefore has a table of meshes
+(`render.Lod`: five for a red cell, from 7 by 18 segments down to 1 by 4) and is drawn with the coarsest
+one whose facets stay near a pixel at the size it has on screen. The cells of a frame are sorted by a key
+of mesh, kind and distance, which batches them by mesh and lists the near ones first, so the far ones are
+rejected by the depth test where a near one covers them. The vessel wall, the largest surface and the one
+behind everything else, is drawn after all other opaque geometry for the same reason. Its tube is built at
+five ring densities, and each span along the vessel takes the coarsest density whose rings are no more than
+24 pixels apart on screen at the span's distance; the levels differ only in rings and share the vertices
+around the tube, so spans of different levels meet without a gap. The needle, the septum and every entity
+that is a single body are skipped when the view does not contain them. The drifting cells themselves are
+decoration and move once per displayed frame instead of once per step of the simulation, and each samples
+the flow field every second frame near the drone and every eighth further out, coasting on the velocity it
+last read in between.
+
+### The OpenGL ES backend
+
+`src/gpu/gles.zig` draws the same frame with OpenGL ES 3.0, with no headers and no library at link time:
+its entry points are looked up in `libGLESv2` when it starts. ES 3.0 has no buffer a shader can index by
+vertex and instance number, so vertex and instance data are attributes there, and a batch's base vertex and
+base instance are expressed by where the attributes point. The projection's depth of 0 to 1 is rescaled to
+OpenGL's range in the vertex shaders, and the scene is drawn and read back with OpenGL's bottom-left
+origin, so that nothing is flipped until `readback`. Multisampling uses
+`EXT_multisampled_render_to_texture`, which resolves inside the tile on a tile-based GPU, and the depth
+buffer is invalidated when the scene pass ends, so that neither is written back to memory. The arms are
+drawn first, since nothing is ever in front of them, and what they cover is not shaded.
+
+The television's GPU cannot do what the fragment shader asks at every pixel of a 1920×1080 image, and two
+things follow. The first is that the patterns are baked. The value noise hashes eight lattice points per
+sample and the cell pattern visits thirty-five cells, and a vessel wall takes nine samples of one and one
+of the other at every pixel. `src/gpu/gles_bake.zig` computes at startup, with the shader's own integer
+hashes, a 64-point noise lattice as a volume texture, a tile of 32 by 32 cells, the four-octave sum of the
+noise as a 128-texel volume that repeats every 8 units, and a square of film grain; the GLSL file's baked
+variants of `vnoise`, `fbm` and `voronoi` then cost one or two filtered fetches each. The patterns have the
+character they have elsewhere and differ in that they repeat. A desktop build of this backend computes
+them per pixel unless told otherwise, since it exists to be compared with Metal.
+
+The second is that the scene is drawn smaller than the output. It is tone-mapped at its own size into an
+8-bit image, one more pass stretches that to 1920×1080 and adds the grain at the output's resolution, and
+the HUD is drawn over it at full size, so text and instruments stay sharp whatever the scene's size. How
+small is decided while the game runs. The backend keeps a ladder of scene sizes, each 0.84 of the height
+of the one above, between `tuning.scene_height` and `tuning.min_scene_height` (510 and 254 rows as built),
+each with its own render targets, and `Gpu.paced` moves along it once a frame from what the display
+reported: whether a frame reached it a refresh later than it was drawn for, and whether it showed a frame
+twice. Each kind of miss fills its own counter, which drains while frames are on time; a counter that
+fills means a step down. A step up is tried after 240 calm frames and is on trial for 900 frames. A trial
+that fails doubles the time before the next attempt, up to 4800 frames, and one that holds resets it, so
+a scene that sits at the edge of what the GPU can do is not tested every few seconds. The display's
+feedback is used because the GPU's own time cannot be had on this device: its driver advertises
+`EXT_disjoint_timer_query` and answers every query with zero, and it lowers the GPU's clock under a light
+load, so a fence at the end of a frame is signalled no sooner for a small scene than for one that just
+fits. A frame that misses its refresh is shown for two and is seen as a stutter, where a softer image is
+not, which is why the controller gives up resolution first. With the display at 60 Hz about 9 ms of each
+frame goes to work that does not depend on the scene's size: any pass that covers the 1920×1080 surface
+costs close to 4 ms on this GPU whatever its shader does, and the HUD, the tone mapping and the bloom
+chain take the rest. The scene has what is left, which is why it settles near 254 to 300 rows in busy
+stages. The engine's surface is always 1920×1080; a smaller one scaled by the television would return
+that time, and is a change to the engine.
+
 Audio is a procedural synthesiser; there are no sample files. The game thread sends events through a
 single-producer ring and continuous parameters (drill load per arm, flow, heart rate) through atomics, and
 each arm's sounds are panned to its side. The system output pulls from it: an AudioQueue on macOS, and on
 Windows a WASAPI shared-mode stream on the default playback device, opened as 48 kHz float stereo (Windows
 converts to the device's own format) and refilled by a thread that the device wakes whenever the stream
-has room. A Windows machine may have no playback device at all, and the default device can change while
+has room. On the television the direction is reversed. The engine owns the stream to the platform's audio
+output and takes 16-bit stereo at 22.05 kHz through a lock-free queue, and running the synthesiser inside
+Tizen's own callback thread crashed, so `tv.zig` renders on the game thread: every frame it tops the queue
+up to 80 ms in blocks of 512 samples (`audio/tizen.zig` converts the synthesiser's floats). The synthesiser
+takes its sample rate from `audio.rate`, so its pitches and envelopes are the same at either rate. A
+Windows machine may have no playback device at all, and the default device can change while
 the game runs, so neither is treated as an error: with no device the thread keeps the synthesiser's clock
 running into nothing and looks again every few seconds, and once a second it compares the stream's device
 with the current default and reopens on the new one.
@@ -321,6 +406,19 @@ controllers stand down until one of them has been used for a second with every X
 which a mirror cannot do. Its tests drive it frame by frame, including a mirrored controller whose two
 copies arrive a frame apart in either order.
 
+On the television the engine reads Xbox controllers from the kernel's event devices and delivers each
+change as an event: a device, the index of a button or an axis, and a value. `platform/tvpad.zig` adds
+those up into a `pad.State` for as many as two controllers and hands the game the one touched last, raw,
+so the dead zones, thresholds and the layout are the shared ones. It imports nothing from the engine and
+is tested on the build machine, including the engine's numbering of the X and Y buttons, which follows
+the kernel's diagram and is the reverse of what an Xbox controller prints. The remote's arrows, OK and
+Back arrive as key names and become the menu actions only, so the remote can start the game, change the
+language and leave, and cannot fly; Back on the title screen leaves the application, as the television's
+guidelines ask. The prompts always name the Xbox controller, there being no keyboard to name. When the
+application is suspended (another one comes to the front, or the television goes to standby) the flight
+pauses, the stream stops and every held control is released, since the releases will not be delivered;
+on resume the scene-size controller ignores the first frames, whose timing says nothing about the load.
+
 On Windows the mouse is read through Raw Input as well, which reports the device's movement without
 pointer acceleration and does not stop at the edge of the screen. While the game holds the mouse the
 cursor is hidden and confined to the window. Keys arrive as window messages and are identified by scan
@@ -354,7 +452,8 @@ stage.
 
 ## Verification
 
-The simulation being headless makes five layers possible.
+The simulation being headless makes five layers possible on the desktops; what is checked on and for the
+television follows them.
 
 - `zig build test` runs unit tests for the anatomy models, the rules, the guide, the audio panning, the text
   formatter, the translations and the controller layer, plus a scripted pilot (`src/bot.zig`) that plays
@@ -423,8 +522,27 @@ system-preference path testable without changing system settings.
 
 Scripted and bot-driven modes never read or write the save file.
 
-CI runs all of this on both systems for every push to `main` and every pull request, and on request for
-any other branch (`.github/workflows/ci.yml`). The Windows job runs on a
+The television gives no shell and its package cannot run tests, so the port is checked in three places.
+Everything of it that is not a call into the device is tested by `zig build test` on the build machine:
+the controller events, the audio conversion, the save path, the baked textures (that each fills its range,
+closes on itself where it repeats and holds the shader's hashes), the attribute layouts against the shader
+file, and the shader parity described above. The renderer is run on the Mac: `zig build -Dgles` swaps
+Metal for the OpenGL ES backend, drawing offscreen through ANGLE (`DENTRO_ANGLE_DIR` names the directory
+holding its libraries), and `--shots` then writes the frames the television's code path draws, which were
+compared with Metal's frame by frame; with the patterns computed, the worst frames differ by a mean of
+about one level in 255. On the device, a package built with `SELFTEST=1` has the scripted pilot fly the
+chapter named by `CHAPTER`, and with `DEBUG_HOST` it reports every five seconds over the network: the
+stage reached, the presented frame rate, late and repeated frames, the scene's rows and its steps up and
+down, and audio underruns. `CAPTURE=1` sends frames to the build machine and `PROFILE=1` times the phases
+of a frame, which slows it. `tv/build.sh --test --unsigned` runs the tests, builds the package and runs
+the engine's checks on the binary (the ABI, the newest glibc symbol it needs, that floating-point
+instructions are present). All four chapters have been flown this way on the television; a controller in
+a player's hands, the remote and the save file have not been tried there.
+
+CI runs all of this on both desktop systems for every push to `main` and every pull request, and on
+request for any other branch (`.github/workflows/ci.yml`). It does not build the television package,
+having neither the engine's repository nor Tizen's tools; the television's code that `zig build test`
+covers is tested there like the rest. The Windows job runs on a
 GitHub-hosted Windows Server machine, which has a desktop session but no graphics card, no sound device
 and no controller. It runs `zig build test` natively, the release executable's `--selftest`, `--shots` in
 both languages through WARP, the same render with a forced device loss, and `--inputtest` and `--padtest`
@@ -496,6 +614,23 @@ temporary file beside the save, are flushed, and the file is moved over the save
 `MOVEFILE_REPLACE_EXISTING`, which replaces the old file in one step. The preferred language comes from
 the user's display-language list (`GetUserPreferredUILanguages`).
 
+The television package is built by `tv/build.py`, which describes the application to the engine's
+`tvbuild` (identifier, entry point `src/tv.zig`, the fonts as named modules as `build.zig` embeds them, the
+licences as resources, and the build values the game reads as `build_options`) and leaves compiling,
+packaging, signing and installing to it. The target is 32-bit ARM with the soft-float calling convention,
+and the engine's pipeline compiles the game through LLVM IR so that floating point is done in the
+processor while arguments still travel in integer registers. One thing had to be added on the game's
+side. Zig compiles its own runtime library, which holds `sin`, `cos`, `exp` and the rest, with floating
+point emulated in integer code for this target. A sine then took 0.6 microseconds on the television, and
+the simulation, which evaluates thousands of them a step, ran hundreds of times slower than on a desktop.
+`tv/build.py` compiles the math functions of that library the way the engine compiles the game and links
+the object ahead of the runtime library, and it stops the build if a Zig release changes what the step
+relies on. The same step belongs in the engine, where the other games would have it too. A `usize` is 32
+bits there, which the desktops never exercise, so the package is built after any change to shared code.
+The save file is `save.txt` in the application's private data directory, which the engine reports at
+startup, written under the same guarantee as on macOS. The language follows the television's menu
+language, read from Tizen's settings store, until the player chooses one.
+
 ## Source layout
 
 | | |
@@ -508,17 +643,21 @@ the user's display-language list (`GetUserPreferredUILanguages`).
 | `src/guide.zig`, `src/campaign.zig` | the atlas and comms queue; the chapter table (both bilingual) |
 | `src/i18n.zig`, `src/strings.zig`, `src/l10n.zig` | languages, templates and plurals; the string catalogue; the tests that walk all text |
 | `src/bot.zig` | scripted pilot used by the tests and `--demo` |
-| `src/main.zig`, `src/cli.zig`, `src/app.zig` | entry point and the modes; command-line parsing; screens, menus and the save file |
+| `src/main.zig`, `src/cli.zig`, `src/app.zig` | the desktop entry point and the modes; command-line parsing; screens, menus and the save file |
+| `src/tv.zig`, `src/runtime.zig` | the television's entry point, on the engine; what both entry points do in a frame |
 | `src/draw.zig`, `src/render.zig` | scene, arms and HUD; batching |
 | `src/gpu.zig`, `src/gpu/metal.zig`, `src/gpu/d3d11.zig`, `src/gpu/d3d11_api.zig` | the frame description and the GPU seam; the Metal and Direct3D 11 backends; Direct3D declarations |
-| `src/shaders/`, `src/gpu/shader_parity.zig` | the Metal and HLSL shader files; the test that holds them together |
+| `src/gpu/gles.zig`, `src/gpu/gles_bake.zig` | the OpenGL ES 3.0 backend with its scene-size controller; the baked pattern textures |
+| `src/shaders/`, `src/gpu/shader_parity.zig` | the Metal, HLSL and GLSL shader files; the test that holds them together |
 | `src/pad.zig`, `src/bindings.zig`, `src/input.zig` | controller state and its shaping; the layout and the names of controls per device; controller input as actions, and the device the prompts follow |
 | `src/platform.zig`, `src/platform/keymap.zig` | the platform seam: keys, input state, window; hardware key codes to keys |
 | `src/platform/macos.zig`, `src/platform/objc.zig` | AppKit window, event pump, GameController; the Objective-C runtime bridge |
 | `src/platform/windows.zig`, `src/platform/win32.zig` | Win32 window, message pump, Raw Input; Win32 and COM declarations |
 | `src/platform/xinput.zig`, `src/platform/pshid.zig`, `src/platform/padsel.zig` | XInput mapping and slot polling; DualShock 4 and DualSense report parsers; which controller is current |
-| `src/audio.zig`, `src/audio/audioqueue.zig`, `src/audio/wasapi.zig` | synthesiser; its outputs |
+| `src/platform/tvpad.zig` | the engine's controller events as controller state |
+| `src/audio.zig`, `src/audio/audioqueue.zig`, `src/audio/wasapi.zig`, `src/audio/tizen.zig` | synthesiser; its outputs |
 | `src/util.zig`, `src/os/` | files, environment and the save folder, per system |
 | `src/image.zig` | BMP, PNG and ICO encoding |
 | `build.zig`, `res/`, `.github/` | the app bundle and the Windows folder; icons, manifest, package README; CI |
+| `tv/`, `engine/` | the television package's description and icon; tvengine, a submodule |
 | `src/font.zig`, `src/utf8.zig`, `src/stb_truetype.c`, `vendor/stb/`, `res/fonts/` | glyph atlas and UTF-8 decoding; the rasteriser and the fonts it reads |

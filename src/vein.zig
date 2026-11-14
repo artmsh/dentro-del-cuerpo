@@ -426,7 +426,8 @@ pub const Vein = struct {
 };
 
 pub const Meshes = struct {
-    tube: gpu.Mesh,
+    /// The wall at each level of detail, finest first.
+    tube: [tube_levels]gpu.Mesh,
     needle: gpu.Mesh,
     septum: gpu.Mesh,
 };
@@ -434,11 +435,58 @@ pub const Meshes = struct {
 /// Endothelial cells per turn of the wall texture (must be an integer so the pattern closes on itself).
 pub const wall_cells_around: f32 = 808;
 
+/// The wall at its finest is a grid of this many quads around and this many rings along the vein, the
+/// rings in order of z, so a stretch of the vein is a contiguous run of the mesh's indices.
+pub const tube_around = 96;
+pub const tube_rings = 520;
+/// The wall is drawn in this many stretches, each only when the view can hold it.
+pub const tube_spans = 26;
+/// The wall is built at this many levels of detail, each with the finest's rings along the vein divided
+/// by one of these. Seen from inside, a stretch far down the vein is foreshortened to a thin band, and at
+/// the finest level its triangles would be slivers a fraction of a pixel wide, each costing the GPU a
+/// block of four pixels of the dearest material there is. The quads around stay as they are, so the
+/// levels meet at a ring without a gap.
+pub const tube_levels = 5;
+const tube_rings_div = [tube_levels]u32{ 1, 2, 5, 10, 20 };
+
+/// The coarsest level of the wall whose rings are still no more than a couple of dozen pixels apart on
+/// the screen, for a stretch that begins `along` down the vein from the eye, on a screen with
+/// `px_per_unit` pixels to a unit length at unit distance.
+pub fn tubeLevel(along: f32, px_per_unit: f32) usize {
+    const finest = (z_max - z_min) / @as(f32, tube_rings);
+    // A ring of the wall `along` away is R0 / along from the view's axis, and the next one, `gap`
+    // further, is nearer the axis by R0 * gap / along^2.
+    const px_per_gap = R0 * px_per_unit / @max(along * along, 1.0);
+    var level: usize = tube_levels - 1;
+    while (level > 0 and px_per_gap * finest * @as(f32, @floatFromInt(tube_rings_div[level])) > 24) level -= 1;
+    return level;
+}
+
+/// Stretch `k` of the wall at a level of detail, where it lies along the vein, and a sphere that holds it.
+pub fn tubeSpan(tubes: [tube_levels]gpu.Mesh, level: usize, k: usize) struct { mesh: gpu.Mesh, z0: f32, z1: f32, centre: Vec3, radius: f32 } {
+    const tube = tubes[level];
+    const rings = tube_rings / tube_rings_div[level] / tube_spans;
+    comptime for (tube_rings_div) |div| std.debug.assert(tube_rings / div / tube_spans * tube_spans * div == tube_rings);
+    const per_ring = tube_around * 6;
+    const dz = (z_max - z_min) / @as(f32, tube_spans);
+    const z0 = z_min + dz * @as(f32, @floatFromInt(k));
+    // The widest the wall gets is at the confluence, with a sinus bulge on top; the centreline wanders
+    // less than a tenth of the stretch's length to either side of its middle.
+    const widest = R0 * 2.6;
+    const half = dz * 0.5;
+    return .{
+        .mesh = .{ .index_start = tube.index_start + @as(u32, @intCast(k * rings * per_ring)), .index_count = rings * per_ring, .base_vertex = tube.base_vertex },
+        .z0 = z0,
+        .z1 = z0 + dz,
+        .centre = Vein.center(z0 + half),
+        .radius = @sqrt(half * half + widest * widest) + dz * 0.1,
+    };
+}
+
 pub fn buildMeshes(b: *mesh.Builder, vn: *const Vein) Meshes {
     var out: Meshes = undefined;
 
     // Vessel wall.
-    b.begin();
     const Tube = struct {
         vn: *const Vein,
         pub fn at(c: @This(), u: f32, v: f32) Vec3 {
@@ -449,9 +497,12 @@ pub fn buildMeshes(b: *mesh.Builder, vn: *const Vein) Meshes {
             return v3(ctr.x + r * @cos(th), ctr.y + r * @sin(th), z);
         }
     };
-    b.grid(96, 520, Tube{ .vn = vn }, false, .{ wall_cells_around, (z_max - z_min) / 14.0 });
-    b.smoothNormals(false);
-    out.tube = b.end();
+    for (&out.tube, tube_rings_div) |*tube, rings_div| {
+        b.begin();
+        b.grid(tube_around, tube_rings / rings_div, Tube{ .vn = vn }, false, .{ wall_cells_around, (z_max - z_min) / 14.0 });
+        b.smoothNormals(false);
+        tube.* = b.end();
+    }
 
     // Cannula: outer and inner shells cut by the bevel plane, plus the ground rim between them.
     b.begin();

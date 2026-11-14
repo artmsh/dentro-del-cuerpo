@@ -154,9 +154,29 @@ pub const View = struct {
     view: Mat4,
     eye: Vec3,
     fwd: Vec3,
+    /// Cosine and sine of the half-angle of the cone around `fwd` that holds the whole view.
+    cone_cos: f32 = -1,
+    cone_sin: f32 = 0,
+    /// Pixels of the scene image that a length of one unit covers at a distance of one unit.
+    px_per_unit: f32 = 800,
+
+    /// False when a sphere of `radius` at `p` lies wholly outside the view cone. It errs towards true.
+    pub fn sees(vw: *const View, p: Vec3, radius: f32) bool {
+        const rel = p.sub(vw.eye);
+        return rel.dot(vw.fwd) >= rel.len() * vw.cone_cos - (vw.cone_cos + vw.cone_sin) * radius;
+    }
+
+    /// The radius in pixels at which a sphere of `radius` is drawn when `dist` away.
+    pub fn pixels(vw: *const View, radius: f32, dist: f32) f32 {
+        return radius * vw.px_per_unit / @max(dist, 1e-3);
+    }
 };
 
 var bore_mix: f32 = 1;
+
+/// Beyond this distance the vessel wall is not drawn: the thinnest fog of the chapter passes under a
+/// hundredth of the light from there, which is less than one step of the display.
+const wall_reach = 11000;
 
 pub fn frame(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, dt: f32) Out {
     const s = &app.sim;
@@ -176,7 +196,18 @@ pub fn frame(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, dt: f32) Out {
     const fov = if (app.icon_mode) 0.95 else 1.17 + 0.08 * speed_kick + 0.45 * s.warp;
     const proj = Mat4.perspective(fov, aspect, 1.0, 14000);
     const view = Mat4.view(eye, rt, up, f.neg());
-    const vw: View = .{ .vp = proj.mul(view), .view = view, .eye = eye, .fwd = f };
+    // The cone that holds the view reaches the corners of the image.
+    const half_tan = @tan(fov * 0.5);
+    const corner = half_tan * @sqrt(1 + aspect * aspect);
+    const vw: View = .{
+        .vp = proj.mul(view),
+        .view = view,
+        .eye = eye,
+        .fwd = f,
+        .cone_cos = 1 / @sqrt(1 + corner * corner),
+        .cone_sin = corner / @sqrt(1 + corner * corner),
+        .px_per_unit = r.sceneHeight() * 0.5 / half_tan,
+    };
     r.cam_right = rt;
     r.cam_up = up;
     r.cam_pos = eye;
@@ -271,11 +302,23 @@ pub fn frame(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, dt: f32) Out {
 
 // ---------------------------------------------------------------------------- world
 
+/// The levels of detail of a body of the ambient field: blood cells in the vein, and elsewhere what
+/// the lumen holds in their places (droplets, flakes and mucus; in the kidney, crystals for the flakes).
+fn cellLods(ms: *const render.Meshes, kind: app_mod.CellKind, chapter: usize) []const render.Lod {
+    return switch (kind) {
+        .red => if (chapter != 0) &ms.droplet_lods else &ms.red_lods,
+        .platelet => if (chapter == 3) &ms.crystal_lods else &ms.platelet_lods,
+        .white => if (chapter != 0) &ms.mucus_lods else &ms.white_lods,
+    };
+}
+
 fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const View) void {
     const s = &app.sim;
     const ms = &r.meshes;
     const vn = &s.vein;
 
+    // What encloses the scene is listed here and drawn last (see the end of the function).
+    const shell_from = r.nb;
     if (s.chapter == 1) {
         drawGut(app, r, vw);
     } else if (s.chapter == 2) {
@@ -283,39 +326,84 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
     } else if (s.chapter == 3) {
         drawKidney(app, r, vw);
     } else {
-        r.draw(vm.tube, .solid, Mat4.identity, .{ .color = .{ 0.66, 0.19, 0.20, 1 }, .mat = .wall, .anim = vein_mod.wall_cells_around });
-        r.draw(vm.needle, .solid, Mat4.identity, .{ .color = .{ 0.42, 0.45, 0.50, 1 }, .mat = .metal });
-        r.draw(vm.septum, .solid, Mat4.identity, .{ .color = .{ 0.74, 0.55, 0.47, 1 }, .mat = .fibrin, .seed = 0.4 });
+        // The wall, stretch by stretch: only those the view can hold, and not those so far into the
+        // blood that less than a hundredth of their light arrives.
+        // Each is drawn with as many rings as its distance down the vein shows.
+        for (0..vein_mod.tube_spans) |k| {
+            const whole = vein_mod.tubeSpan(vm.tube, 0, k);
+            if (whole.centre.dist(vw.eye) - whole.radius > wall_reach or !vw.sees(whole.centre, whole.radius)) continue;
+            const along = @max(whole.z0 - vw.eye.z, vw.eye.z - whole.z1, 0);
+            const span = vein_mod.tubeSpan(vm.tube, vein_mod.tubeLevel(along, vw.px_per_unit), k);
+            r.draw(span.mesh, .solid, Mat4.identity, .{ .color = .{ 0.66, 0.19, 0.20, 1 }, .mat = .wall, .anim = vein_mod.wall_cells_around });
+        }
+        // The cannula and the septum, each where the view can hold it and its light still arrives.
+        const needle_mid = vn.needle.at(-0.5 * vein_mod.Needle.len);
+        const needle_reach = 0.5 * vein_mod.Needle.len + 2 * vein_mod.Needle.outer;
+        if (needle_mid.dist(vw.eye) - needle_reach < wall_reach and vw.sees(needle_mid, needle_reach)) {
+            r.draw(vm.needle, .solid, Mat4.identity, .{ .color = .{ 0.42, 0.45, 0.50, 1 }, .mat = .metal });
+        }
+        const septum_mid = Vein.center(vn.septum.z);
+        const septum_reach = vein_mod.R0 * 2.6;
+        if (septum_mid.dist(vw.eye) - septum_reach < wall_reach and vw.sees(septum_mid, septum_reach)) {
+            r.draw(vm.septum, .solid, Mat4.identity, .{ .color = .{ 0.74, 0.55, 0.47, 1 }, .mat = .fibrin, .seed = 0.4 });
+        }
     }
+    const shell_to = r.nb;
     // The decorative field is blood cells in the vein and whatever the lumen holds elsewhere.
     const jej = s.chapter != 0;
     const sto = s.chapter == 2;
     const kid = s.chapter == 3;
 
-    // Blood cells the display has left in.
-    inline for (.{ &app.near, &app.far }, .{ true, false }) |cells, is_near| {
-        inline for (.{ app_mod.CellKind.red, app_mod.CellKind.platelet, app_mod.CellKind.white }) |kind| {
-            for (cells) |*c| {
-                if (!c.visible or c.kind != kind) continue;
-                const d2 = c.pos.sub(vw.eye).len2();
-                if (d2 < 15 * 15) continue;
-                if (!is_near and d2 < 240 * 240) continue; // the near field already covers this shell
-                const b0 = c.axis.perp();
-                const axis = c.axis.scale(@cos(c.phase)).add(b0.scale(@sin(c.phase)));
-                const model = Mat4.place(c.pos, axis, v3(c.scale, c.scale, c.scale));
-                switch (kind) {
-                    // in the gut the same field is chyme: fat droplets, food debris, mucus
-                    .red => if (jej) r.draw(ms.sphere_lo, .solid, model, .{ .color = if (kid) .{ 0.70, 0.52, 0.42, 1 } else if (sto) .{ 0.50, 0.42, 0.16, 1 } else .{ 0.80, 0.66, 0.20, 1 }, .mat = .cell, .seed = c.tint }) else r.draw(if (is_near) ms.red_cell else ms.red_cell_lo, .solid, model, .{ .color = .{ 0.46 + 0.12 * c.tint, 0.05, 0.065, 1 }, .mat = .cell, .seed = c.tint }),
-                    .platelet => r.draw(if (kid) ms.crystal else ms.platelet, .solid, model, .{ .color = if (kid) .{ 0.80, 0.84, 0.78, 1 } else if (sto) .{ 0.36, 0.32, 0.20, 1 } else if (jej) .{ 0.40, 0.30, 0.16, 1 } else .{ 0.70, 0.64, 0.46, 1 }, .mat = .cell, .seed = c.tint }),
-                    .white => r.draw(if (jej) ms.blob[1] else ms.white_cell, .solid, model, .{ .color = if (kid) .{ 0.74, 0.52, 0.48, 1 } else if (sto) .{ 0.40, 0.42, 0.34, 1 } else if (jej) .{ 0.52, 0.56, 0.40, 1 } else .{ 0.62, 0.64, 0.74, 1 }, .mat = .cell, .seed = c.tint }),
-                }
-            }
+    // Blood cells the display has left in: those the view can hold, each in as much detail as its size
+    // on the screen shows, and nearest first, so that a cell behind another is not shaded where it is
+    // hidden. The order is by level of detail, then kind, then distance: every run of one mesh is one
+    // batch of instances, and the finer levels are the nearer cells.
+    var order: [app_mod.near_count + app_mod.far_count]u64 = undefined;
+    var count: usize = 0;
+    inline for (.{ &app.near, &app.far }, .{ true, false }, .{ 0, app_mod.near_count }) |cells, is_near, base| {
+        for (cells, 0..) |*c, i| {
+            if (!c.visible) continue;
+            const d2 = c.pos.sub(vw.eye).len2();
+            if (d2 < 15 * 15) continue;
+            if (!is_near and d2 < 240 * 240) continue; // the near field already covers this shell
+            if (!vw.sees(c.pos, c.scale)) continue;
+            const dist = @sqrt(d2);
+            const lods = cellLods(ms, c.kind, s.chapter);
+            const px = vw.pixels(c.scale, dist);
+            var level: usize = 0;
+            while (level + 1 < lods.len and px < lods[level].px) level += 1;
+            const far: u64 = @intFromFloat(@min(dist * 64, 4e9));
+            order[count] = @as(u64, level) << 56 | @as(u64, @intFromEnum(c.kind)) << 48 | far << 16 | @as(u64, base + i);
+            count += 1;
         }
+    }
+    std.mem.sortUnstable(u64, order[0..count], {}, std.sort.asc(u64));
+    for (order[0..count]) |key| {
+        const index: usize = @intCast(key & 0xFFFF);
+        const c = if (index < app_mod.near_count) &app.near[index] else &app.far[index - app_mod.near_count];
+        const b0 = c.axis.perp();
+        const axis = c.axis.scale(@cos(c.phase)).add(b0.scale(@sin(c.phase)));
+        const model = Mat4.place(c.pos, axis, v3(c.scale, c.scale, c.scale));
+        const mesh = cellLods(ms, c.kind, s.chapter)[@intCast(key >> 56)].mesh;
+        const color: Color = switch (c.kind) {
+            // in the gut the same field is chyme: fat droplets, food debris, mucus
+            .red => if (kid) .{ 0.70, 0.52, 0.42, 1 } else if (sto) .{ 0.50, 0.42, 0.16, 1 } else if (jej) .{ 0.80, 0.66, 0.20, 1 } else .{ 0.46 + 0.12 * c.tint, 0.05, 0.065, 1 },
+            .platelet => if (kid) .{ 0.80, 0.84, 0.78, 1 } else if (sto) .{ 0.36, 0.32, 0.20, 1 } else if (jej) .{ 0.40, 0.30, 0.16, 1 } else .{ 0.70, 0.64, 0.46, 1 },
+            .white => if (kid) .{ 0.74, 0.52, 0.48, 1 } else if (sto) .{ 0.40, 0.42, 0.34, 1 } else if (jej) .{ 0.52, 0.56, 0.40, 1 } else .{ 0.62, 0.64, 0.74, 1 },
+        };
+        r.draw(mesh, .solid, model, .{ .color = color, .mat = .cell, .seed = c.tint });
     }
 
     // Organisms, clot, markers.
     for (&s.ents, 0..) |*e, idx| {
         const seed = e.seed;
+        // A single body the view cannot hold is not drawn. The margin covers what each adds to its
+        // radius: a glow's swell, a bob, a nucleus.
+        const one_body = switch (e.kind) {
+            .cocci, .embolus, .neutrophil, .odd_cell, .infected, .shed, .virion => true,
+            else => false,
+        };
+        if (one_body and !vw.sees(e.pos, e.radius * 2.5 + 6)) continue;
         switch (e.kind) {
             .none => {},
             .cocci => {
@@ -345,7 +433,11 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
                 r.draw(ms.blob[1], .solid, Mat4.trs(e.pos, v3(0.3, 1, 0.2), app.time * 0.7 + seed * 9, e.radius), .{ .color = .{ 0.5, 0.08, 0.09, 1 }, .mat = .clot, .emissive = e.flash * 1.5, .seed = seed });
             },
             .neutrophil => {
-                r.draw(ms.white_cell, .solid, Mat4.trs(e.pos, v3(@sin(seed * 30), 0.2, @cos(seed * 30)), app.time * 0.6 + seed * 12, e.radius), .{ .color = .{ 0.66, 0.68, 0.78, 1 }, .mat = .cell, .seed = seed });
+                // as fine as its size on the screen shows, like the white cells of the field
+                const px = vw.pixels(e.radius, e.pos.dist(vw.eye));
+                var level: usize = 0;
+                while (level + 1 < ms.white_lods.len and px < ms.white_lods[level].px) level += 1;
+                r.draw(ms.white_lods[level].mesh, .solid, Mat4.trs(e.pos, v3(@sin(seed * 30), 0.2, @cos(seed * 30)), app.time * 0.6 + seed * 12, e.radius), .{ .color = .{ 0.66, 0.68, 0.78, 1 }, .mat = .cell, .seed = seed });
             },
             .odd_cell => {
                 const bobp = e.pos.add(v3(0, @sin(app.time * 0.8 + seed * 9) * 3, 0));
@@ -584,6 +676,8 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
         p.z = vw.eye.z + @mod(base.z - vw.eye.z, cell * 6) - cell * 3;
         r.particle(p, 0.9, if (kid) .{ 1.0, 0.95, 0.7, 0.10 } else if (sto) .{ 0.8, 0.95, 0.8, 0.14 } else if (jej) .{ 1.0, 0.9, 0.5, 0.16 } else .{ 1.0, 0.75, 0.7, 0.18 });
     }
+
+    r.drawLast(shell_from, shell_to);
 }
 
 /// Chapter 2 scenery: the crypt floor, the villi around the camera, and, where a contraction ring is passing,

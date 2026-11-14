@@ -1,15 +1,16 @@
 //! Procedural audio. No samples on disk: every sound is a few oscillators and noise, rendered as
 //! interleaved float stereo at 48 kHz. Each arm's sounds are panned to its side so the two can be told
 //! apart by ear. The synthesiser is the same on every platform; what plays its output is picked at compile
-//! time (`audio/audioqueue.zig` on macOS, `audio/wasapi.zig` on Windows) and calls back into it from the
-//! system's audio thread.
+//! time (`audio/audioqueue.zig` on macOS, `audio/wasapi.zig` on Windows, `audio/tizen.zig` on the
+//! television) and calls back into it from the system's audio thread.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const game = @import("game.zig");
 
-/// Sample rate the synthesiser renders at. An output asks the system for this rate.
-pub const rate: f32 = 48000;
+/// Sample rate the synthesiser renders at. An output asks the system for this rate; the television's
+/// stream belongs to its engine, which runs it at 22050 Hz.
+pub const rate: f32 = if (builtin.os.tag == .linux) 22050 else 48000;
 
 /// What an output pulls from: `frames` frames of interleaved stereo written to `out`, on the output's thread.
 pub const Source = struct {
@@ -22,10 +23,12 @@ pub const Source = struct {
 };
 
 /// The system output for the target: `start(source) bool` begins pulling, `stop()` ends it and returns
-/// only when the audio thread no longer touches the source.
+/// only when the audio thread no longer touches the source. The television's is the exception: it has no
+/// thread, and renders when the platform layer asks (see audio/tizen.zig).
 const Output = switch (builtin.os.tag) {
     .macos => @import("audio/audioqueue.zig").Output,
     .windows => @import("audio/wasapi.zig").Output,
+    .linux => @import("audio/tizen.zig").Output,
     else => @compileError("no audio output for this operating system"),
 };
 
@@ -366,4 +369,9 @@ test "arm sounds are panned to their side" {
     }
     try std.testing.expect(el > er * 3);
     for (buf) |s| try std.testing.expect(s >= -1 and s <= 1);
+}
+
+test {
+    // The television's output converts samples with a function that calls nothing; it is tested everywhere.
+    _ = @import("audio/tizen.zig");
 }

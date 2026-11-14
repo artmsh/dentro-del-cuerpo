@@ -206,12 +206,20 @@ pub const Cell = struct {
     scale: f32 = 3.9,
     tint: f32 = 0,
     visible: bool = false,
+    /// The flow where the cell was when it was last sampled. The cell drifts with it until the next
+    /// sample (see `updateCells`).
+    vel: Vec3 = .{},
 };
 
 pub const near_count = 1500;
 pub const far_count = 3200;
 const near_half = v3(260, 260, 300);
 const far_half = v3(1500, 1500, 2100);
+/// One cell in this many has the flow at its position sampled, and its position checked against the
+/// walls, in an update; the others drift on with the flow they last sampled. The field is smooth and a
+/// cell crosses little of it between samples, and sampling it is most of what the drifting cells cost.
+const near_stride = 2;
+const far_stride = 8;
 
 pub const App = struct {
     screen: Screen = .title,
@@ -219,6 +227,12 @@ pub const App = struct {
     checkpoint: game.Sim = undefined,
     near: [near_count]Cell = undefined,
     far: [far_count]Cell = undefined,
+    /// Set by the caller that steps the simulation several times for one displayed frame, while steps
+    /// of that frame remain: work that belongs to the frame rather than to the step waits for the last.
+    more_steps: bool = false,
+    /// Time the drifting cells have not yet moved through, and a count of their updates.
+    cell_time: f32 = 0,
+    cell_tick: u32 = 0,
     rng: m.Rng = m.Rng.init(99),
     time: f32 = 0,
     screen_t: f32 = 0,
@@ -403,6 +417,7 @@ pub const App = struct {
         }
         c.tint = app.rng.f();
         app.validate(c);
+        c.vel = if (c.visible) app.sim.worldFlow(c.pos) else .{};
     }
 
     fn validate(app: *App, c: *Cell) void {
@@ -434,12 +449,22 @@ pub const App = struct {
         if (@abs(c.pos.z - vn.septum.z) < 60) c.visible = false;
     }
 
-    fn updateCells(app: *App, dt: f32) void {
+    /// The drifting cells are decoration, so they move once per displayed frame rather than once per
+    /// step of the simulation: the time of the steps is added up, and the cells take it in one move when
+    /// the frame's last step is reached.
+    fn updateCells(app: *App, step_dt: f32) void {
+        app.cell_time += step_dt;
+        if (app.more_steps) return;
+        const dt = app.cell_time;
+        app.cell_time = 0;
+        app.cell_tick +%= 1;
         const p = app.sim.pos;
-        inline for (.{ &app.near, &app.far }, .{ near_half, far_half }) |cells, half| {
-            for (cells) |*c| {
+        inline for (.{ &app.near, &app.far }, .{ near_half, far_half }, .{ near_stride, far_stride }) |cells, half, stride| {
+            for (cells, 0..) |*c, i| {
+                const sampled = (i +% app.cell_tick) % stride == 0;
                 if (c.visible) {
-                    c.pos = c.pos.add(app.sim.worldFlow(c.pos).scale(dt));
+                    if (sampled) c.vel = app.sim.worldFlow(c.pos);
+                    c.pos = c.pos.add(c.vel.scale(dt));
                     c.phase += c.spin * dt;
                 }
                 const rel = c.pos.sub(p);
@@ -450,8 +475,10 @@ pub const App = struct {
                 } else if (rel.z < -half.z) {
                     app.respawn(c, half, false, 1);
                 } else if (c.visible) {
-                    app.validate(c);
-                    if (!c.visible) app.respawn(c, half, true, 0);
+                    if (sampled) {
+                        app.validate(c);
+                        if (!c.visible) app.respawn(c, half, true, 0);
+                    }
                 } else if (app.rng.f() < dt * 2) {
                     app.respawn(c, half, true, 0);
                 }

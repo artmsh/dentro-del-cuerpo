@@ -200,4 +200,5 @@ test {
     _ = @import("platform/xinput.zig");
     _ = @import("platform/pshid.zig");
     _ = @import("platform/padsel.zig");
+    _ = @import("platform/tvpad.zig");
 }

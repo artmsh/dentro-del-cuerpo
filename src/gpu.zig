@@ -1,8 +1,8 @@
 //! What the renderer asks of a graphics API: the vertex and uniform layouts shared with the shaders, the
 //! frame description, and the `Gpu` that turns one into pixels. The layouts and limits are the same on
-//! every platform; the implementation is picked at compile time (`gpu/metal.zig`, `gpu/d3d11.zig`), and
-//! both draw the same frame: an HDR scene pass (4x MSAA, resolved and mip-chained for bloom) and a post
-//! pass that tonemaps to the target and draws the HUD.
+//! every platform; the implementation is picked at compile time (`gpu/metal.zig`, `gpu/d3d11.zig`,
+//! `gpu/gles.zig`), and all draw the same frame: an HDR scene pass (4x MSAA, resolved and mip-chained for
+//! bloom) and a post pass that tonemaps to the target and draws the HUD.
 //!
 //! A backend's `Gpu` has: `init(shader_src)`, `attach(surface)` for a window, `resizeSurface(w, h, scale)`
 //! and `resize(w, h, with_offscreen)`, `uploadMeshes`, `uploadFont`, `submit(desc, wait)`, `readback`,
@@ -12,7 +12,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// Layouts mirror the shader files (src/shaders/shaders.metal, shaders.hlsl), byte for byte.
+// Layouts mirror the shader files (src/shaders/shaders.metal, shaders.hlsl, shaders.glsl), byte for byte.
 pub const Vertex = extern struct { pos: [3]f32, nrm: [3]f32, uv: [2]f32 };
 pub const Instance = extern struct { model: [16]f32, color: [4]f32, params: [4]f32 };
 pub const PVertex = extern struct { pos: [3]f32, uv: [2]f32, color: [4]f32 };
@@ -128,10 +128,16 @@ pub const Options = struct {
     software: bool = false,
 };
 
-/// The implementation for the target.
-pub const backend = switch (builtin.os.tag) {
+/// The implementation for the target: Metal on macOS, Direct3D 11 on Windows, OpenGL ES on the
+/// television, which is the one Linux target. A desktop build made with `-Dgles` takes the OpenGL ES
+/// backend instead of the system's own, to run the television's renderer offscreen through ANGLE; the
+/// program's root file says so in `dentro_host_gles`.
+const root = @import("root");
+const host_gles = @hasDecl(root, "dentro_host_gles") and root.dentro_host_gles;
+pub const backend = if (host_gles) @import("gpu/gles.zig") else switch (builtin.os.tag) {
     .macos => @import("gpu/metal.zig"),
     .windows => @import("gpu/d3d11.zig"),
+    .linux => @import("gpu/gles.zig"),
     else => @compileError("no GPU backend for this operating system"),
 };
 
@@ -150,10 +156,13 @@ comptime {
 }
 
 test {
-    // The Direct3D declarations check their own vtable layouts at compile time, and the two shader files
-    // are compared as text, so both are worth compiling on every host.
+    // The Direct3D declarations check their own vtable layouts at compile time, the shader files are
+    // compared as text, and the OpenGL ES backend's layout checks call nothing, so all are worth
+    // compiling on every host.
     _ = @import("gpu/d3d11_api.zig");
     _ = @import("gpu/shader_parity.zig");
+    _ = @import("gpu/gles.zig");
+    _ = @import("gpu/gles_bake.zig");
 }
 
 test "the mip chain halves down to the last level with two rows, averaging with rounding" {

@@ -1,3 +1,7 @@
 zig-out/
 .zig-cache/
 .DS_Store
+.build/
+zig-out-gles/
+__pycache__/
+*.tpk

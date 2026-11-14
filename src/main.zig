@@ -42,10 +42,14 @@ const pad = @import("pad.zig");
 const bindings = @import("bindings.zig");
 const input = @import("input.zig");
 const cli = @import("cli.zig");
+const runtime = @import("runtime.zig");
 const Lang = i18n.Lang;
 const Text = i18n.Text;
 
 const Mode = cli.Mode;
+
+/// Read by `gpu.zig`: this build draws with the OpenGL ES backend instead of the system's own (`-Dgles`).
+pub const dentro_host_gles = @import("build_config").gles;
 
 pub fn main(init: std.process.Init) !void {
     platform.initProcess();
@@ -151,35 +155,12 @@ fn shaderSource(arena: std.mem.Allocator) [:0]const u8 {
     return buf[0..data.len :0];
 }
 
-const Engine = struct {
-    g: gpu.Gpu,
-    r: render.Renderer,
-    vm: vein_mod.Meshes,
-    app: *app_mod.App,
+const Engine = runtime.Engine;
 
-    /// `lang` is the language asked for on the command line; `fallback` applies when neither it nor the
-    /// save file names one.
-    fn init(e: *Engine, arena: std.mem.Allocator, options: gpu.Options, persist: bool, lang: ?Lang, fallback: Lang) !void {
-        e.g = try gpu.Gpu.init(shaderSource(arena), options);
-        e.app = try arena.create(app_mod.App);
-        e.app.init(persist, fallback);
-        e.app.window_keys = .{ .fullscreen = platform.fullscreen_keys, .quit = platform.quit_keys };
-        if (lang) |l| e.app.lang = l;
-        var b = mesh.Builder.init(arena);
-        const meshes = render.Meshes.build(&b);
-        e.vm = vein_mod.buildMeshes(&b, &e.app.sim.vein);
-        e.g.uploadMeshes(b.verts.items, b.indices.items);
-        const f = try font.Font.build(arena);
-        try e.g.uploadFont(arena, f.pixels, font.atlas_w, font.atlas_h);
-        e.r = .{ .g = &e.g, .font = f, .meshes = meshes };
-    }
-
-    fn renderFrame(e: *Engine, dt: f32, wait: bool) bool {
-        e.r.begin();
-        const out = draw.frame(e.app, &e.r, &e.vm, dt);
-        return e.r.end(out.scene, out.arm, out.post, wait);
-    }
-};
+/// The renderer and the application, with this platform's shader source and window shortcuts.
+fn initEngine(e: *Engine, arena: std.mem.Allocator, options: gpu.Options, persist: bool, lang: ?Lang, fallback: Lang) !void {
+    try e.init(arena, shaderSource(arena), options, persist, lang, fallback, .{ .fullscreen = platform.fullscreen_keys, .quit = platform.quit_keys });
+}
 
 // ---------------------------------------------------------------------------- offscreen screenshots
 
@@ -202,7 +183,7 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
         std.process.exit(1);
     }
     const e = try arena.create(Engine);
-    try e.init(arena, options, false, lang, .en);
+    try initEngine(e, arena, options, false, lang, .en);
     e.app.prompts = prompts;
     const w: u32 = 1600;
     const h: u32 = 1000;
@@ -578,7 +559,7 @@ fn runIcon(arena: std.mem.Allocator, options: gpu.Options, path: []const u8) !vo
     const pool = platform.scopeBegin();
     defer platform.scopeEnd(pool);
     const e = try arena.create(Engine);
-    try e.init(arena, options, false, null, .en);
+    try initEngine(e, arena, options, false, null, .en);
     const n: u32 = 2048; // supersampled; the iconset step scales it down
     e.g.resize(n, n, true);
     const px = try arena.alloc(u8, n * n * 4);
@@ -681,7 +662,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
     defer platform.scopeEnd(outer);
     const e = try arena.create(Engine);
     // The scripted tests assert on their output, so they do not follow the machine they run on.
-    try e.init(arena, opts.gpu, mode == .play, lang, if (mode == .inputtest or mode == .padtest) .en else systemLanguage());
+    try initEngine(e, arena, opts.gpu, mode == .play, lang, if (mode == .inputtest or mode == .padtest) .en else systemLanguage());
     const app = e.app;
     if (opts.prompts) |d| app.prompts = d;
     var menu_text: MenuText = .{};
@@ -770,25 +751,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
         // the game stops and waits rather than fly on with nobody at the controls.
         if (tracker.lost_pad and (mode == .play or mode == .padtest)) app.autoPause();
 
-        const steps: usize = @intFromFloat(m.clamp(@ceil(dt * 120.0), 1, 4));
-        const sub = dt / @as(f32, @floatFromInt(steps));
-        for (0..steps) |k| {
-            var c = gathered.controls;
-            if (k > 0) {
-                // One-shot actions belong to the frame, not to each step of it.
-                c.look = .{ 0, 0 };
-                c.cycle = .{ false, false };
-                c.select = .{ null, null };
-                c.examine = false;
-                c.hint = false;
-                c.confirm = false;
-                c.skip = false;
-                c.tether = false;
-            }
-            app.step(c, if (k == 0) gathered.ui else .{}, sub);
-            for (app.sim.sfx[0..app.sim.nsfx]) |ev| audio.playSfx(ev);
-            if (app.comm_chirp) audio.play(audio_mod.comm_chirp, 0, 1);
-        }
+        runtime.advance(app, audio, gathered, dt);
         plat.input.endFrame();
         // Quit chosen from a menu ends the game the way the menu bar's Quit does. The scripted modes leave
         // the request standing for their script to read.
@@ -799,21 +762,7 @@ fn runWindow(arena: std.mem.Allocator, mode: Mode, opts: WindowOptions) !void {
             plat.setMenuTitles(menu_text.set(menu_lang));
         }
 
-        // Continuous audio state.
-        {
-            const s = &app.sim;
-            const in_play = app.screen == .play and (s.mode == .playing or s.mode == .transit);
-            const p = &audio.params;
-            for (0..2) |k| {
-                const a = &s.arms[k];
-                p.drill_on[k] = if (in_play and a.tool == .drill and a.held and !a.overheated) 1 else 0;
-                p.drill_bite[k] = if (in_play and a.engaged) 1 else 0;
-            }
-            p.flow = m.sat((s.flow.len() + s.vrel.len() * 0.6) / 500.0) + s.warp;
-            p.heart_bpm = 68 + (100 - s.stability) * 0.75;
-            p.alarm = if (in_play and s.stability < 25) 1 else 0;
-            p.heart_gain = if (app.screen == .pause) 0.5 else 1;
-        }
+        runtime.mix(app, audio);
 
         _ = e.renderFrame(dt, false);
         frames += 1;

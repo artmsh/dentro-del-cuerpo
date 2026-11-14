@@ -9,6 +9,8 @@ const paths = @import("os/paths.zig");
 
 const impl = switch (builtin.os.tag) {
     .windows => @import("os/windows_files.zig"),
+    // The television is the one Linux target.
+    .linux => @import("os/tv_files.zig"),
     else => @import("os/posix_files.zig"),
 };
 
@@ -102,7 +104,7 @@ pub fn envIsSet(name: [*:0]const u8) bool {
 }
 
 /// The directory the save file lives in: under Application Support in the user's Library on macOS,
-/// under %APPDATA% on Windows. It is not created here; `makeDirs` does that when there is something to
+/// under %APPDATA% on Windows, the application's data directory on the television. It is not created here; `makeDirs` does that when there is something to
 /// save. Null if the system will not say where the user's files are kept.
 pub fn saveDir(buf: []u8) ?[:0]const u8 {
     var root_buf: [paths.max_path]u8 = undefined;

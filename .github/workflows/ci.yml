@@ -85,7 +85,7 @@ jobs:
           "$EXE" --selftest 2>&1 | tee selftest-windows.txt
       # The runner has no GPU, so the frames come from WARP, Direct3D's software rasteriser: the same
       # shaders and the same draw calls as on a graphics card.
-      - name: Render both chapters in both languages
+      - name: Render every chapter in both languages
         run: |
           for lang in en uk; do
             "$EXE" --software --lang $lang --shots shots/$lang 2>&1 | grep -v '^wrote '

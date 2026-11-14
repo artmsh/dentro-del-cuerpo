@@ -1,5 +1,5 @@
 <h1 align="center">Dentro del cuerpo</h1>
-<p align="center">A first-person game for macOS and Windows: pilot a cell-sized drone through a patient's real anatomy, leg vein to brain.</p>
+<p align="center">A first-person game for macOS, Windows and a Samsung television: pilot a cell-sized drone through a patient's real anatomy, leg vein to brain.</p>
 <p align="center">
   <b>Stage:</b> alpha · <b>Target:</b> personal project · <b>License:</b> Apache-2.0 (code), CC BY 4.0 (artwork)
   <br>
@@ -22,10 +22,12 @@
 > in [DESIGN.md](docs/DESIGN.md) are playable.
 
 *Inside the Body.* A doctor pilots the drone in through a vein in the patient's right leg and organ by organ
-to the brain, treating what it finds on the way. It is playable in English and Ukrainian, on macOS and on
-Windows. It is written in Zig directly over each system's own interfaces, AppKit and Metal on macOS, Win32
-and Direct3D 11 on Windows, with no engine in between; the only third-party code is the vendored
-`stb_truetype.h`, which rasterises the bundled fonts.
+to the brain, treating what it finds on the way. It is playable in English and Ukrainian, on macOS, on
+Windows and on a Samsung television. It is written in Zig directly over each system's own interfaces, AppKit
+and Metal on macOS, Win32 and Direct3D 11 on Windows, with no engine in between. On the television it draws
+with its own OpenGL ES 3.0 backend inside tvengine, the author's runtime for that television, which owns the
+window, the pacing of frames to the display, the controllers and the audio stream. The only third-party
+code is the vendored `stb_truetype.h`, which rasterises the bundled fonts.
 
 ## Rationale
 
@@ -90,9 +92,9 @@ game found: a shooter flown inside the human body.
 | Setting | real anatomy and disease (*S. aureus*, rotavirus, *H. pylori*, a kidney stone) | fictional nanobot disease ("Rust") |
 | Movement | first person, two independently aimed arms | 6DoF ship, cockpit or third-person view |
 | Content | 4 chapters, about 5 minutes each | 12-mission campaign, 5 difficulty levels |
-| Platforms | macOS 14+ on Apple Silicon; Windows 10 and 11 on x64; free | Windows, macOS, Linux; $7.99 |
+| Platforms | macOS 14+ on Apple Silicon; Windows 10 and 11 on x64; one Samsung television model, built from source; free | Windows, macOS, Linux; $7.99 |
 | Input | keyboard and mouse; Xbox and PlayStation controllers; fixed layout | keyboard, mouse, gamepads; remappable |
-| Engine | none: Zig on AppKit and Metal, and on Win32 and Direct3D 11 | Godot |
+| Engine | none: Zig on AppKit and Metal, and on Win32 and Direct3D 11; on the television, OpenGL ES inside the author's tvengine | Godot |
 
 Cell Sword is the one to play for a finished campaign, remappable controls, or a Linux machine.
 
@@ -103,6 +105,10 @@ Cell Sword is the one to play for a finished campaign, remappable controls, or a
   11_0, which is any card made since about 2010. Nothing has to be installed: the game uses only DLLs that
   are part of Windows. On a machine with no such card it falls back to WARP, Windows' software renderer,
   which draws the same picture slowly.
+- Samsung television: one model, the QE65Q80D (Tizen 9), in developer mode, with an Xbox controller. The
+  game is in no store there; it is built from source and installed over the network, which needs Python 3,
+  Tizen Studio with the TV extensions (for packaging, `sdb` and the ARM binutils the package checks use)
+  and a signing profile for the television.
 - Zig 0.17 to build from source. The Windows version cross-compiles from macOS or any other host Zig runs
   on, with no Windows SDK and no Visual Studio.
 
@@ -110,7 +116,7 @@ Cell Sword is the one to play for a finished campaign, remappable controls, or a
 
 Every push to `main` that passes the tests on both platforms is published as a
 [release](https://github.com/artmsh/dentro-del-cuerpo/releases/latest) by [CI](.github/workflows/ci.yml),
-with one zip per platform.
+with one zip for macOS and one for Windows. The television package is built from source.
 
 ### macOS
 
@@ -152,10 +158,33 @@ in the same format as on macOS. To build from source, on Windows or on any other
 zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast   # builds the folder zig-out/Dentro del cuerpo/
 ```
 
-### Both
+### Samsung television
+
+```sh
+git submodule update --init                # engine/, the tvengine runtime
+tv/build.sh --test --unsigned              # the tests, an unsigned package and the checks of its binary
+TV=<address:port> tv/build.sh --install    # signed with the profile CERT_PROFILE (`dev`), installed and launched
+```
+
+The game is flown with an Xbox controller connected to the television, with the layout in the table below.
+The remote's arrows, OK and Back reach every menu and card, which is enough to start a chapter, change the
+language and leave, and it cannot fly the drone; Back on the title screen leaves the game, and in flight it
+pauses. The language follows the television's menu language until one is chosen in the game, and progress
+is saved in the application's private data directory in the same format as on the other systems. When
+another application comes to the front or the television goes to standby the flight pauses and the sound
+stops.
+
+The television's GPU cannot shade the scene at 1920×1080 at the display's rate, so the scene is drawn
+smaller and scaled up, while the HUD and all text are drawn at full resolution over it. The size follows the
+load: the game watches which frames the display showed late or twice, steps the scene down a size when
+that happens and tries a size up after a calm stretch. `SCENE_HEIGHT` and `MIN_SCENE_HEIGHT` set the range
+at build time (510 and 254 rows by default) and `MSAA` the samples per pixel (4); giving both heights the
+same value fixes the size.
+
+### Chapters, saves and language
 
 A chapter unlocks on the route map when the one before it is finished; `--chapter 2`, `--chapter 3` or
-`--chapter 4` opens one directly. The save
+`--chapter 4` opens one directly on a desktop. The save
 file keeps for each chapter the best grade flown and, among runs of equal grade, the latest. It is replaced
 whole on every save, so an interrupted write leaves the previous one, and a save that cannot be written is
 reported once on stderr while play goes on. The game starts in Ukrainian if Ukrainian comes before English in the system's list of preferred languages (on
@@ -197,6 +226,9 @@ gyroscope and trackpads arrive as mouse movement. The window's own shortcuts (`C
 the controller in use disconnects during a chapter. Back on a briefing returns to the screen it was opened
 from, the title or the route map.
 
+On the television the controller column applies as it stands, with Xbox names in every prompt, and the
+remote stands in for the d-pad, `A` and `B` on menus and cards only.
+
 On Windows an Xbox controller, and anything else that presents itself through XInput, is read through
 XInput and gets Xbox names. A DualShock 4 or DualSense is read directly from its HID reports over USB or
 Bluetooth and gets PlayStation names; when Steam Input or a tool such as DS4Windows presents it as an XInput
@@ -216,7 +248,19 @@ vein that should not be in circulating blood) is already in chapter 1.
 
 ## Limitations
 
-- Apple Silicon Macs and x64 Windows only: there is no build for Intel Macs, Windows on ARM or Linux.
+- Apple Silicon Macs, x64 Windows and one television model only: there is no build for Intel Macs, Windows
+  on ARM or desktop Linux, and the television package is built for the QE65Q80D and has been run on no
+  other model.
+- On the television the picture is soft in busy scenes. With the display at 60 Hz the scripted pilot's
+  flights of all four chapters held 59 to 60 frames a second with the scene averaging 280 to 300 rows
+  over a chapter and at its floor of 254 in the busiest stages, scaled to 1080. Of each 16.7 ms frame about 9 ms goes
+  to work whose cost does not depend on the scene's size (the pass that scales to 1080, the HUD, the tone
+  mapping and the bloom chain), and only an output surface smaller than 1920×1080, which the engine does
+  not offer, would return it. At 50 Hz a frame has 3.3 ms more and the scene should settle larger; that has
+  not been measured since the renderer was optimised.
+- On the television the game has been flown only by the scripted pilot, with telemetry and captured frames
+  read on another machine. A controller in a player's hands, the remote's keys and the writing of the save
+  file have not been tried on the device; their code is covered by tests that run on the build machine.
 - The Windows version has been run almost entirely on CI machines, which have a desktop session but no
   graphics card, no sound device and no controller. There it passes the same tests as the macOS version,
   its scripted playthroughs print the same summary line for line, and its frames, drawn by Direct3D's
@@ -255,6 +299,8 @@ zig-out/bin/dentro --padtest   # opens the window and plays from the title scree
 zig-out/bin/dentro --demo      # the scripted pilot flies chapter 1 in the window, with audio
 zig-out/bin/dentro --chapter 3 --demo   # or 2, or 4
 zig-out/bin/dentro --demo --pad   # the same pilot, holding a controller instead of handing over its controls
+tv/build.sh --test --unsigned     # the television package: the tests, the build for ARM and the checks of the binary
+DEBUG_HOST=<ip> SELFTEST=1 CHAPTER=2 tv/build.sh --install   # the pilot flies chapter 2 on the television, telemetry to <ip>
 ```
 
 Every mode exists on Windows with the same flags; the program there is
@@ -268,6 +314,15 @@ Bash do.
 zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast   # cross-build the Windows folder from macOS
 zig build test                                                 # on Windows as on macOS: the tests, natively
 ```
+
+The television's renderer can be run on a Mac without the television. `zig build -Dgles` builds the game
+with the OpenGL ES backend in place of Metal, drawing offscreen through ANGLE, whose `libEGL` and
+`libGLESv2` are looked for in the directory named by `DENTRO_ANGLE_DIR` (any Chromium or Electron
+application carries a copy). `--shots` then writes the frames the television would draw, to be compared
+with Metal's. A run on the television built with `DEBUG_HOST` sends a line of telemetry every five seconds
+to `engine/tools/observe.py` on that machine (presented frame rate, late and repeated frames, the scene's
+rows, audio underruns), and with `CAPTURE=1` frames to `engine/tools/capture-server.py`; `tv/build.py`
+lists the other build values.
 
 The scripted modes run in English unless `--lang` says otherwise, so their output does not depend on the
 machine; `--demo` follows the system like normal play. The tests fail on a string with no Ukrainian text, on
@@ -284,7 +339,7 @@ directory cannot be made, a frame cannot be written or a chapter is not flown to
 rely on its status.
 
 ```text
-Build Summary: 12/12 steps succeeded; 175/175 tests passed
+Build Summary: 13/13 steps succeeded; 190/190 tests passed
 …
 selftest ch4: completed=true stage=done sim_time=65.3s deaths=0 stability=98.0 grade=A atlas=4
 …
@@ -305,8 +360,8 @@ Source code is licensed under [Apache-2.0](LICENSE). Artwork and writing (the ic
 [CC BY 4.0](LICENSE-ARTWORK.txt); attribute them to "Dentro del cuerpo" with a link to this repository.
 
 Third-party files are distributed under their own licences. The fonts are compiled into the binary, and
-their licence texts are copied into the app bundle under `Contents/Resources/licenses/` and into the Windows
-folder under `licenses`:
+their licence texts are copied into the app bundle under `Contents/Resources/licenses/`, into the Windows
+folder under `licenses` and into the television package under `res/licenses`:
 
 | | | |
 |---|---|---|

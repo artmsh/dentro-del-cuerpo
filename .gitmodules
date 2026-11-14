@@ -1,0 +1,3 @@
+[submodule "engine"]
+	path = engine
+	url = ssh://forgejo@nixos.lan:2222/art/tvengine.git

@@ -1,15 +1,21 @@
-//! Holds the two shader files together. `shaders.metal` and `shaders.hlsl` are the same program in two
-//! dialects, ported by hand, and a change to the lighting in one that is not made in the other would
-//! leave the platforms looking different with nothing to say so. The tests here read both sources and
-//! require that they declare the same functions in the same order, and that the functions with no
-//! platform-specific plumbing in them (the noise helpers, the whole of the scene's fragment function, the
-//! particle and post-processing fragment functions) are the same text once the Metal spelling is rewritten
-//! in HLSL's. They run on any machine, since they only compare text.
+//! Holds the three shader files together. `shaders.metal`, `shaders.hlsl` and `shaders.glsl` are the same
+//! program in three dialects, ported by hand, and a change to the lighting in one that is not made in the
+//! others would leave the platforms looking different with nothing to say so. The tests here read the
+//! sources and require that they declare the same functions in the same order, and that the functions
+//! with no platform-specific plumbing in them (the noise helpers, the whole of the scene's fragment
+//! function, the particle and post-processing fragment functions) are the same text once the Metal
+//! spelling is rewritten in the other dialect's. They run on any machine, since they only compare text.
+//!
+//! The GLSL file holds more than the other two: a second set of the pattern functions that read baked
+//! textures (the television uses those), a `main` for each stage, and the pass that scales the scene up
+//! to the output. The comparison takes the last definition of each name, which is the computed one, and
+//! leaves the rest alone.
 
 const std = @import("std");
 
 const metal = @embedFile("../shaders/shaders.metal");
 const hlsl = @embedFile("../shaders/shaders.hlsl");
+const glsl = @embedFile("../shaders/shaders.glsl");
 
 /// Functions whose bodies must match line for line. The vertex functions and the HUD's fragment function
 /// are left out: they are a few lines each and differ in how a stage reaches its buffers, which is the
@@ -21,6 +27,20 @@ const shared_bodies = [_][]const u8{ "hash1", "vnoise", "fbm", "hash2", "cellHas
 const line_exceptions = [_][2][]const u8{
     // HLSL has no one-argument vector constructor; a scalar exponent is applied to each component.
     .{ "col = pow(saturate(col), float3(1.0 / 2.2));", "col = pow(saturate(col), 1.0 / 2.2);" },
+};
+
+/// The same for the GLSL file, Metal first. GLSL converts with constructors where Metal casts, has no
+/// implicit conversion from an integer literal to a vector, and its post-processing leaves the grain and
+/// the fade to the scaling pass when one follows (`last_pass` is 0 then).
+const glsl_exceptions = [_][2][]const u8{
+    .{ "return (float)(v.x >> 8) * (1.0 / 16777216.0);", "return float(v.x >> 8) * (1.0 / 16777216.0);" },
+    .{ "if (period > 0.5) c.x = (float)((uint)(int)(c.x + period * 8.0) % (uint)max(period, 1.0));", "if (period > 0.5) c.x = float(uint(int(c.x + period * 8.0)) % uint(max(period, 1.0)));" },
+    .{ "float2 mg = 0, mr = 0;", "float2 mg = float2(0.0), mr = float2(0.0);" },
+    .{ "float3 col = 0;", "float3 col = float3(0.0);" },
+    .{ "float tot = 0;", "float tot = 0.0;" },
+    .{ "float3 bloom = 0;", "float3 bloom = float3(0.0);" },
+    .{ "col += (g - 0.5) * 0.018;", "col += (g - 0.5) * 0.018 * last_pass;" },
+    .{ "col *= po.b.y;", "col *= mix(1.0, po.b.y, last_pass);" },
 };
 
 const Function = struct {
@@ -55,7 +75,7 @@ fn parse(arena: std.mem.Allocator, src: []const u8) ![]Function {
         const closes = std.mem.count(u8, line, "}");
         if (depth == 0 and name == null and !in_header) {
             const paren = std.mem.indexOfScalar(u8, line, '(');
-            const declaration = line[line.len - 1] == ';' or std.mem.startsWith(u8, line, "cbuffer") or std.mem.startsWith(u8, line, "struct") or line[0] == '#';
+            const declaration = line[line.len - 1] == ';' or std.mem.startsWith(u8, line, "cbuffer") or std.mem.startsWith(u8, line, "struct") or std.mem.startsWith(u8, line, "layout") or line[0] == '#';
             if (paren != null and !declaration) {
                 var start = paren.?;
                 while (start > 0 and isIdent(line[start - 1])) start -= 1;
@@ -65,6 +85,16 @@ fn parse(arena: std.mem.Allocator, src: []const u8) ![]Function {
         }
         if (name != null) {
             if (in_header) {
+                // A function written on one line (the `main` of a GLSL stage).
+                if (depth == 0 and opens > 0 and opens == closes) {
+                    const open = std.mem.indexOfScalar(u8, line, '{').?;
+                    const close = std.mem.lastIndexOfScalar(u8, line, '}').?;
+                    try body.append(arena, std.mem.trim(u8, line[open + 1 .. close], " \t"));
+                    try out.append(arena, .{ .name = name.?, .body = try body.toOwnedSlice(arena) });
+                    name = null;
+                    in_header = false;
+                    continue;
+                }
                 // The header runs to the line that opens the body.
                 if (opens > closes) {
                     in_header = false;
@@ -91,6 +121,59 @@ fn replaceAll(arena: std.mem.Allocator, s: []const u8, from: []const u8, to: []c
     return std.mem.replaceOwned(u8, arena, s, from, to);
 }
 
+/// `in` is a reserved word in HLSL and in GLSL; the stage input is called IN in both.
+fn renameInput(arena: std.mem.Allocator, s: []const u8) ![]const u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < s.len) {
+        if (std.mem.startsWith(u8, s[i..], "in.") and (i == 0 or !isIdent(s[i - 1]))) {
+            try buf.appendSlice(arena, "IN.");
+            i += 3;
+        } else {
+            try buf.append(arena, s[i]);
+            i += 1;
+        }
+    }
+    return buf.items;
+}
+
+/// Texture taps. Metal's `hdr.sample(smp, uv)` leaves the mip level to the sampler and `level(x)` names
+/// it; the other files always name it, 0 where Metal leaves it out (see the note on post_fs in the HLSL
+/// file). The call becomes `open`, with or without the sampler argument, then the level.
+fn renameTaps(arena: std.mem.Allocator, s: []const u8, open: []const u8, keep_sampler: bool) ![]const u8 {
+    const call = "hdr.sample(";
+    const sampler = "smp, ";
+    var buf: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (std.mem.indexOfPos(u8, s, i, call)) |at| {
+        try buf.appendSlice(arena, s[i..at]);
+        var close = at + call.len;
+        var nest: usize = 1;
+        while (close < s.len) : (close += 1) {
+            if (s[close] == '(') nest += 1;
+            if (s[close] == ')') {
+                nest -= 1;
+                if (nest == 0) break;
+            }
+        }
+        var args = s[at + call.len .. close];
+        if (!keep_sampler and std.mem.startsWith(u8, args, sampler)) args = args[sampler.len..];
+        try buf.appendSlice(arena, open);
+        if (std.mem.indexOf(u8, args, ", level(")) |lv| {
+            try buf.appendSlice(arena, args[0..lv]);
+            try buf.appendSlice(arena, ", ");
+            try buf.appendSlice(arena, args[lv + ", level(".len .. args.len - 1]);
+        } else {
+            try buf.appendSlice(arena, args);
+            try buf.appendSlice(arena, ", 0.0");
+        }
+        try buf.append(arena, ')');
+        i = close + 1;
+    }
+    try buf.appendSlice(arena, s[i..]);
+    return buf.items;
+}
+
 /// One line of the Metal file in HLSL's spelling.
 fn toHlsl(arena: std.mem.Allocator, line: []const u8) ![]const u8 {
     for (line_exceptions) |e| {
@@ -98,55 +181,30 @@ fn toHlsl(arena: std.mem.Allocator, line: []const u8) ![]const u8 {
     }
     var s = try replaceAll(arena, line, "fract(", "frac(");
     s = try replaceAll(arena, s, "mix(", "lerp(");
-    // `in` is a reserved word in HLSL; the stage input is called IN there.
-    {
-        var buf: std.ArrayList(u8) = .empty;
-        var i: usize = 0;
-        while (i < s.len) {
-            if (std.mem.startsWith(u8, s[i..], "in.") and (i == 0 or !isIdent(s[i - 1]))) {
-                try buf.appendSlice(arena, "IN.");
-                i += 3;
-            } else {
-                try buf.append(arena, s[i]);
-                i += 1;
-            }
-        }
-        s = buf.items;
+    s = try renameInput(arena, s);
+    return renameTaps(arena, s, "hdr.SampleLevel(", true);
+}
+
+/// One line of the Metal file in GLSL's spelling. The GLSL file defines Metal's type and function names
+/// as macros, so little is left to rewrite.
+fn toGlsl(arena: std.mem.Allocator, line: []const u8) ![]const u8 {
+    for (glsl_exceptions) |e| {
+        if (std.mem.eql(u8, line, e[0])) return e[1];
     }
-    // Texture taps: Metal's `t.sample(smp, uv)` leaves the mip level to the sampler and `level(x)` names
-    // it; the HLSL file always names it, 0 where Metal leaves it out (see the note on post_fs there).
-    {
-        const call = "hdr.sample(";
-        var buf: std.ArrayList(u8) = .empty;
-        var i: usize = 0;
-        while (std.mem.indexOfPos(u8, s, i, call)) |at| {
-            try buf.appendSlice(arena, s[i..at]);
-            var close = at + call.len;
-            var nest: usize = 1;
-            while (close < s.len) : (close += 1) {
-                if (s[close] == '(') nest += 1;
-                if (s[close] == ')') {
-                    nest -= 1;
-                    if (nest == 0) break;
-                }
-            }
-            const args = s[at + call.len .. close];
-            try buf.appendSlice(arena, "hdr.SampleLevel(");
-            if (std.mem.indexOf(u8, args, ", level(")) |lv| {
-                try buf.appendSlice(arena, args[0..lv]);
-                try buf.appendSlice(arena, ", ");
-                try buf.appendSlice(arena, args[lv + ", level(".len .. args.len - 1]);
-            } else {
-                try buf.appendSlice(arena, args);
-                try buf.appendSlice(arena, ", 0.0");
-            }
-            try buf.append(arena, ')');
-            i = close + 1;
-        }
-        try buf.appendSlice(arena, s[i..]);
-        s = buf.items;
+    const s = try renameInput(arena, line);
+    return renameTaps(arena, s, "tap(", false);
+}
+
+/// The functions of the GLSL file that the other two also have: no `main`, no `cellTap` (a helper of the
+/// baked patterns), and of the pattern functions that are defined twice, the second, computed one.
+fn glslShared(arena: std.mem.Allocator, all: []const Function) ![]Function {
+    var out: std.ArrayList(Function) = .empty;
+    for (all, 0..) |f, i| {
+        if (std.mem.eql(u8, f.name, "main") or std.mem.eql(u8, f.name, "cellTap")) continue;
+        if (find(all[i + 1 ..], f.name) != null) continue;
+        try out.append(arena, f);
     }
-    return s;
+    return out.toOwnedSlice(arena);
 }
 
 fn find(fns: []const Function, name: []const u8) ?Function {
@@ -156,18 +214,21 @@ fn find(fns: []const Function, name: []const u8) ?Function {
     return null;
 }
 
-test "both shader files declare the same functions in the same order" {
+test "the shader files declare the same functions in the same order" {
     var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const m = try parse(arena, metal);
     const h = try parse(arena, hlsl);
+    const g = try glslShared(arena, try parse(arena, glsl));
     const want = [_][]const u8{ "hash1", "vnoise", "fbm", "hash2", "cellHash", "voronoi", "scene_vs", "scene_fs", "part_vs", "part_fs", "post_vs", "aces", "post_fs", "hud_vs", "hud_fs" };
     try std.testing.expectEqual(want.len, m.len);
     try std.testing.expectEqual(want.len, h.len);
-    for (want, m, h) |name, mf, hf| {
+    try std.testing.expectEqual(want.len, g.len);
+    for (want, m, h, g) |name, mf, hf, gf| {
         try std.testing.expectEqualStrings(name, mf.name);
         try std.testing.expectEqualStrings(name, hf.name);
+        try std.testing.expectEqualStrings(name, gf.name);
     }
 }
 
@@ -196,12 +257,65 @@ test "the shared shader functions are the same text in both dialects" {
     try std.testing.expectEqual(@as(usize, 0), different);
 }
 
-test "the same materials are switched on in both files" {
+test "the shared shader functions are the same text in Metal and GLSL" {
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const m = try parse(arena, metal);
+    const g = try glslShared(arena, try parse(arena, glsl));
+    var different: usize = 0;
+    for (shared_bodies) |name| {
+        const mf = find(m, name) orelse return error.MissingInMetal;
+        const gf = find(g, name) orelse return error.MissingInGlsl;
+        if (mf.body.len != gf.body.len) {
+            std.debug.print("{s}: {d} lines in shaders.metal, {d} in shaders.glsl\n", .{ name, mf.body.len, gf.body.len });
+            different += 1;
+        }
+        for (0..@min(mf.body.len, gf.body.len)) |i| {
+            const ported = try toGlsl(arena, mf.body[i]);
+            if (!std.mem.eql(u8, ported, gf.body[i])) {
+                std.debug.print("{s}, line {d} of the body:\n  metal as glsl: {s}\n  glsl:          {s}\n", .{ name, i + 1, ported, gf.body[i] });
+                different += 1;
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), different);
+}
+
+test "the baked patterns of the GLSL file stand in for the computed ones" {
+    // The first definitions of the pattern functions are the baked ones, and they take the same arguments
+    // as the computed ones they replace, so the scene's code calls either.
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const all = try parse(arena, glsl);
+    for ([_][]const u8{ "vnoise", "fbm", "voronoi" }) |name| {
+        var count: usize = 0;
+        for (all) |f| count += @intFromBool(std.mem.eql(u8, f.name, name));
+        try std.testing.expectEqual(@as(usize, 2), count);
+        var headers: [2][]const u8 = undefined;
+        var found: usize = 0;
+        var lines = std.mem.splitScalar(u8, glsl, '\n');
+        while (lines.next()) |raw| {
+            const line = stripComment(raw);
+            const at = std.mem.indexOf(u8, line, name) orelse continue;
+            if (at == 0 or line[at - 1] != ' ' or line[line.len - 1] != '{' or line[0] == ' ') continue;
+            if (!std.mem.startsWith(u8, line[at + name.len ..], "(")) continue;
+            headers[found] = line;
+            found += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 2), found);
+        try std.testing.expectEqualStrings(headers[0], headers[1]);
+    }
+}
+
+test "the same materials are switched on in every file" {
     // Every `mat == N` of one file appears in the other, the same number of times.
     for (0..16) |id| {
         var needle_buf: [16]u8 = undefined;
         const needle = try std.fmt.bufPrint(&needle_buf, "mat == {d})", .{id});
         try std.testing.expectEqual(std.mem.count(u8, metal, needle), std.mem.count(u8, hlsl, needle));
+        try std.testing.expectEqual(std.mem.count(u8, metal, needle), std.mem.count(u8, glsl, needle));
     }
     try std.testing.expect(std.mem.count(u8, hlsl, "mat == 12)") == 1);
 }
@@ -214,6 +328,9 @@ test "the spelling rules do what they say" {
     try std.testing.expectEqualStrings("col += hdr.SampleLevel(smp, 0.5 + c * k, 0.0).rgb * w;", try toHlsl(arena, "col += hdr.sample(smp, 0.5 + c * k).rgb * w;"));
     try std.testing.expectEqualStrings("bloom += hdr.SampleLevel(smp, uv, 3.5).rgb * 0.3;", try toHlsl(arena, "bloom += hdr.sample(smp, uv, level(3.5)).rgb * 0.3;"));
     try std.testing.expectEqualStrings("float mainline = margin.x;", try toHlsl(arena, "float mainline = margin.x;"));
+    try std.testing.expectEqualStrings("float g = mix(fract(IN.uv.x), sin(x), 0.5);", try toGlsl(arena, "float g = mix(fract(in.uv.x), sin(x), 0.5);"));
+    try std.testing.expectEqualStrings("col += tap(0.5 + c * k, 0.0).rgb * w;", try toGlsl(arena, "col += hdr.sample(smp, 0.5 + c * k).rgb * w;"));
+    try std.testing.expectEqualStrings("bloom += tap(uv, 3.5).rgb * 0.3;", try toGlsl(arena, "bloom += hdr.sample(smp, uv, level(3.5)).rgb * 0.3;"));
 }
 
 /// `hash1` of the shader files, step for step.

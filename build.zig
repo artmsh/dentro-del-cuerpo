@@ -23,6 +23,11 @@ pub fn build(b: *std.Build) void {
         mod.addSystemFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "System/Library/Frameworks" }) });
         mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
     }
+    // -Dgles swaps the system's renderer for the OpenGL ES one the television uses, drawn offscreen through
+    // ANGLE (see src/gpu/gles.zig). It is a development build: `--shots` and `--icon` work, a window does not.
+    const config = b.addOptions();
+    config.addOption(bool, "gles", b.option(bool, "gles", "Render with the OpenGL ES backend through ANGLE, offscreen only") orelse false);
+    mod.addOptions("build_config", config);
     const os = target.result.os.tag;
     if (os == .macos) {
         mod.linkSystemLibrary("objc", .{});
