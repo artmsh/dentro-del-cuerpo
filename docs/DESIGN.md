@@ -19,6 +19,8 @@ Hull 8 µm, deformable (red-cell sized, so it passes capillaries). Fictional cap
 | Diapedesis frame | squeeze between endothelial cells at venules, fenestrated capillaries, HEVs; never across the blood–brain barrier | leukocyte extravasation |
 | Epithelial pass | cross an epithelium only where it is naturally leaky (villus-tip extrusion zone, tonsillar crypt reticulated epithelium, ulcer bed) | cell shedding gaps |
 | Mucus tether (ch. 2) | anchor to a surface and crawl against flow | H. pylori / bacterial adhesins |
+| Buffer coat (ch. 3) | a bicarbonate reserve the hull spends in acid in place of itself; 12 s, refilled in neutral gel or blood | bicarbonate secreted into the mucus by the surface epithelium |
+| Cautery bit (ch. 3) | the drill bit heats as it turns and welds a vessel that the other arm presses flat | coaptive thermal coagulation of a bleeding ulcer vessel |
 | Surfactant skin (ch. 7) | cross air–liquid interfaces | pulmonary surfactant |
 | Sheath glide (ch. 10) | travel the perineural space of olfactory fila | the route *Naegleria fowleri* takes |
 
@@ -136,3 +138,43 @@ against the stream.
 Real: villus and crypt dimensions, enterocyte turnover and tip extrusion, rotavirus villus blunting and
 viroplasms, peristaltic rings travelling aborad. Fiction: the scan pulse, the tether, and the pace of all of
 it.
+
+## Chapter 3 beat sheet (playable)
+
+A 9 mm strip of antral mucosa running from near the pylorus to a peptic ulcer 6 mm across: gastric pits 70 µm
+wide and 0.2 mm deep on a 0.15 mm hexagonal pitch, under 0.3 mm of adherent mucus gel that thins to nothing
+at the ulcer's heaped rim. The crater is 0.5 mm deep and bare. The drone arrives in the gel at the pyloric
+end and works towards the ulcer.
+
+1. **Arrival.** Set down in the gel after the climb from the jejunum. The HUD gains a pH reading at the hull.
+   The pilot identifies a pit.
+2. **Gradient.** Marín has the pilot rise through the gel. The reading falls from 7 at the lining to 2 at the
+   top of the gel, the colour of the water changes with it, and below pH 4.5 the hull erodes. Back in neutral
+   gel the erosion is repaired, which is the rule for the rest of the chapter: acid damage is a debt that
+   neutral gel pays off, and only an empty hull is final.
+3. **Antral wave.** Every 40 s a ring of contraction travels towards the pylorus and closes the lumen
+   completely, the far wall pressed onto this one. The HUD counts it in. Nothing on the surface survives it,
+   and the pits stay open, so the pilot tethers down into one and waits.
+4. **Swimmers.** *Helicobacter pylori* in the gel: corkscrew rods that outrun a round fired from a distance,
+   because the gel slows the round and not them. Before it darts at the drone a swimmer stops and flares for
+   most of a second, and that is when a round arrives; a punch at arm's length and a Sync Strike's shockwave
+   work at any time.
+5. **Margin.** Four pits beside the rim are packed with colonies, which keep their pits neutral with ammonia
+   and shed swimmers while the drone is near. Rounds wear a colony down, the drill does too, and both arms
+   on one colony clear it fastest. The gel here is too thin to protect the surface between pits, so the pilot
+   crosses low and quickly and rests inside the pits, cleared ones included.
+6. **Upgrade.** Buffer Coat and the cautery bit, with the margin clear.
+7. **Crater.** Over the rim into pH 2 with the coat counting down, to an arteriole in the bed with one wall
+   eaten through. The blood around it is neutral and refills the coat. The pilot fixes a tether to the bed,
+   because each wave now squirts juice back through the crater, then presses the vessel flat with a punch
+   and welds it with the drill while it is flat: six seconds of drilling, all of it with the other arm
+   pressing (the chapter's dual-arm encounter). Until it is sealed the vessel bleeds and stability falls.
+8. **End.** Out through a venule that the crater has laid open, towards the portal vein. Debrief with grade,
+   colonies cleared, seconds the vessel bled, seconds of acid on a bare hull and hits on the lining; the
+   same retry paths as chapters 1 and 2.
+
+Real: pit dimensions and spacing, the thickness of the gel and the pH gradient across it, bicarbonate
+secretion by the surface cells, *H. pylori*'s size, helical shape, motility in mucus and urease-made ammonia,
+its colonisation of antral pits, retropulsion of gastric contents by the antral wave, and coaptive
+coagulation as the treatment for a bleeding ulcer vessel. Fiction: the coat, a drill that welds, a hull that
+gel repairs, a wave every 40 s instead of every 20, and the pace of all of it.

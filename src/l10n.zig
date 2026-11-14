@@ -94,7 +94,7 @@ fn hasEnglishWord(s: []const u8) bool {
 
 /// Text that is deliberately the same in every language although it contains Latin words: the binomial,
 /// names printed on the keyboard, and the two PlayStation buttons that go by their product names.
-const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Esc", "Enter", "Shift", "Tab", "Create", "Options" };
+const same_everywhere = [_][]const u8{ "Staphylococcus aureus", "Helicobacter pylori", "Esc", "Enter", "Shift", "Tab", "Create", "Options" };
 
 /// The wordings of a text: the one for keyboard and mouse, then the one for a controller if it has its own.
 fn wordingsOf(t: Text) struct { list: [2]i18n.Wording, len: usize } {
@@ -268,7 +268,7 @@ test "every stage has an objective and a hint in each language, for each device"
     var buf_en: [240]u8 = undefined;
     var buf_uk: [240]u8 = undefined;
     var hint_buf: [1024]u8 = undefined;
-    for (0..2) |chapter| {
+    for (0..campaign.playable_count) |chapter| {
         sim.* = game.Sim.initChapter(@intCast(chapter));
         inline for (comptime std.meta.fieldNames(game.Stage)) |name| {
             sim.stage = @field(game.Stage, name);

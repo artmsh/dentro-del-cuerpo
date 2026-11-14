@@ -222,6 +222,14 @@ pub const Audio = struct {
             },
             .ui => a.tone(0, 880, 880, 0.04, .sine, 0.08 * g, p),
             .bump => a.tone(0, 95, 45, 0.13, .sine, 0.4 * g, 0),
+            .acid => {
+                a.hiss(0, 0.3, 0.9, 0.1 * g, p);
+                a.tone(0, 2600, 3400, 0.05, .sine, 0.02 * g, a.rnd() * 0.5);
+            },
+            .sizzle => {
+                a.hiss(0, 0.28, 0.75, 0.16 * g, p);
+                a.tone(0, 240, 200, 0.25, .saw, 0.05 * g, p);
+            },
         }
     }
 

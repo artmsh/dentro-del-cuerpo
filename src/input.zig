@@ -707,7 +707,7 @@ const ThroughPad = struct {
     }
 };
 
-test "the scripted pilot finishes both chapters through a controller alone" {
+test "the scripted pilot finishes every chapter through a controller alone" {
     const bot = @import("bot.zig");
     const gpa = std.testing.allocator;
     const sim = try gpa.create(game.Sim);
@@ -733,4 +733,14 @@ test "the scripted pilot finishes both chapters through a controller alone" {
     try expect(sim.g.tether_uses >= 6);
     try expect(gut.stats.dual_time > 1.5);
     try expect(gut.stability > 0);
+
+    through = .{};
+    const antrum = bot.runHeadlessVia(sim, cp, 2, 1500, false, &through);
+    try expect(antrum.completed);
+    try expect(sim.g3.cleared == sim.g3.total and sim.g3.sealed);
+    try expect(sim.g3.waves_survived >= 2);
+    try expect(sim.g3.tether_uses >= 2);
+    // the weld needs one trigger held to press and the other to drill, for its whole length
+    try expect(antrum.stats.dual_time > 6);
+    try expect(antrum.stability > 0);
 }

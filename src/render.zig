@@ -59,6 +59,18 @@ pub const Meshes = struct {
     capsule: gpu.Mesh,
     /// Mucosal floor profile across the trough, one unit long in z (see gut.floorY).
     mucosa_strip: gpu.Mesh,
+    /// Chapter 3: one lattice cell of antral mucosa around the mouth of its pit and the pit below it (two
+    /// meshes, so the pit can be drawn darker), the floor profile one unit long in z, the ulcer's rim and
+    /// bed, the top of the mucus gel (in units of `gel_unit`), a corkscrew rod, and the cut end of a
+    /// vessel: a tube of unit radius about +Y with a rolled lip at y = 0 and three radii of length below it.
+    pit_tile: gpu.Mesh,
+    pit_bore: gpu.Mesh,
+    stump: gpu.Mesh,
+    antrum_floor: gpu.Mesh,
+    ulcer_rim: gpu.Mesh,
+    ulcer_bed: gpu.Mesh,
+    gel_sheet: gpu.Mesh,
+    helix: gpu.Mesh,
 
     pub fn build(b: *mesh_mod.Builder) Meshes {
         var ms: Meshes = undefined;
@@ -97,7 +109,194 @@ pub const Meshes = struct {
             }
             ms.mucosa_strip = b.end();
         }
+        buildStomach(b, &ms);
         return ms;
+    }
+
+    /// Cobbles of the wall material around a pit, and so around the seam of its texture.
+    pub const pit_cells_around: f32 = 24;
+    /// Where the antrum's floor strip begins: everything nearer the ulcer is the rim mesh.
+    pub const antrum_floor_z0: f32 = 3700;
+    /// The gel sheet is modelled at 1/gel_unit scale so the slime material's noise is the right size.
+    pub const gel_unit: f32 = 250;
+
+    /// Chapter 3 scenery, from the functions in stomach.zig that the collision reads.
+    fn buildStomach(b: *mesh_mod.Builder, ms: *Meshes) void {
+        const st = @import("stomach.zig");
+        const cell: f32 = 9; // width of one surface cell, for the wall material's cobbles
+        const v_per: f32 = 1.0 / (cell * 0.32);
+
+        // A hexagon of surface with the pit sunk in its middle, as a surface of revolution whose first
+        // ring is the hexagon's outline. Texture runs around the pit and down into it.
+        {
+            b.begin();
+            const seg: u32 = 12;
+            const s30: f32 = 0.5;
+            const c30: f32 = 0.8660254;
+            const bottom = -(st.pit_depth - st.pit_r);
+            // radius, height, and the normal's (radial, vertical) parts; the first ring is the outline
+            const rings = [_][4]f32{
+                .{ 0, 0, 0, 1 },
+                .{ st.pit_r + 7, 0, -0.38, 0.92 },
+                .{ st.pit_r, -7, -0.92, 0.38 },
+                .{ st.pit_r, -80, -1, 0 },
+                .{ st.pit_r, bottom, -1, 0 },
+                .{ st.pit_r * c30, bottom - st.pit_r * s30, -c30, s30 },
+                .{ st.pit_r * s30, bottom - st.pit_r * c30, -s30, c30 },
+                .{ 0.01, -st.pit_depth, 0, 1 },
+            };
+            // distance along the profile, which is the texture's other axis
+            var runs: [rings.len]f32 = undefined;
+            var prev_r: f32 = st.pitch * 0.5;
+            var prev_y: f32 = 0;
+            var run: f32 = 0;
+            for (rings, 0..) |ring, j| {
+                const rr = if (j == 0) st.pitch * 0.5 else ring[0];
+                run += @sqrt((rr - prev_r) * (rr - prev_r) + (ring[1] - prev_y) * (ring[1] - prev_y));
+                runs[j] = run;
+                prev_r = rr;
+                prev_y = ring[1];
+            }
+            // the surface down to the neck of the pit, then the pit from the neck down
+            inline for (.{ [2]usize{ 0, 2 }, [2]usize{ 2, rings.len - 1 } }, 0..) |span, which| {
+                b.begin();
+                for (span[0]..span[1] + 1) |j| {
+                    const ring = rings[j];
+                    for (0..seg + 1) |i| {
+                        const a = m.tau * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(seg));
+                        var radius = ring[0];
+                        if (j == 0) {
+                            // apothem pitch/2 towards the neighbours in the row, corners between them
+                            const local = @mod(a + m.pi / 6.0, m.pi / 3.0) - m.pi / 6.0;
+                            radius = st.pitch * 0.5 / @cos(local);
+                        }
+                        const c = @cos(a);
+                        const s = @sin(a);
+                        _ = b.vert(m.v3(radius * c, ring[1], radius * s), m.v3(ring[2] * c, ring[3], ring[2] * s), pit_cells_around * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(seg)), runs[j] * v_per);
+                    }
+                }
+                for (0..span[1] - span[0]) |j| {
+                    for (0..seg) |i| {
+                        const a: u32 = @intCast(j * (seg + 1) + i);
+                        b.quad(a, a + 1, a + seg + 2, a + seg + 1);
+                    }
+                }
+                if (which == 0) ms.pit_tile = b.end() else ms.pit_bore = b.end();
+            }
+        }
+
+        // The cut end of a vessel: wall, a lip rolled outwards, and the first of the lumen inside it.
+        ms.stump = b.revolve(&.{ .{ 1.0, -3.0 }, .{ 1.0, -0.3 }, .{ 1.07, -0.1 }, .{ 1.0, 0.0 }, .{ 0.84, -0.03 }, .{ 0.74, -0.16 }, .{ 0.70, -0.5 }, .{ 0.0, -0.5 } }, 22);
+
+        // The floor away from the ulcer, under the tiles and up the folds on either side.
+        {
+            b.begin();
+            const n: u32 = 38;
+            const len = st.z_max + 600 - antrum_floor_z0;
+            for (0..n + 1) |i| {
+                const x = -1900 + 3800 * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n));
+                const slope = (st.floorY(x + 1) - st.floorY(x - 1)) / 2;
+                const nrm = m.v3(-slope, 1, 0).norm();
+                _ = b.vert(m.v3(x, st.floorY(x), 0), nrm, x / cell, 0);
+                _ = b.vert(m.v3(x, st.floorY(x), 1), nrm, x / cell, len * v_per);
+            }
+            for (0..n) |i| {
+                const a: u32 = @intCast(i * 2);
+                b.quad(a, a + 1, a + 3, a + 2);
+            }
+            ms.antrum_floor = b.end();
+        }
+
+        // The ulcer, on a polar grid about its centre so that rows follow the edge: the bed in one mesh,
+        // the wall of the crater with the heaped rim and the mucosa outside it in the other.
+        {
+            const Ring = struct {
+                fn radius(j: usize) f32 {
+                    // coarse over the bed, 20 µm rows across the crater wall and the rim, coarse outside
+                    if (j <= 24) return 250 + 100 * @as(f32, @floatFromInt(j));
+                    if (j <= 56) return 2650 + 20 * @as(f32, @floatFromInt(j - 24));
+                    return 3290 + 150 * @as(f32, @floatFromInt(j - 56));
+                }
+            };
+            const cols: u32 = 96;
+            const half_angle: f32 = 1.4;
+            const split: usize = 28; // 270 µm inside the edge, where the wall meets the bed
+            inline for (.{ [2]usize{ 0, split }, [2]usize{ split, 62 } }, 0..) |span, which| {
+                b.begin();
+                for (span[0]..span[1] + 1) |j| {
+                    const rad = Ring.radius(j);
+                    for (0..cols + 1) |i| {
+                        const th = -half_angle + 2 * half_angle * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(cols));
+                        const x = rad * @sin(th);
+                        const z = rad * @cos(th);
+                        const u = th * st.ulcer_r;
+                        if (which == 0) {
+                            _ = b.vert(m.v3(x, st.surfaceY(x, z), z), m.v3(0, 1, 0), u / 400.0, rad / 400.0);
+                        } else {
+                            // outside the rim the tiles lie on top of this, so it sits a hair under them
+                            const sink = 1.5 * m.smoothstep(260, 300, -st.into(x, z));
+                            _ = b.vert(m.v3(x, st.surfaceY(x, z) - sink, z), m.v3(0, 1, 0), u / cell, rad * v_per);
+                        }
+                    }
+                }
+                for (0..span[1] - span[0]) |j| {
+                    for (0..cols) |i| {
+                        const a: u32 = @intCast(j * (cols + 1) + i);
+                        b.quad(a, a + 1, a + cols + 2, a + cols + 1);
+                    }
+                }
+                b.smoothNormals(false);
+                if (which == 0) ms.ulcer_bed = b.end() else ms.ulcer_rim = b.end();
+            }
+        }
+
+        // The top of the gel. Its first row lies on the line where the gel runs out, short of the rim.
+        {
+            b.begin();
+            const nx: u32 = 38;
+            const nz: u32 = 36;
+            const edge = st.ulcer_r + 215;
+            for (0..nz + 1) |j| {
+                const t = std.math.pow(f32, @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(nz)), 1.7);
+                for (0..nx + 1) |i| {
+                    const x = -1900 + 3800 * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(nx));
+                    const z = m.lerp(@sqrt(edge * edge - x * x), st.z_max + 600, t);
+                    const y = st.floorY(x) + st.mucus(x, z);
+                    _ = b.vert(m.v3(x / gel_unit, y / gel_unit, z / gel_unit), m.v3(0, 1, 0), x / 300.0, z / 300.0);
+                }
+            }
+            for (0..nz) |j| {
+                for (0..nx) |i| {
+                    const a: u32 = @intCast(j * (nx + 1) + i);
+                    b.quad(a, a + 1, a + nx + 2, a + nx + 1);
+                }
+            }
+            b.smoothNormals(false);
+            ms.gel_sheet = b.end();
+        }
+
+        // A spiral rod: two turns about +Y, tapered at both ends.
+        {
+            b.begin();
+            const Ctx = struct {
+                pub fn at(_: @This(), u: f32, v: f32) Vec3 {
+                    const turns = 2.0 * m.tau;
+                    const len: f32 = 3.2;
+                    const coil: f32 = 0.42;
+                    const ph = v * turns;
+                    const centre = m.v3(coil * @cos(ph), (v - 0.5) * len, coil * @sin(ph));
+                    const tangent = m.v3(-coil * turns * @sin(ph), len, coil * turns * @cos(ph)).norm();
+                    const out = m.v3(@cos(ph), 0, @sin(ph));
+                    const side = tangent.cross(out).norm();
+                    const thick = 0.3 * @sqrt(@max(0, @sin(m.pi * m.clamp(v, 0.02, 0.98))));
+                    const a = u * m.tau;
+                    return centre.add(out.scale(@cos(a) * thick)).add(side.scale(@sin(a) * thick));
+                }
+            };
+            b.grid(8, 22, Ctx{}, false, .{ 1, 1 });
+            b.smoothNormals(false);
+            ms.helix = b.end();
+        }
     }
 
     fn domeProfile() [10][2]f32 {

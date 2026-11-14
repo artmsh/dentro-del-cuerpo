@@ -7,6 +7,8 @@ const game = @import("game.zig");
 const vein_mod = @import("vein.zig");
 const gut = @import("gut.zig");
 const ch2 = @import("ch2.zig");
+const stomach = @import("stomach.zig");
+const ch3 = @import("ch3.zig");
 const Vec3 = m.Vec3;
 const v3 = m.v3;
 const Vein = vein_mod.Vein;
@@ -300,6 +302,195 @@ pub const Bot = struct {
         }
     }
 
+    // ------------------------------------------------------------------ chapter 3
+
+    fn colonisedPit(s: *const Sim, pit: stomach.Pit) bool {
+        for (&s.ents) |*e| {
+            if (e.kind == .colony and @abs(e.pos.x - pit.x) < 5 and @abs(e.pos.z - pit.z) < 5) return true;
+        }
+        return false;
+    }
+
+    /// Into the pit nearest the drone: over its mouth first, then down the axis.
+    fn intoPit(s: *const Sim, c: *Controls) void {
+        const pit = stomach.pitNear(s.pos.x, s.pos.z) orelse return;
+        const off = @abs(pit.x - s.pos.x) + @abs(pit.z - s.pos.z);
+        const depth: f32 = if (colonisedPit(s, pit)) 46 else 150;
+        _ = flyTo(s, c, if (off > 14 and s.pos.y > -4) pit.mouth().add(v3(0, 10, 0)) else pit.down(depth), true);
+    }
+
+    /// Out of a pit by its axis; true while the drone is still below the mouth.
+    fn climbOut(s: *const Sim, c: *Controls) bool {
+        if (s.pos.y > 4 or ch3.inCrater(s.pos)) return false;
+        const pit = stomach.pitNear(s.pos.x, s.pos.z) orelse return false;
+        _ = flyTo(s, c, pit.mouth().add(v3(0, 24, 0)), true);
+        return true;
+    }
+
+    /// A round arrives only while the swimmer holds still to flare, or at arm's length. Returns true if
+    /// one is near enough to need the reticle.
+    fn fightSwimmers(s: *const Sim, c: *Controls, dt: f32, range: f32) bool {
+        const e = nearestOf(s, .pylori, range) orelse return false;
+        const d = e.pos.dist(s.pos);
+        const cs = aimAt(s, c, e.pos, dt);
+        if (cs > 0.995 and (e.state == 1 or d < 55) and s.arms[0].tool == .shoot) c.arm[0] = true;
+        if (cs > 0.9 and d < game.punch_reach + 2 and s.arms[1].tool == .punch) c.arm[1] = true;
+        return true;
+    }
+
+    fn releaseLine(b: *Bot, s: *const Sim, c: *Controls, dt: f32) void {
+        _ = aimAt(s, c, s.pos.add(v3(0, 1, -0.15).scale(500)), dt);
+        if (ch3.tetherTarget(s) == null) {
+            if (b.tap()) c.tether = true;
+        }
+    }
+
+    fn thinkStomach(b: *Bot, s: *const Sim, dt: f32, c: *Controls) void {
+        const g = &s.g3;
+        // Left arm shoots and the right punches; at the colonies the right arm drills, and at the vessel
+        // the left presses while the right welds.
+        const cautery = s.stage == .s_cautery;
+        const want_left: game.Tool = if (cautery) .punch else .shoot;
+        const want_right: game.Tool = if (cautery or s.stage == .s_margin) .drill else .punch;
+        if (s.arms[0].tool != want_left) c.select[0] = want_left;
+        if (s.arms[1].tool != want_right) c.select[1] = want_right;
+        const drill = &s.arms[1];
+        if (drill.heat > 0.9) b.cooling = true;
+        if (drill.heat < 0.3) b.cooling = false;
+
+        // A wave is coming or overhead: outside the crater, get below the mouth of a pit and stay there.
+        const eta = ch3.ringEta(s);
+        const wave = ch3.underRing(s) or (eta != null and eta.? > 0 and eta.? < 3.2) or (eta != null and eta.? == 0 and s.sto.ring_z.? - stomach.ring_half < s.pos.z);
+        if (wave and s.tether == null and !ch3.inCrater(s.pos) and @intFromEnum(s.stage) > @intFromEnum(game.Stage.s_wave)) {
+            if (!ch3.sheltered(s)) {
+                intoPit(s, c);
+                _ = aimAt(s, c, s.pos.add(v3(0, -1, -0.3).scale(200)), dt);
+                return;
+            }
+            if (s.stage != .s_margin) {
+                intoPit(s, c);
+                _ = fightSwimmers(s, c, dt, 120);
+                return;
+            }
+        }
+
+        switch (s.stage) {
+            .s_arrive => {},
+            .s_pits => {
+                const pit = stomach.pitNear(s.pos.x, s.pos.z - 220) orelse return;
+                _ = aimAt(s, c, pit.down(20), dt);
+                if ((s.focus.topic == .gastric_pit or s.focus.topic == .surface_mucous_cell) and b.tap()) c.examine = true;
+            },
+            .s_gradient => {
+                const y: f32 = if (g.said.acid_reached) 70 else 270;
+                _ = flyTo(s, c, v3(s.pos.x, y, s.pos.z), false);
+                _ = aimAt(s, c, s.pos.add(v3(0, -0.3, -1).scale(300)), dt);
+            },
+            .s_wave => {
+                // hover over a mouth, aim down the pit, and let the line pull the drone in
+                const pit = stomach.pitNear(s.pos.x, s.pos.z) orelse return;
+                if (s.tether != null) return;
+                if (eta != null and eta.? < 2.0) {
+                    intoPit(s, c);
+                    return;
+                }
+                const d = flyTo(s, c, pit.mouth().add(v3(0, 46, 0)), false);
+                const cs = aimAt(s, c, pit.down(170), dt);
+                if (d < 12 and cs > 0.995) {
+                    if (ch3.tetherTarget(s)) |h| {
+                        if (h.what == .pit and b.tap()) c.tether = true;
+                    }
+                }
+            },
+            .s_swim => {
+                if (s.tether != null) return b.releaseLine(s, c, dt);
+                if (climbOut(s, c)) return;
+                if (fightSwimmers(s, c, dt, 420)) return;
+                const wp = s.waypoint orelse return;
+                _ = flyTo(s, c, wp, true);
+                _ = aimAt(s, c, wp.add(v3(0, -40, -300)), dt);
+            },
+            .s_margin => {
+                if (s.tether != null) return b.releaseLine(s, c, dt);
+                const col = nearestOf(s, .colony, 1e9) orelse {
+                    // the margin is clear: wait deep in the pit, where the gel is still neutral
+                    intoPit(s, c);
+                    if (!fightSwimmers(s, c, dt, 300)) _ = aimAt(s, c, s.pos.add(v3(0, 1, -0.2).scale(200)), dt);
+                    return;
+                };
+                const hover = v3(col.pos.x, -44, col.pos.z);
+                const off = @abs(col.pos.x - s.pos.x) + @abs(col.pos.z - s.pos.z);
+                const flaring = if (nearestOf(s, .pylori, 110)) |e| (e.state == 1 or e.state == 2 or e.pos.dist(s.pos) < 55) else false;
+                if (off > 16) {
+                    // the surface between pits is acid here: cross low and fast
+                    if (climbOut(s, c)) return;
+                    const far = off > 500;
+                    _ = flyTo(s, c, v3(col.pos.x, if (far) 70 else 14, col.pos.z), true);
+                    if (!(flaring and fightSwimmers(s, c, dt, 110))) _ = aimAt(s, c, col.pos, dt);
+                    return;
+                }
+                const d = flyTo(s, c, hover, false);
+                // a swimmer that flares gets the shooting arm; the drill stays in the colony meanwhile
+                if (!(flaring and fightSwimmers(s, c, dt, 110))) {
+                    const cs = aimAt(s, c, col.pos, dt);
+                    if (cs > 0.98 and d < 16) c.arm[0] = true;
+                }
+                if (!b.cooling and (drill.latch != null or (focusKind(s) == .colony and s.focus.dist < game.drill_reach))) c.arm[1] = true;
+            },
+            .s_cross => {
+                if (s.tether != null) return b.releaseLine(s, c, dt);
+                if (climbOut(s, c)) return;
+                const e = s.findConst(.vessel) orelse return;
+                const stand = vesselStand(e);
+                // up and over the rim first, then down the crater wall to the vessel
+                const outside = stomach.into(s.pos.x, s.pos.z) < 70;
+                const target = if (outside) v3(m.lerp(s.pos.x, stand.x, 0.3), 190, stomach.marginZ(s.pos.x) - 140) else stand;
+                _ = flyTo(s, c, target, true);
+                _ = aimAt(s, c, e.pos, dt);
+            },
+            .s_cautery => {
+                const e = s.findConst(.vessel) orelse return;
+                if (g.sealed) return;
+                const stand = vesselStand(e);
+                const d = s.pos.dist(stand);
+                if (s.tether == null) {
+                    // fix a line to the bed beside the vessel before starting: the jet and the waves
+                    // would otherwise take the drone every time the bit has to cool
+                    _ = flyTo(s, c, stand, d > 150);
+                    const anchor = e.pos.sub(e.end.scale(8)).add(vesselSide(e).scale(e.radius));
+                    const cs = aimAt(s, c, anchor, dt);
+                    if (d < 16 and cs > 0.995 and ch3.tetherTarget(s) != null and b.tap()) c.tether = true;
+                    return;
+                }
+                const cs = aimAt(s, c, e.pos, dt);
+                const on = focusKind(s) == .vessel and s.focus.dist < game.drill_reach;
+                if (cs > 0.97) c.arm[0] = true;
+                if (!b.cooling and (drill.latch != null or on)) c.arm[1] = true;
+            },
+            .s_exit => {
+                if (s.tether != null) return b.releaseLine(s, c, dt);
+                const wp = s.waypoint orelse return;
+                if (b.phase == 0) {
+                    if (flyTo(s, c, wp.add(v3(0, 20, 170)), true) < 40) b.phase = 1;
+                    _ = aimAt(s, c, wp, dt);
+                } else {
+                    _ = flyTo(s, c, wp.add(v3(0, 0, -70)), true);
+                    _ = aimAt(s, c, wp.add(v3(0, 0, -300)), dt);
+                }
+            },
+            else => {},
+        }
+    }
+
+    fn vesselSide(e: *const game.Entity) Vec3 {
+        return e.end.cross(v3(0, 0, 1)).norm();
+    }
+
+    /// Where to work on the vessel from: beside it, off the axis of its jet.
+    fn vesselStand(e: *const game.Entity) Vec3 {
+        return e.pos.add(vesselSide(e).scale(e.radius + 16)).add(e.end.scale(24));
+    }
+
     pub fn think(b: *Bot, s: *const Sim, dt: f32) Controls {
         var c: Controls = .{};
         b.tap_cd = @max(0, b.tap_cd - dt);
@@ -314,6 +505,10 @@ pub const Bot = struct {
         if (s.mode != .playing) return c;
         if (s.chapter == 1) {
             b.thinkGut(s, dt, &c);
+            return c;
+        }
+        if (s.chapter == 2) {
+            b.thinkStomach(s, dt, &c);
             return c;
         }
         const vn = &s.vein;
@@ -600,7 +795,7 @@ pub fn runHeadlessVia(sim: *Sim, checkpoint: *Sim, chapter: u8, max_seconds: f32
             bot = .{};
             if (log) std.debug.print("[{d:7.1}s] hull lost, retry from checkpoint (stage {s})\n", .{ t, @tagName(sim.stage) });
         }
-        if (log and trace and @mod(t, 4.0) < dt) std.debug.print("    t={d:.0} pos=({d:.0},{d:.0},{d:.0}) hull={d:.0} flow={d:.0} phase={d} ring={?d:.0} tether={} wp={?d:.0}\n", .{ t, sim.pos.x, sim.pos.y, sim.pos.z, sim.hull, sim.flow.z, bot.phase, sim.gut.ring_z, sim.tether != null, if (sim.waypoint) |w| @as(?f32, w.z) else null });
+        if (log and trace and @mod(t, 4.0) < dt) std.debug.print("    t={d:.0} pos=({d:.0},{d:.0},{d:.0}) hull={d:.0} flow={d:.0} phase={d} ring={?d:.0} tether={} wp={?d:.0}\n", .{ t, sim.pos.x, sim.pos.y, sim.pos.z, sim.hull, sim.flow.z, bot.phase, if (sim.chapter == 2) sim.sto.ring_z else sim.gut.ring_z, sim.tether != null, if (sim.waypoint) |w| @as(?f32, w.z) else null });
         if (sim.stage != last) {
             last = sim.stage;
             if (log) std.debug.print("[{d:7.1}s] stage {s}  hull {d:.0} stability {d:.0} z {d:.0}\n", .{ t, @tagName(sim.stage), sim.hull, sim.stability, sim.pos.z });
@@ -653,5 +848,31 @@ test "scripted pilot finishes the jejunum chapter: extrusion, the dome with both
     // the stripped stretch cannot be flown; it was crossed on the line
     try std.testing.expect(sim.g.tether_uses >= 6);
     try std.testing.expect(r.stats.dual_time > 1.5);
+    try std.testing.expect(r.stability > 0);
+}
+
+test "scripted pilot finishes the stomach chapter: pits under the waves, the colonies, the coat and the weld" {
+    const gpa = std.testing.allocator;
+    const sim = try gpa.create(Sim);
+    defer gpa.destroy(sim);
+    const cp = try gpa.create(Sim);
+    defer gpa.destroy(cp);
+    const r = runHeadlessChapter(sim, cp, 2, 1500, false);
+    try std.testing.expect(r.completed);
+    const g = &sim.g3;
+    try std.testing.expectEqual(@as(u32, 0), sim.count(.colony));
+    try std.testing.expectEqual(g.total, g.cleared);
+    try std.testing.expect(g.sealed);
+    // the waves were sat out in pits, not on the surface
+    try std.testing.expect(g.waves_survived >= 2);
+    try std.testing.expectEqual(@as(u32, 0), g.crush_hits);
+    // swimmers were killed as they flared, and the hull met acid both bare and under the coat
+    try std.testing.expect(g.swimmers_killed >= 4);
+    try std.testing.expect(g.acid_time > 0.5);
+    try std.testing.expect(g.has_coat and g.coat_time > 1.5);
+    // the weld is the two-arm job: all of its heat went in while the other arm pressed
+    try std.testing.expect(g.cautery_t >= ch3.seal_time - 0.1);
+    try std.testing.expect(r.stats.dual_time > ch3.seal_time);
+    try std.testing.expect(g.tether_uses >= 2);
     try std.testing.expect(r.stability > 0);
 }

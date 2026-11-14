@@ -4,19 +4,20 @@
 const std = @import("std");
 const i18n = @import("i18n.zig");
 const bindings = @import("bindings.zig");
+const campaign = @import("campaign.zig");
 const Lang = i18n.Lang;
 
 pub const Mode = enum { play, demo, inputtest, padtest, selftest, shots, icon };
 
 pub const usage =
-    \\usage: dentro [--fullscreen] [--software] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2]
+    \\usage: dentro [--fullscreen] [--software] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2|3]
     \\              [--demo [--pad] | --inputtest | --padtest | --selftest | --shots <dir> | --icon <png|ico>]
     \\
     \\  (no mode)        play in a window
     \\  --demo           the scripted pilot flies a chapter in the window; --pad has it hold a controller
     \\  --inputtest      drive the window with synthetic key events and check what reaches the game
     \\  --padtest        play from the title screen with a synthetic controller
-    \\  --selftest       headless: the scripted pilot plays both chapters and prints a summary
+    \\  --selftest       headless: the scripted pilot plays every chapter and prints a summary
     \\  --shots <dir>    render every screen and stage offscreen, one BMP each, into <dir>
     \\  --icon <file>    render the application icon: a .png master, or a Windows .ico
     \\
@@ -25,7 +26,7 @@ pub const usage =
     \\  --lang en|uk     language for this run (not --selftest or --icon)
     \\  --prompts D      write the prompts for kbm, xbox or ps instead of the device last used
     \\                   (play, --demo, --inputtest, --shots)
-    \\  --chapter 1|2    the chapter to open (play), fly (--demo) or render (--shots)
+    \\  --chapter 1|2|3  the chapter to open (play), fly (--demo) or render (--shots)
     \\  --help, -h       print this and exit
     \\
 ;
@@ -146,7 +147,7 @@ pub fn parse(args: anytype, msg: []u8) Result {
             given.insert(.prompts);
         } else if (eql(u8, a, "--chapter")) {
             const n = std.fmt.parseInt(u8, value(args, &i) orelse "", 10) catch 0;
-            if (n < 1 or n > 2) return bad(msg, "--chapter takes 1 or 2 (the playable chapters)", .{});
+            if (n < 1 or n > campaign.playable_count) return bad(msg, "--chapter takes a number from 1 to {d} (the playable chapters)", .{campaign.playable_count});
             o.chapter = n - 1;
             given.insert(.chapter);
         } else {
@@ -208,6 +209,7 @@ test "no arguments is normal play, and each mode is chosen by its flag" {
     try std.testing.expectEqualDeep(Options{ .mode = .shots, .path = "out dir", .chapter = 0, .lang = .uk, .prompts = .xbox }, shots);
     try std.testing.expectEqualStrings("icon.png", run(&.{ "--icon", "icon.png" }).run.path);
     try std.testing.expectEqual(@as(?u8, 1), run(&.{ "--chapter", "2" }).run.chapter);
+    try std.testing.expectEqual(@as(?u8, 2), run(&.{ "--chapter", "3" }).run.chapter);
 }
 
 test "an option that needs a value is refused without one, wherever it stands" {
@@ -218,8 +220,9 @@ test "an option that needs a value is refused without one, wherever it stands" {
         try expectBad(&.{ "--fullscreen", flag }, flag);
     }
     try expectBad(&.{ "--shots", "--chapter", "1" }, "--shots takes a directory");
-    try expectBad(&.{ "--chapter", "3" }, "--chapter takes 1 or 2");
-    try expectBad(&.{ "--chapter", "one" }, "--chapter takes 1 or 2");
+    try expectBad(&.{ "--chapter", "0" }, "--chapter takes a number from 1 to");
+    try expectBad(&.{ "--chapter", "12" }, "--chapter takes a number from 1 to");
+    try expectBad(&.{ "--chapter", "one" }, "--chapter takes a number from 1 to");
     try expectBad(&.{ "--lang", "de" }, "--lang takes en or uk");
     try expectBad(&.{ "--prompts", "switch" }, "--prompts takes kbm, xbox or ps");
 }

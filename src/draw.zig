@@ -11,6 +11,8 @@ const app_mod = @import("app.zig");
 const campaign = @import("campaign.zig");
 const gut = @import("gut.zig");
 const ch2 = @import("ch2.zig");
+const stomach = @import("stomach.zig");
+const ch3 = @import("ch3.zig");
 const i18n = @import("i18n.zig");
 const strings = @import("strings.zig");
 const bindings = @import("bindings.zig");
@@ -209,11 +211,25 @@ pub fn frame(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, dt: f32) Out {
         amb = .{ m.lerp(0.30, 0.17, closed), m.lerp(0.23, 0.12, closed), m.lerp(0.12, 0.07, closed) };
         lamp_range = 800;
     }
+    if (s.chapter == 2) {
+        // Inside the gel: a pale, slightly milky haze. In the juice: clear and yellow-green. The reading
+        // on the HUD and the colour of the water change together.
+        const acid = m.smoothstep(6.3, 2.6, s.g3.ph);
+        const closed = s.sto.squeeze(s.pos.z);
+        const dark = 1 - 0.55 * closed;
+        fog = .{ m.lerp(0.085, 0.150, acid) * dark, m.lerp(0.100, 0.135, acid) * dark, m.lerp(0.092, 0.030, acid) * dark, m.lerp(0.00095, 0.00062, acid) };
+        amb = .{ m.lerp(0.21, 0.29, acid) * dark, m.lerp(0.20, 0.25, acid) * dark, m.lerp(0.18, 0.09, acid) * dark };
+        lamp_range = 850;
+    }
     if (app.icon_mode) { // the icon wants the stream as a saturated field, not a dark tunnel
         fog = .{ 0.34, 0.022, 0.04, 0.0011 };
         amb = .{ 0.42, 0.09, 0.10 };
     }
-    const pulse = if (s.chapter == 1) 0.5 * s.gut.squeeze(s.pos.z) else m.sat(Vein.pump(s.clock) / 1.5);
+    const pulse = switch (s.chapter) {
+        1 => 0.5 * s.gut.squeeze(s.pos.z),
+        2 => 0.5 * s.sto.squeeze(s.pos.z),
+        else => m.sat(Vein.pump(s.clock) / 1.5),
+    };
     const scene: gpu.Frame = .{
         .view_proj = vw.vp.m,
         .cam_pos = .{ eye.x, eye.y, eye.z, app.time },
@@ -253,12 +269,16 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
 
     if (s.chapter == 1) {
         drawGut(app, r, vw);
+    } else if (s.chapter == 2) {
+        drawStomach(app, r, vw);
     } else {
         r.draw(vm.tube, .solid, Mat4.identity, .{ .color = .{ 0.66, 0.19, 0.20, 1 }, .mat = .wall, .anim = vein_mod.wall_cells_around });
         r.draw(vm.needle, .solid, Mat4.identity, .{ .color = .{ 0.42, 0.45, 0.50, 1 }, .mat = .metal });
         r.draw(vm.septum, .solid, Mat4.identity, .{ .color = .{ 0.74, 0.55, 0.47, 1 }, .mat = .fibrin, .seed = 0.4 });
     }
-    const jej = s.chapter == 1;
+    // The decorative field is blood cells in the vein and whatever the lumen holds elsewhere.
+    const jej = s.chapter != 0;
+    const sto = s.chapter == 2;
 
     // Blood cells the display has left in.
     inline for (.{ &app.near, &app.far }, .{ true, false }) |cells, is_near| {
@@ -273,9 +293,9 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
                 const model = Mat4.place(c.pos, axis, v3(c.scale, c.scale, c.scale));
                 switch (kind) {
                     // in the gut the same field is chyme: fat droplets, food debris, mucus
-                    .red => if (jej) r.draw(ms.sphere_lo, .solid, model, .{ .color = .{ 0.80, 0.66, 0.20, 1 }, .mat = .cell, .seed = c.tint }) else r.draw(if (is_near) ms.red_cell else ms.red_cell_lo, .solid, model, .{ .color = .{ 0.46 + 0.12 * c.tint, 0.05, 0.065, 1 }, .mat = .cell, .seed = c.tint }),
-                    .platelet => r.draw(ms.platelet, .solid, model, .{ .color = if (jej) .{ 0.40, 0.30, 0.16, 1 } else .{ 0.70, 0.64, 0.46, 1 }, .mat = .cell, .seed = c.tint }),
-                    .white => r.draw(if (jej) ms.blob[1] else ms.white_cell, .solid, model, .{ .color = if (jej) .{ 0.52, 0.56, 0.40, 1 } else .{ 0.62, 0.64, 0.74, 1 }, .mat = .cell, .seed = c.tint }),
+                    .red => if (jej) r.draw(ms.sphere_lo, .solid, model, .{ .color = if (sto) .{ 0.50, 0.42, 0.16, 1 } else .{ 0.80, 0.66, 0.20, 1 }, .mat = .cell, .seed = c.tint }) else r.draw(if (is_near) ms.red_cell else ms.red_cell_lo, .solid, model, .{ .color = .{ 0.46 + 0.12 * c.tint, 0.05, 0.065, 1 }, .mat = .cell, .seed = c.tint }),
+                    .platelet => r.draw(ms.platelet, .solid, model, .{ .color = if (sto) .{ 0.36, 0.32, 0.20, 1 } else if (jej) .{ 0.40, 0.30, 0.16, 1 } else .{ 0.70, 0.64, 0.46, 1 }, .mat = .cell, .seed = c.tint }),
+                    .white => r.draw(if (jej) ms.blob[1] else ms.white_cell, .solid, model, .{ .color = if (sto) .{ 0.40, 0.42, 0.34, 1 } else if (jej) .{ 0.52, 0.56, 0.40, 1 } else .{ 0.62, 0.64, 0.74, 1 }, .mat = .cell, .seed = c.tint }),
                 }
             }
         }
@@ -344,7 +364,7 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
             },
             .ring => {
                 if (!s.ringVisible(e.variant)) continue;
-                const tg = if (jej) v3(0, 0, -1) else Vein.tangent(e.pos.z);
+                const tg = if (s.chapter != 0) v3(0, 0, -1) else Vein.tangent(e.pos.z);
                 const pulse = 1 + 0.03 * @sin(app.time * 3);
                 r.draw(ms.torus, .blend, Mat4.place(e.pos, tg, v3(e.radius * pulse, e.radius * pulse, e.radius * pulse)), .{ .color = .{ 0.3, 0.95, 1.0, 0.9 }, .mat = .hologram, .emissive = 1 });
                 r.draw(ms.torus_thin, .blend, Mat4.place(e.pos.add(tg.scale(40)), tg, v3(e.radius * 0.7, e.radius * 0.7, e.radius * 0.7)), .{ .color = .{ 0.3, 0.95, 1.0, 0.7 }, .mat = .hologram });
@@ -390,6 +410,62 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
                     r.draw(ms.cluster[k], .solid, Mat4.trs(e.pos.add(v3(@cos(a) * 20, 4, @sin(a) * 20)), n, app.time * 0.4 + a, 17), .{ .color = .{ 0.58, 0.09, 0.36, 1 }, .mat = .cell, .emissive = 0.05 + pulse * (0.1 + 0.4 * e.aux) + e.flash * 0.9, .seed = seed });
                 }
                 if (e.aux > 0.3) r.particle(e.pos.add(n.scale(30)), 30 * e.aux, .{ 1.0, 0.35, 0.8, 0.35 * e.aux });
+            },
+            .pylori => {
+                const glow: f32 = if (e.state == 1 or e.state == 2) e.aux else 0;
+                const sp = e.vel.len();
+                const axis = if (sp > 8) e.vel.scale(1 / sp) else v3(@sin(seed * 9), 0.3, @cos(seed * 9)).norm();
+                const size = 2.3 * (1 + 0.3 * glow);
+                // the rod turns about its own axis as it swims: that is how a corkscrew moves through gel
+                const model = Mat4.place(e.pos, axis, v3(size, size, size)).mul(Mat4.rotation(Vec3.up, app.time * 22 + seed * 20));
+                r.draw(ms.helix, .solid, model, .{ .color = .{ 0.62, 0.76, 0.30, 1 }, .mat = .cell, .emissive = 0.1 + glow * 2.2 + e.flash, .seed = seed });
+                // the tuft of flagella at the trailing end
+                const tail = e.pos.sub(axis.scale(size * 1.6));
+                const side = axis.perp();
+                for (0..3) |k| {
+                    const a = app.time * 30 + @as(f32, @floatFromInt(k)) * 2.1 + seed * 9;
+                    const off = side.scale(@cos(a) * 2.2).add(axis.cross(side).scale(@sin(a) * 2.2));
+                    r.streak(tail, tail.sub(axis.scale(6)).add(off), 0.35, .{ 0.8, 0.9, 0.5, 0.5 });
+                }
+                if (glow > 0.05) r.particle(e.pos, 6 + 12 * glow, .{ 0.8, 1.0, 0.3, 0.55 * glow });
+            },
+            .colony => {
+                const pulse = 0.6 + 0.4 * @sin(app.time * 4 + seed * 7);
+                // a mat of bacteria packed across the pit: granular, olive, faintly lit by its own chemistry
+                const col: Color = .{ 0.27, 0.33, 0.11, 1 };
+                r.draw(ms.cluster[2], .solid, Mat4.trs(e.pos, Vec3.up, app.time * 0.3 + seed * 6, e.radius * 0.74), .{ .color = col, .mat = .clot, .emissive = 0.02 + 0.03 * pulse + e.flash * 0.6, .seed = seed });
+                for (0..3) |k| {
+                    const a = @as(f32, @floatFromInt(k)) * 2.1 + seed * 6;
+                    r.draw(ms.cluster[k], .solid, Mat4.trs(e.pos.add(v3(@cos(a) * 14, 10, @sin(a) * 14)), v3(0.3, 1, 0.2), a + app.time * 0.2, e.radius * 0.5), .{ .color = .{ 0.33, 0.39, 0.13, 1 }, .mat = .clot, .emissive = 0.02 + 0.03 * pulse + e.flash * 0.6, .seed = seed + a });
+                }
+                // its ammonia: a faint haze over the mouth of the pit
+                r.particle(v3(e.pos.x, 8, e.pos.z), 48, .{ 0.75, 1.0, 0.55, 0.06 + 0.03 * pulse });
+            },
+            .vessel => {
+                const n = e.end;
+                const sealed = e.state != 0;
+                const pressed = m.sat(e.timer / 0.3);
+                const weld: f32 = if (sealed) 1 else e.aux;
+                const beat = ch3.pulse(s);
+                const h = 24 * (1 - 0.6 * pressed);
+                const w = e.radius * (1 + 0.25 * pressed + (if (sealed) @as(f32, 0) else 0.06 * beat));
+                const top = e.pos.add(n.scale(h));
+                // the stump: red and wet while it bleeds, blanched where the heat has cooked it
+                r.draw(ms.stump, .solid, Mat4.place(top, n, v3(w, (24 + h) / 2.4, w)), .{ .color = mixc(.{ 0.66, 0.17, 0.15, 1 }, .{ 0.80, 0.74, 0.62, 1 }, weld), .mat = .fibrin, .emissive = e.flash * 0.5, .seed = 0.6 });
+                if (sealed) {
+                    // the coagulum: both walls welded into one pale plug
+                    r.draw(ms.blob[2], .solid, Mat4.trs(top.sub(n.scale(w * 0.1)), n, 0.4, w * 0.78), .{ .color = .{ 0.88, 0.84, 0.74, 1 }, .mat = .fibrin, .emissive = e.flash * 0.6, .seed = 0.8 });
+                } else {
+                    // blood welling in the lumen with every beat
+                    const well = 0.16 + 0.10 * beat * (1 - pressed);
+                    r.draw(ms.sphere, .solid, Mat4.place(top.sub(n.scale(w * 0.22)), n, v3(w * 0.72, w * well, w * 0.72)), .{ .color = .{ 0.40, 0.02, 0.03, 1 }, .mat = .clot, .emissive = 0.04 + 0.10 * beat, .seed = 0.4 });
+                    // the blood that has not yet mixed away: the neutral halo the drone can work in
+                    if (pressed < 0.5) r.particle(e.pos.add(n.scale(h + 40)), 90 + 60 * beat, .{ 0.9, 0.05, 0.05, 0.10 + 0.10 * beat });
+                    if (weld > 0.02) r.particle(e.pos.add(n.scale(h)), 16 + 14 * weld, .{ 1.0, 0.8, 0.5, 0.25 * weld + e.flash * 0.3 });
+                }
+            },
+            .grit => {
+                r.draw(ms.blob[2], .solid, Mat4.trs(e.pos, v3(@sin(seed * 30), 0.4, @cos(seed * 30)), app.time * 0.2 + seed * 9, e.radius), .{ .color = .{ 0.62, 0.50, 0.30, 1 }, .mat = .cell, .seed = seed });
             },
         }
         _ = idx;
@@ -463,7 +539,7 @@ fn drawWorld(app: *App, r: *Renderer, vm: *const vein_mod.Meshes, vw: *const Vie
         p.x = vw.eye.x + @mod(base.x - vw.eye.x, cell * 4) - cell * 2;
         p.y = vw.eye.y + @mod(base.y - vw.eye.y, cell * 4) - cell * 2;
         p.z = vw.eye.z + @mod(base.z - vw.eye.z, cell * 6) - cell * 3;
-        r.particle(p, 0.9, if (jej) .{ 1.0, 0.9, 0.5, 0.16 } else .{ 1.0, 0.75, 0.7, 0.18 });
+        r.particle(p, 0.9, if (sto) .{ 0.8, 0.95, 0.8, 0.14 } else if (jej) .{ 1.0, 0.9, 0.5, 0.16 } else .{ 1.0, 0.75, 0.7, 0.18 });
     }
 }
 
@@ -537,6 +613,115 @@ fn drawGut(app: *App, r: *Renderer, vw: *const View) void {
             }
         }
     }
+}
+
+/// The colour of a pit's wall below the neck, from the colour of the surface around it.
+fn pitShade(col: Color) Color {
+    return .{ col[0] * 0.46, col[1] * 0.34, col[2] * 0.36, 1 };
+}
+
+/// Chapter 3 scenery: the honeycomb of pits around the camera, the ulcer, the top of the gel, and, where a
+/// wave is passing, the opposite wall coming down. All of it is read from the same functions as the
+/// collision in stomach.zig.
+fn drawStomach(app: *App, r: *Renderer, vw: *const View) void {
+    const s = &app.sim;
+    const ms = &r.meshes;
+    const g = &s.sto;
+    const M = render.Meshes;
+    const healthy: Color = .{ 0.80, 0.43, 0.35, 1 };
+    const inflamed: Color = .{ 0.70, 0.22, 0.20, 1 };
+
+    r.draw(ms.antrum_floor, .solid, Mat4.translation(v3(0, -3, M.antrum_floor_z0)).mul(Mat4.scaling(v3(1, 1, stomach.z_max + 600 - M.antrum_floor_z0))), .{ .color = healthy, .mat = .wall });
+    r.draw(ms.ulcer_rim, .solid, Mat4.identity, .{ .color = inflamed, .mat = .wall });
+    r.draw(ms.ulcer_bed, .solid, Mat4.identity, .{ .color = .{ 0.74, 0.69, 0.52, 1 }, .mat = .fibrin, .seed = 0.3 });
+
+    const reach: f32 = 2000;
+    const c = stomach.cellOf(vw.eye.x, vw.eye.z);
+    const nz: i32 = @intFromFloat(reach / stomach.row);
+    const nx: i32 = @intFromFloat(reach / stomach.pitch);
+    var dz: i32 = -nz;
+    while (dz <= nz) : (dz += 1) {
+        var dx: i32 = -nx;
+        while (dx <= nx) : (dx += 1) {
+            const pit = stomach.pitAt(c[0] + dx, c[1] + dz) orelse continue;
+            if (pit.z > stomach.z_max + 600) continue;
+            const rel = v3(pit.x, -60, pit.z).sub(vw.eye);
+            if (rel.len2() > reach * reach) continue;
+            if (rel.dot(vw.fwd) < -220) continue;
+            // redder towards the ulcer: the mucosa around it is inflamed
+            const k = m.smoothstep(-1150, -400, stomach.into(pit.x, pit.z));
+            const col = mixc(healthy, inflamed, k);
+            r.draw(ms.pit_tile, .solid, Mat4.translation(pit.mouth()), .{ .color = col, .mat = .wall, .anim = M.pit_cells_around });
+            // no light gets far down a pit 70 µm across
+            r.draw(ms.pit_bore, .solid, Mat4.translation(pit.mouth()), .{ .color = pitShade(col), .mat = .wall, .anim = M.pit_cells_around });
+        }
+    }
+
+    // What lies on the bed: adherent clot, dark with altered blood.
+    var rng = m.Rng.init(909);
+    for (0..9) |_| {
+        const x = rng.range(-1100, 1100);
+        const z = rng.range(900, 2500);
+        const size = rng.range(30, 75);
+        if (stomach.into(x, z) < 320) continue;
+        r.draw(ms.blob[1], .solid, Mat4.place(v3(x, stomach.surfaceY(x, z) - size * 0.1, z), v3(rng.range(-0.2, 0.2), 1, rng.range(-0.2, 0.2)), v3(size, size * 0.4, size)), .{ .color = .{ 0.30, 0.05, 0.05, 1 }, .mat = .clot, .seed = size });
+    }
+
+    // The venule the crater has laid open, half buried in the bed, its cut end facing the way in.
+    {
+        const ex = ch3.exitSite();
+        const bed = stomach.surfaceY(ex.x, ex.z);
+        const axis = v3(0, 0.05, 1).norm();
+        const mouth = v3(ex.x, ex.y, ex.z - 25);
+        const rad: f32 = 74;
+        const len: f32 = 3.2;
+        r.draw(ms.stump, .solid, Mat4.place(mouth, axis, v3(rad, rad * len, rad)), .{ .color = .{ 0.36, 0.17, 0.33, 1 }, .mat = .fibrin, .seed = 0.2 });
+        // what is left of the lumen: dark venous blood, standing
+        r.draw(ms.cylinder, .solid, Mat4.place(mouth.sub(axis.scale(rad * len * 0.42)), axis, v3(rad * 0.72, 1, rad * 0.72)), .{ .color = .{ 0.22, 0.02, 0.07, 1 }, .mat = .unlit, .emissive = 0.3 });
+        // the slough it runs under
+        const slough: Color = .{ 0.72, 0.67, 0.50, 1 };
+        r.draw(ms.blob[1], .solid, Mat4.place(v3(ex.x - 20, bed - 30, ex.z - 300), v3(0.1, 1, 0.05), v3(190, 230, 250)), .{ .color = slough, .mat = .fibrin, .seed = 0.3 });
+        r.draw(ms.blob[2], .solid, Mat4.place(v3(ex.x + 60, bed - 40, ex.z - 620), v3(-0.1, 1, 0), v3(260, 250, 300)), .{ .color = slough, .mat = .fibrin, .seed = 0.3 });
+    }
+
+    // The far wall, where the wave has brought it down: the same honeycomb, upside down.
+    if (g.ring_z) |rz| {
+        if (@abs(rz - vw.eye.z) < reach + stomach.ring_half) {
+            const far: Color = .{ 0.62, 0.32, 0.27, 1 };
+            const span = stomach.ring_half;
+            var z = rz - span;
+            while (z < rz + span) : (z += 250) {
+                const y0 = g.ceilY(z);
+                const y1 = g.ceilY(z + 250);
+                if (@min(y0, y1) > stomach.roof - 60) continue;
+                r.draw(ms.antrum_floor, .solid, Mat4.fromBasis(v3(1, 0, 0), v3(0, 1, 0), v3(0, y1 - y0, 250), v3(0, y0 + 3, z)), .{ .color = far, .mat = .wall });
+            }
+            const cr = stomach.cellOf(vw.eye.x, rz);
+            const rn: i32 = @intFromFloat(span / stomach.row);
+            dz = -rn;
+            while (dz <= rn) : (dz += 1) {
+                var dx: i32 = -nx;
+                while (dx <= nx) : (dx += 1) {
+                    // the opposing pits sit half a pitch off, so the two walls do not mirror each other
+                    const cc = stomach.cellCentre(cr[0] + dx, cr[1] + dz);
+                    const x = cc[0] + stomach.pitch * 0.5;
+                    const zz = cc[1] + stomach.row * 0.33;
+                    if (@abs(x) > stomach.half_w - 60) continue;
+                    const y = g.ceilY(zz);
+                    if (y > stomach.roof - 60) continue;
+                    const p = v3(x, y, zz);
+                    if (p.sub(vw.eye).len2() > reach * reach) continue;
+                    const slope = (g.ceilY(zz + 40) - g.ceilY(zz - 40)) / 80;
+                    const model = Mat4.fromBasis(v3(1, 0, 0), v3(0, -1, 0), v3(0, slope, 1), p);
+                    r.draw(ms.pit_tile, .solid, model, .{ .color = far, .mat = .wall, .anim = M.pit_cells_around });
+                    if (p.sub(vw.eye).len2() < 900 * 900) r.draw(ms.pit_bore, .solid, model, .{ .color = pitShade(far), .mat = .wall, .anim = M.pit_cells_around });
+                }
+            }
+        }
+    }
+
+    // The top of the gel, seen from inside it or from the juice above.
+    r.draw(ms.gel_sheet, .blend, Mat4.scaling(v3(M.gel_unit, M.gel_unit, M.gel_unit)), .{ .color = .{ 0.60, 0.70, 0.58, 1 }, .mat = .slime, .seed = 0.2, .anim = 0.35 });
 }
 
 // ---------------------------------------------------------------------------- first-person arms
@@ -749,6 +934,7 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
         // the hull bar starts where its label ends (17 units after "HULL", as the panel was drawn)
         const hull_x = x + @round(r.text(.bold, x, y + 100, 13, dim, tr(hud.hull))) + 17;
         bar(r, hull_x, y + 105, x + 280 - hull_x, 5, s.hull / 100, if (s.hull < 35) red else white);
+        if (s.chapter == 2 and s.g3.has_coat) bar(r, hull_x, y + 112, x + 280 - hull_x, 3, s.g3.coat / ch3.coat_max, if (s.g3.coat < 3) gold else cyan);
         const atlas_w = r.text(.regular, x, y + 122, 13, alpha(dim, 0.9), tf(&buf, hud.atlas, .{ i18n.int(s.atlasCount()), i18n.int(s.atlasTotal()) }));
         if (s.has_sync) _ = r.text(.bold, x + @max(110, atlas_w + 24), y + 122, 13, alpha(white, 0.9), tr(hud.sync_servo));
     }
@@ -759,12 +945,29 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
         const y: f32 = 24;
         r.rect(x - 310, y - 8, 320, 128, panel);
         const flow = s.worldFlow(s.pos).len();
-        r.textRight(.bold, x, y, 13, dim, if (s.chapter == 1) tr(hud.site_jejunum) else tr(hud.site_vein));
+        r.textRight(.bold, x, y, 13, dim, switch (s.chapter) {
+            1 => tr(hud.site_jejunum),
+            2 => tr(hud.site_antrum),
+            else => tr(hud.site_vein),
+        });
         r.textRight(.bold, x, y + 16, 22, white, tf(&buf, hud.centimetres, .{i18n.fixed(s.locationCm(), 1)}));
-        r.textRight(.regular, x - 96, y + 23, 13, dim, if (s.chapter == 1) tr(hud.past_duodenal_flexure) else tr(hud.to_femoral_junction));
-        r.textRight(.bold, x, y + 46, 22, if (s.chapter == 1 and flow > 330) gold else white, i18n.expand(&buf, lang, "{0}", &.{i18n.fixed(flow, 0)}));
-        r.textRight(.regular, x - 60, y + 53, 13, dim, if (s.chapter == 1) tr(hud.stream_unit) else tr(hud.flow_unit));
-        bar(r, x - 300, y + 76, 300, 4, flow / (if (s.chapter == 1) @as(f32, 900.0) else 480.0), alpha(white, 0.8));
+        r.textRight(.regular, x - 96, y + 23, 13, dim, switch (s.chapter) {
+            1 => tr(hud.past_duodenal_flexure),
+            2 => tr(hud.to_pylorus),
+            else => tr(hud.to_femoral_junction),
+        });
+        if (s.chapter == 2) {
+            // the stomach's reading is acidity, not flow: that is what decides where the drone can be
+            const ph = s.g3.ph;
+            const acid = ph < stomach.safe_ph;
+            r.textRight(.bold, x, y + 46, 22, if (acid) gold else white, i18n.expand(&buf, lang, "{0}", &.{i18n.fixed(ph, 1)}));
+            r.textRight(.regular, x - 60, y + 53, 13, dim, tr(hud.ph_at_hull));
+            bar(r, x - 300, y + 76, 300, 4, ph / stomach.cell_ph, alpha(if (acid) gold else white, 0.8));
+        } else {
+            r.textRight(.bold, x, y + 46, 22, if (s.chapter == 1 and flow > 330) gold else white, i18n.expand(&buf, lang, "{0}", &.{i18n.fixed(flow, 0)}));
+            r.textRight(.regular, x - 60, y + 53, 13, dim, if (s.chapter == 1) tr(hud.stream_unit) else tr(hud.flow_unit));
+            bar(r, x - 300, y + 76, 300, 4, flow / (if (s.chapter == 1) @as(f32, 900.0) else 480.0), alpha(white, 0.8));
+        }
         // pump cycle
         const ttr = Vein.timeToReflux(s.clock);
         var status_col = green;
@@ -776,6 +979,25 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
             } else if (ch2.ringEta(s)) |eta| {
                 if (eta > 0) status_col = gold;
                 status = if (eta > 0) tf(&buf, hud.contraction_in, .{i18n.fixed(eta, 1)}) else tr(hud.ring_passed);
+            } else if (s.tether != null) {
+                status = tr(hud.tethered);
+            } else {
+                status = tr(hud.lumen_open);
+            }
+        } else if (s.chapter == 2) {
+            const g3 = &s.g3;
+            if (g3.ph < stomach.safe_ph and g3.coat <= 0) {
+                status_col = red;
+                status = tr(hud.acid_on_hull);
+            } else if (ch3.underRing(s)) {
+                status_col = red;
+                status = tr(hud.wave_overhead);
+            } else if (ch3.ringEta(s)) |eta| {
+                if (eta > 0) status_col = gold;
+                status = if (eta > 0) tf(&buf, hud.wave_in, .{i18n.fixed(eta, 1)}) else tr(hud.wave_passed);
+            } else if (g3.ph < stomach.safe_ph) {
+                status_col = gold;
+                status = tf(&buf, hud.coat_holding, .{i18n.fixed(g3.coat, 0)});
             } else if (s.tether != null) {
                 status = tr(hud.tethered);
             } else {
@@ -844,21 +1066,25 @@ fn drawHud(app: *App, r: *Renderer, vw: *const View) void {
     // --- Marín
     drawSubtitles(app, r);
 
-    if (s.stage == .g_arrive) {
+    if (s.stage == .g_arrive or s.stage == .s_arrive) {
         // arrival card: where the transit took the drone
+        const lines: [4]Text = if (s.stage == .g_arrive)
+            .{ hud.arrival_chapter, hud.arrival_place, hud.arrival_route[0], hud.arrival_route[1] }
+        else
+            .{ hud.arrival3_chapter, hud.arrival3_place, hud.arrival3_route[0], hud.arrival3_route[1] };
         const a = m.sat(s.stage_t / 0.8) * m.sat((6.5 - s.stage_t) / 1.0);
         r.rect(cx - 430, 232, 860, 150, alpha(panel, a));
-        r.textCentered(.bold, cx, 246, 15, alpha(dim, a), tr(hud.arrival_chapter));
-        r.textCentered(.bold, cx, 270, 40, alpha(white, a), tr(hud.arrival_place));
-        r.textCentered(.regular, cx, 326, 16, alpha(dim, a), tr(hud.arrival_route[0]));
-        r.textCentered(.regular, cx, 348, 16, alpha(dim, a), tr(hud.arrival_route[1]));
+        r.textCentered(.bold, cx, 246, 15, alpha(dim, a), tr(lines[0]));
+        r.textCentered(.bold, cx, 270, 40, alpha(white, a), tr(lines[1]));
+        r.textCentered(.regular, cx, 326, fitSize(r, .regular, 16, 830, tr(lines[2])), alpha(dim, a), tr(lines[2]));
+        r.textCentered(.regular, cx, 348, fitSize(r, .regular, 16, 830, tr(lines[3])), alpha(dim, a), tr(lines[3]));
     }
     if (in_transit) {
         r.textCentered(.bold, cx, 300, 30, alpha(white, 0.9), tr(hud.transit));
         r.textCentered(.regular, cx, 340, 18, alpha(dim, 0.9), tf(&buf, hud.transit_distance, .{i18n.fixed(s.locationCm(), 1)}));
     }
 
-    const controls = if (s.has_tether) tr(hud.controls_tether) else tr(hud.controls);
+    const controls = if (!s.has_tether) tr(hud.controls) else if (s.chapter == 1) tr(hud.controls_tether) else tr(hud.controls_tether_identify);
     // the strip sits between the two arm panels and widens for a longer line
     const strip = @max(600, r.textWidth(.regular, 13, controls) + 40);
     r.rect(cx - strip * 0.5, 874, strip, 22, .{ 0.02, 0.03, 0.05, 0.45 });
@@ -944,7 +1170,8 @@ fn upgradeCard(app: *App, r: *Renderer, kicker: Text, name: Text, body: Text) f3
     const h = 380 + @max(0, body_h - 106);
     const o = card(r, 720, h, white);
     r.textCentered(.bold, cx, o[1] + 30, 15, dim, tr(kicker));
-    r.textCentered(.bold, cx, o[1] + 58, 54, white, tr(name));
+    // a name too long for the card in some language is set smaller rather than run past its edges
+    r.textCentered(.bold, cx, o[1] + 58, fitSize(r, .bold, 54, 640, tr(name)), white, tr(name));
     _ = r.paragraph(.regular, o[0] + 60, o[1] + 220, 600, 20, white, tr(body));
     r.textCentered(.bold, cx, o[1] + h - 44, 18, alpha(green, 0.7 + 0.3 * @sin(app.time * 4)), tr(card_text.install));
     return o[1] + 168;
@@ -1001,6 +1228,15 @@ fn drawModeOverlay(app: *App, r: *Renderer) void {
                 r.arc(cx - 150 + 290 * k, fy, 9, 0, m.tau, 4, white);
                 return;
             }
+            if (s.chapter == 2) {
+                const fy = upgradeCard(app, r, card_text.coat_kicker, card_text.coat_name, card_text.coat_body);
+                // the hull inside its coat, and the reserve draining and refilling around it
+                const k = 0.5 + 0.5 * @sin(app.time * 0.9);
+                r.arc(cx, fy, 12, 0, m.tau, 24, white);
+                r.arc(cx, fy, 30, -m.pi / 2.0, -m.pi / 2.0 + m.tau * k, 5, cyan);
+                r.arc(cx, fy, 30, -m.pi / 2.0 + m.tau * k, -m.pi / 2.0 + m.tau, 2, alpha(gold, 0.6));
+                return;
+            }
             const fy = upgradeCard(app, r, card_text.sync_kicker, card_text.sync_name, card_text.sync_body);
             // the two arcs closing into one ring
             const k = 0.5 + 0.5 * @sin(app.time * 2.5);
@@ -1015,7 +1251,11 @@ fn drawModeOverlay(app: *App, r: *Renderer) void {
         },
         .lost => {
             const o = card(r, 660, 240, red);
-            const why = if (s.chapter == 1) tr(card_text.lost_gut) else tr(card_text.lost_vein);
+            const why = switch (s.chapter) {
+                1 => tr(card_text.lost_gut),
+                2 => tr(card_text.lost_stomach),
+                else => tr(card_text.lost_vein),
+            };
             r.textCentered(.bold, cx, o[1] + 36, 50, red, tr(card_text.patient_lost));
             r.textCentered(.regular, cx, o[1] + 112, fitSize(r, .regular, 20, 620, why), white, why);
             r.textCentered(.bold, cx, o[1] + 176, 18, alpha(white, 0.7 + 0.3 * @sin(app.time * 4)), tr(card_text.restart));
@@ -1032,6 +1272,21 @@ fn drawModeOverlay(app: *App, r: *Renderer) void {
                     .{ .label = card_text.row_cleared, .value = tf(buf[112..144], card_text.out_of, .{ i18n.int(s.g.cleared), i18n.int(s.g.total) }) },
                     .{ .label = card_text.row_spread, .value = number(buf[144..160], s.g.spread) },
                     .{ .label = card_text.row_commensals, .value = number(buf[160..176], s.g.commensals_lost) },
+                    .{ .label = card_text.row_lining, .value = number(buf[176..192], s.stats.tissue_hits) },
+                    .{ .label = card_text.row_atlas, .value = atlas },
+                    .{ .label = card_text.row_relaunches, .value = relaunches },
+                    .{ .label = card_text.row_time, .value = time },
+                }, &.{note});
+                return;
+            }
+            if (s.chapter == 2) {
+                const g3 = &s.g3;
+                const note: Text = if (s.stats.tissue_hits > 3) card_text.note_stomach_lining else if (g3.blood_lost > 45) card_text.note_stomach_bled else card_text.note_stomach_clean;
+                debrief(app, r, card_text.stomach_kicker, card_text.stomach_title, &.{
+                    .{ .label = card_text.row_stability, .value = stability },
+                    .{ .label = card_text.row_colonies, .value = tf(buf[112..144], card_text.out_of, .{ i18n.int(g3.cleared), i18n.int(g3.total) }) },
+                    .{ .label = card_text.row_bleed, .value = number(buf[144..160], @as(u32, @intFromFloat(g3.blood_lost))) },
+                    .{ .label = card_text.row_acid, .value = number(buf[160..176], @as(u32, @intFromFloat(g3.acid_time))) },
                     .{ .label = card_text.row_lining, .value = number(buf[176..192], s.stats.tissue_hits) },
                     .{ .label = card_text.row_atlas, .value = atlas },
                     .{ .label = card_text.row_relaunches, .value = relaunches },
@@ -1061,8 +1316,9 @@ fn drawPause(app: *App, r: *Renderer) void {
     // The card is as tall as its rows: the options, then the controls, with the rows that depend on the
     // device and on what the drone carries.
     const tether_row = app.sim.has_tether;
+    const coat_row = app.sim.chapter == 2 and app.sim.g3.has_coat;
     const fullscreen_row = device == .kbm and app.window_keys.fullscreen.len > 0;
-    const rows: f32 = @floatFromInt(P.controls.len + @intFromBool(tether_row) + @intFromBool(fullscreen_row));
+    const rows: f32 = @floatFromInt(P.controls.len + @intFromBool(tether_row) + @intFromBool(coat_row) + @intFromBool(fullscreen_row));
     const o = card(r, 760, 104 + 30 * @as(f32, app_mod.PauseItem.count) + 48 + 23 * rows + 36, cyan);
     r.textCentered(.bold, cx, o[1] + 28, 46, white, tr(P.heading));
     var y = o[1] + 104;
@@ -1111,6 +1367,10 @@ fn drawPause(app: *App, r: *Renderer) void {
     }
     if (tether_row) {
         row(r, cx, y, P.tether);
+        y += 23;
+    }
+    if (coat_row) {
+        row(r, cx, y, P.coat);
         y += 23;
     }
     if (fullscreen_row) {
@@ -1172,7 +1432,19 @@ fn drawTitle(app: *App, r: *Renderer) void {
     r.textCentered(.regular, cx, y + 4, 14, alpha(dim, a * 0.9), tr(strings.title.choose));
     if (app.save.ch1_done) {
         var buf: [200]u8 = undefined;
-        r.textCentered(.regular, cx, y + 48, 16, alpha(gold, a * 0.9), if (app.save.ch2_done) tf(&buf, strings.title.progress_two, .{ i18n.char(app.save.grade), i18n.char(app.save.grade2) }) else tf(&buf, strings.title.progress_one, .{i18n.char(app.save.grade)}));
+        // the chapters finished in a row from the first, and their grades in order
+        var n: usize = 1;
+        while (n < campaign.playable_count and app.save.finished(n)) n += 1;
+        var grades: [2 * campaign.playable_count]u8 = undefined;
+        for (0..n) |i| {
+            grades[2 * i] = app.save.gradeIn(i);
+            grades[2 * i + 1] = ' ';
+        }
+        r.textCentered(.regular, cx, y + 48, 16, alpha(gold, a * 0.9), switch (n) {
+            1 => tf(&buf, strings.title.progress_one, .{i18n.char(app.save.grade)}),
+            2 => tf(&buf, strings.title.progress_two, .{ i18n.char(app.save.grade), i18n.char(app.save.grade2) }),
+            else => tf(&buf, strings.title.progress_many, .{ i18n.int(n), i18n.str(grades[0 .. 2 * n - 1]) }),
+        });
     }
     r.textCentered(.regular, cx, 850, 14, alpha(dim, a * 0.8), tr(strings.title.backdrop));
 }

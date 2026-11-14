@@ -138,6 +138,16 @@ pub const hud = struct {
     pub const valves_closing: T = .{ .en = "VALVES CLOSING IN {0} s", .uk = "КЛАПАНИ ЗАКРИЮТЬСЯ ЧЕРЕЗ {0} с" };
     pub const valves_open: T = .{ .en = "VALVES OPEN  ·  {0} s", .uk = "КЛАПАНИ ВІДКРИТІ  ·  {0} с" };
 
+    pub const site_antrum: T = .{ .en = "GASTRIC ANTRUM", .uk = "АНТРАЛЬНИЙ ВІДДІЛ ШЛУНКА" };
+    pub const to_pylorus: T = .{ .en = "TO PYLORUS", .uk = "ДО ВОРОТАРЯ" };
+    pub const ph_at_hull: T = .{ .en = "pH AT THE HULL", .uk = "pH БІЛЯ КОРПУСУ" };
+    pub const wave_overhead: T = .{ .en = "WALLS CLOSED — STAY IN A PIT", .uk = "СТІНКИ ЗІМКНУЛИСЯ — ЗАЛИШАЙТЕСЯ В ЯМЦІ" };
+    pub const wave_in: T = .{ .en = "ANTRAL WAVE IN {0} s", .uk = "АНТРАЛЬНА ХВИЛЯ ЧЕРЕЗ {0} с" };
+    pub const wave_passed: T = .{ .en = "WAVE PASSED", .uk = "ХВИЛЯ ПРОЙШЛА" };
+    pub const acid_on_hull: T = .{ .en = "ACID — HULL ERODING", .uk = "КИСЛОТА — КОРПУС РУЙНУЄТЬСЯ" };
+    pub const buffer_coat: T = .{ .en = "BUFFER COAT", .uk = "БУФЕРНЕ ПОКРИТТЯ" };
+    pub const coat_holding: T = .{ .en = "ACID — COAT HOLDING  ·  {0} s", .uk = "КИСЛОТА — ПОКРИТТЯ ТРИМАЄ  ·  {0} с" };
+
     pub const checkpoint_saved: T = .{ .en = "CHECKPOINT SAVED", .uk = "КОНТРОЛЬНУ ТОЧКУ ЗБЕРЕЖЕНО" };
     pub const hidden_route: T = .{ .en = "HIDDEN ROUTE LOGGED: BONE MARROW", .uk = "ЗАПИСАНО ПРИХОВАНИЙ МАРШРУТ: КІСТКОВИЙ МОЗОК" };
 
@@ -176,6 +186,12 @@ pub const hud = struct {
         .{ .en = "femoral vein → vena cava → right heart → lungs → left heart → aorta →", .uk = "стегнова вена → порожниста вена → праве серце → легені → ліве серце → аорта →" },
         .{ .en = "superior mesenteric artery → villus capillary → out through the tip", .uk = "верхня брижова артерія → капіляр ворсинки → назовні крізь верхівку" },
     };
+    pub const arrival3_chapter: T = .{ .en = "CHAPTER 3  ·  TRANSIT COMPLETE", .uk = "РОЗДІЛ 3  ·  ТРАНЗИТ ЗАВЕРШЕНО" };
+    pub const arrival3_place: T = .{ .en = "Gastric antrum", .uk = "Антральний відділ шлунка" };
+    pub const arrival3_route = [2]T{
+        .{ .en = "jejunal lumen, against the stream on the tether → duodenum →", .uk = "просвіт порожньої кишки, проти течії на тросі → дванадцятипала кишка →" },
+        .{ .en = "pylorus, on a wave of duodenogastric reflux → mucus gel of the antrum", .uk = "воротар, на хвилі дуоденогастрального рефлюксу → слизовий гель антрального відділу" },
+    };
     pub const transit: T = .{ .en = "TRANSIT — TEMPO LINK 1:1", .uk = "ТРАНЗИТ — МАСШТАБ ЧАСУ 1:1" };
     pub const transit_distance: T = .{ .en = "{0} cm to femoral junction", .uk = "{0} см до стегнової вени" };
 
@@ -195,6 +211,15 @@ pub const hud = struct {
             .uk = "{@move}: рух   {@up} / {@down}: вгору, вниз   {@boost}: прискорення   {@tether}: трос   {@examine}: скан   {@hint}: підказка   {@skip}: пропустити   {@pause}: пауза",
         },
     };
+    /// The strip for chapters that carry the tether and identify with a look rather than a scan pulse.
+    pub const controls_tether_identify: T = .{
+        .en = "WASD move   Space / C up, down   Shift boost   G tether   T identify   H hint   Tab skip   Esc pause",
+        .uk = "WASD рух   Пробіл / C вгору, вниз   Shift прискорення   G трос   T розпізнати   H підказка   Tab пропустити   Esc пауза",
+        .pad = &.{
+            .en = "{@move}: move   {@up} / {@down}: up, down   {@boost}: boost   {@tether}: tether   {@examine}: identify   {@hint}: hint   {@skip}: skip   {@pause}: pause",
+            .uk = "{@move}: рух   {@up} / {@down}: вгору, вниз   {@boost}: прискорення   {@tether}: трос   {@examine}: розпізнати   {@hint}: підказка   {@skip}: пропустити   {@pause}: пауза",
+        },
+    };
 };
 
 /// The cards that stop play: upgrades, the two failures, and the debrief.
@@ -211,6 +236,12 @@ pub const card = struct {
         .en = "Trigger both arms within a tenth of a second and they land as one Sync Strike. Two punches hit ten times as hard as one, enough to shatter calcium, with a shockwave that clears small organisms around you. Two rounds merge into a lance that pierces and does the damage of three.",
         .uk = "Запустіть обидві руки з різницею до десятої частки секунди — і вони спрацюють як один синхроудар. Два удари б’ють удесятеро сильніше за один — досить, щоб розбити кальцій, — і здіймають ударну хвилю, що змітає дрібні організми довкола. Два заряди зливаються у спис, що пробиває наскрізь і завдає шкоди, як три заряди.",
     };
+    pub const coat_kicker: T = .{ .en = "BUFFER RESERVOIR CHARGED  —  UPGRADE", .uk = "БУФЕРНИЙ РЕЗЕРВУАР ЗАРЯДЖЕНО  —  ПОКРАЩЕННЯ" };
+    pub const coat_name: T = .{ .en = "BUFFER COAT  +  CAUTERY BIT", .uk = "БУФЕРНЕ ПОКРИТТЯ  +  КОАГУЛЯЦІЙНЕ СВЕРДЛО" };
+    pub const coat_body: T = .{
+        .en = "The hull now carries a bicarbonate reserve. In acid it spends itself instead of the hull: twelve seconds, shown under the hull bar, refilled in neutral gel or in blood. There is nothing to press; it works when acid touches you. The drill bit now heats as it turns. Held on a vessel that the other arm is pressing flat with PUNCH, it welds the walls together.",
+        .uk = "Корпус тепер несе запас бікарбонату. У кислоті витрачається він, а не корпус: дванадцять секунд — шкала під смугою корпусу; запас поповнюється в нейтральному гелі або в крові. Натискати нічого не треба: покриття спрацьовує, щойно вас торкнеться кислота. А свердло тепер нагрівається під час обертання. Якщо тримати його на судині, яку друга рука сплющує УДАРОМ, воно зварює її стінки.",
+    };
     pub const install: T = .{ .en = "{@confirm} — install", .uk = "{@confirm} — встановити" };
 
     pub const signal_lost: T = .{ .en = "SIGNAL LOST", .uk = "СИГНАЛ ВТРАЧЕНО" };
@@ -219,6 +250,7 @@ pub const card = struct {
     pub const patient_lost: T = .{ .en = "PATIENT LOST", .uk = "ПАЦІЄНТКУ ВТРАЧЕНО" };
     pub const lost_vein: T = .{ .en = "Too much damage to healthy tissue, too many emboli. She did not make it.", .uk = "Забагато ушкоджень здорової тканини, забагато емболів. Вона не вижила." };
     pub const lost_gut: T = .{ .en = "Too much damage to the lining, too much virus spread. She did not make it.", .uk = "Забагато ушкоджень слизової, вірус поширився надто далеко. Вона не вижила." };
+    pub const lost_stomach: T = .{ .en = "Too much damage to the lining, too much blood lost. She did not make it.", .uk = "Забагато ушкоджень слизової, забагато втраченої крові. Вона не вижила." };
     pub const restart: T = .{ .en = "{@confirm} — restart the chapter", .uk = "{@confirm} — почати розділ заново" };
 
     pub const vein_kicker: T = .{ .en = "CHAPTER 1  ·  VEIN", .uk = "РОЗДІЛ 1  ·  ВЕНА" };
@@ -226,6 +258,8 @@ pub const card = struct {
     pub const gut_kicker: T = .{ .en = "CHAPTER 2  ·  INTESTINES", .uk = "РОЗДІЛ 2  ·  КИШКІВНИК" };
     pub const gut_title: T = .{ .en = "Up the lumen", .uk = "Вгору просвітом" };
 
+    pub const stomach_kicker: T = .{ .en = "CHAPTER 3  ·  STOMACH", .uk = "РОЗДІЛ 3  ·  ШЛУНОК" };
+    pub const stomach_title: T = .{ .en = "Out through the venule", .uk = "Назовні крізь венулу" };
     pub const row_stability: T = .{ .en = "Patient stability", .uk = "Стабільність пацієнтки" };
     pub const row_emboli: T = .{ .en = "Emboli that reached the lungs", .uk = "Емболів, що дісталися легень" };
     pub const row_tissue: T = .{ .en = "Hits on healthy tissue", .uk = "Влучань у здорову тканину" };
@@ -238,6 +272,10 @@ pub const card = struct {
     pub const row_spread: T = .{ .en = "Times the virus spread", .uk = "Випадків поширення вірусу" };
     pub const row_commensals: T = .{ .en = "Commensal bacteria killed", .uk = "Убито коменсальних бактерій" };
     pub const row_lining: T = .{ .en = "Hits on the lining", .uk = "Влучань у слизову" };
+    pub const row_colonies: T = .{ .en = "Colonised pits cleared", .uk = "Очищено колонізованих ямок" };
+    pub const row_acid: T = .{ .en = "Seconds of acid on bare hull", .uk = "Секунд у кислоті без покриття" };
+    pub const row_crushed: T = .{ .en = "Times caught between the walls", .uk = "Разів затиснуто між стінками" };
+    pub const row_bleed: T = .{ .en = "Seconds the vessel bled", .uk = "Секунд, що кровила судина" };
     pub const out_of_100: T = .{ .en = "{0} / 100", .uk = "{0} / 100" };
     pub const out_of: T = .{ .en = "{0} / {1}", .uk = "{0} / {1}" };
     pub const duration: T = .{ .en = "{0} min {1} s", .uk = "{0} хв {1} с" };
@@ -248,6 +286,9 @@ pub const card = struct {
     pub const note_gut_clean: T = .{ .en = "Nothing spread and her flora is intact. The villi will be back within the week.", .uk = "Вірус не поширився, і її флора ціла. Ворсинки відновляться за тиждень." };
     pub const note_gut_flora: T = .{ .en = "The virus is cleared, and so is some of what kept other things out.", .uk = "Вірус усунено — а разом із ним і частину того, що не пускало сюди інших." };
     pub const note_gut_spread: T = .{ .en = "Cleared. What spread will slow her recovery by a day or two.", .uk = "Усунено. Те, що встигло поширитися, затримає її одужання на день-два." };
+    pub const note_stomach_clean: T = .{ .en = "Margin clear and the vessel welded without delay. With the bacteria gone the crater will close in a few weeks.", .uk = "Край чистий, судину заварено без зволікань. Без бактерій кратер закриється за кілька тижнів." };
+    pub const note_stomach_bled: T = .{ .en = "The vessel is shut. She lost more blood than she needed to while it was open.", .uk = "Судину закрито. Поки вона була відкрита, пацієнтка втратила більше крові, ніж мусила." };
+    pub const note_stomach_lining: T = .{ .en = "The ulcer will heal. The pits you hit will take a few days longer than the rest.", .uk = "Виразка загоїться. Ямкам, у які ви влучили, знадобиться на кілька днів більше, ніж решті." };
     pub const to_route_map: T = .{ .en = "{@confirm} — route map", .uk = "{@confirm} — карта маршруту" };
     /// The caption beside the grade letter on the debrief.
     pub const grade: T = .{ .en = "GRADE", .uk = "ОЦІНКА" };
@@ -302,6 +343,11 @@ pub const pause = struct {
         .{ .en = "{@tether}", .uk = "{@tether}" },
         .{ .en = "Mucus Tether: attach to tissue, release on nothing", .uk = "Муциновий трос: зачепитися за тканину; у порожнечу — відпустити" },
     };
+    /// The chapter 3 upgrade, listed once the drone carries it. It has no control of its own.
+    pub const coat = [2]T{
+        .{ .en = "auto", .uk = "авто" },
+        .{ .en = "Buffer Coat: 12 s in acid; refills in neutral gel or blood", .uk = "Буферне покриття: 12 с у кислоті; поповнюється в нейтральному гелі або крові" },
+    };
     /// A control that exists only on the keyboard: the window's own shortcut, which the platform names.
     /// It is listed when the prompts are for the keyboard.
     pub const fullscreen: T = .{ .en = "Full screen", .uk = "На весь екран" };
@@ -324,6 +370,8 @@ pub const title = struct {
     pub const choose: T = .{ .en = "{@nav} select    {@confirm} choose", .uk = "{@nav} вибір    {@confirm} обрати" };
     pub const progress_one: T = .{ .en = "Chapter 1 complete  ·  grade {0}  ·  chapter 2 is open on the route map — {@map}", .uk = "Розділ 1 завершено  ·  оцінка {0}  ·  розділ 2 відкрито на карті маршруту — {@map}" };
     pub const progress_two: T = .{ .en = "Chapters 1 and 2 complete  ·  grades {0} and {1}  ·  {@map} for the route map", .uk = "Розділи 1 і 2 завершено  ·  оцінки {0} і {1}  ·  {@map} — карта маршруту" };
+    /// Three chapters or more: the number of the last one finished, then their grades in order.
+    pub const progress_many: T = .{ .en = "Chapters 1–{0} complete  ·  grades {1}  ·  {@map} for the route map", .uk = "Розділи 1–{0} завершено  ·  оцінки {1}  ·  {@map} — карта маршруту" };
     pub const backdrop: T = .{ .en = "Right great saphenous vein, 3.6 mm across. Every disc is a red blood cell, 7.8 µm.", .uk = "Права велика підшкірна вена, 3,6 мм у діаметрі. Кожен диск — еритроцит, 7,8 мкм." };
 };
 
@@ -666,6 +714,130 @@ pub const line = struct {
         .uk = "Ось. Вірус убивав клітини верхівок швидше, ніж крипти встигали їх заміняти: самі пеньки, і течію нічим загальмувати.",
     };
     pub const lines_on: T = .{ .en = "Line's on. Next stop is acid.", .uk = "Трос закріплено. Наступна зупинка — кислота." };
+
+    // ---- chapter 3: gastric antrum
+    pub const through_the_pylorus: T = .{
+        .en = "You're in. Back up the lumen on your own line, through the pylorus on a reflux wave, and into the gel before the acid found you.",
+        .uk = "Ви на місці. Назад просвітом по власному тросу, крізь воротар на хвилі рефлюксу — і в гель, перш ніж вас знайшла кислота.",
+    };
+    pub const this_is_the_antrum: T = .{
+        .en = "This is the antrum, the last centimetres of stomach before the pylorus. It grinds; that is most of what it does.",
+        .uk = "Це антральний відділ, останні сантиметри шлунка перед воротарем. Він перетирає — це майже все, що він робить.",
+    };
+    pub const look_down_at_the_pits: T = .{
+        .en = "Look down. The lining is a honeycomb of holes. Put your reticle on one and press {@examine}.",
+        .uk = "Подивіться вниз. Слизова — суцільні стільники з отворів. Наведіть приціл на один і натисніть {@examine}.",
+    };
+    pub const you_are_inside_the_gel: T = .{
+        .en = "You are flying inside the mucus gel. The cells under you pump bicarbonate into it, so it is neutral down here and pH 2 at the top, a third of a millimetre up.",
+        .uk = "Ви летите всередині слизового гелю. Клітини під вами закачують у нього бікарбонат, тож тут, унизу, він нейтральний, а нагорі, за третину міліметра звідси, — pH 2.",
+    };
+    pub const climb_and_watch_the_ph: T = .{
+        .en = "Climb until your pH reading drops below 4. Then come straight back down.",
+        .uk = "Підіймайтеся, доки показник pH не впаде нижче від 4. А тоді одразу назад.",
+    };
+    pub const thats_acid_come_down: T = .{ .en = "That is acid, and that is your hull fizzing. Down. Now.", .uk = "Це кислота, а шипить ваш корпус. Униз. Негайно." };
+    pub const the_hull_recovers_in_gel: T = .{
+        .en = "Back in neutral gel the hull's oxide skin regrows. That mends acid etching and nothing else.",
+        .uk = "У нейтральному гелі оксидна плівка корпусу відновлюється. Це лікує сліди кислоти — і більше нічого.",
+    };
+    pub const antral_wave_coming: T = .{
+        .en = "Antral wave, coming up behind you. Here the two walls meet completely.",
+        .uk = "Антральна хвиля, іде на вас іззаду. Тут дві стінки змикаються повністю.",
+    };
+    pub const get_into_a_pit: T = .{ .en = "The pits stay open. Get down into one and wait.", .uk = "Ямки лишаються відкритими. Спустіться в одну й чекайте." };
+    pub const it_has_closed_over_you: T = .{
+        .en = "And it has closed over you and gone on. Three of those a minute.",
+        .uk = "От вона зімкнулася над вами й пішла далі. Таких три на хвилину.",
+    };
+    pub const the_walls_have_you: T = .{ .en = "You're between the walls. Slide into a pit!", .uk = "Ви між стінками. Зісковзніть у ямку!" };
+    pub const the_ulcer_is_ahead: T = .{
+        .en = "The ulcer is ahead of you, away from the pylorus, three millimetres off. Stay in the gel on the way.",
+        .uk = "Виразка попереду, в бік від воротаря, за три міліметри. Дорогою тримайтеся в гелі.",
+    };
+    pub const corkscrews_in_the_gel: T = .{
+        .en = "Movement in the gel. Helicobacter: corkscrews. The gel that slows everything else is where they swim best.",
+        .uk = "У гелі щось рухається. Гелікобактер: штопори. Гель, що гальмує все інше, для них — найкраще місце для плавання.",
+    };
+    pub const they_outrun_your_rounds: T = .{
+        .en = "See that? Your rounds drag in the gel and they don't. From any distance they are gone before the round arrives.",
+        .uk = "Бачили? Ваші заряди в’язнуть у гелі, а вони — ні. З будь-якої відстані їх уже немає, коли заряд долітає.",
+    };
+    pub const strike_when_it_flares: T = .{
+        .en = "It holds still to flare before it darts. That is your opening: shoot it then, or punch it.",
+        .uk = "Перед кидком він завмирає і спалахує. Це ваш шанс: стріляйте саме тоді або бийте.",
+    };
+    pub const a_sync_punch_clears_them: T = .{
+        .en = "Several at once: a Sync punch clears everything within arm's reach, gel or no gel.",
+        .uk = "Коли їх кілька одразу — синхроудар змітає все на відстані руки, хоч у гелі, хоч без нього.",
+    };
+    pub const thats_the_ulcer: T = .{
+        .en = "There is the ulcer. The heaped rim, and past it a crater through the lining with no gel over it at all.",
+        .uk = "Ось виразка. Вал, а за ним — кратер крізь слизову, над яким зовсім немає гелю.",
+    };
+    pub const colonies_in_the_pits: T = .{
+        .en = "Four pits along the margin are packed with Helicobacter, and while they are, the edge cannot heal. Clear them. Rounds work, the drill works, both together work fastest.",
+        .uk = "Чотири ямки вздовж краю набиті гелікобактером, і поки це так, край не загоїться. Вичистіть їх. Діють заряди, діє свердло, а найшвидше — те й те разом.",
+    };
+    pub const the_gel_is_thin_here: T = .{
+        .en = "The gel is thin here and the surface is acid. Do your waiting deep inside a pit.",
+        .uk = "Гель тут тонкий, і на поверхні вже кислота. Перечікуйте глибоко в ямці.",
+    };
+    pub const their_ammonia: T = .{
+        .en = "Look at your pH over a colonised pit: neutral. They split urea into ammonia to make their own shelter. Borrow it.",
+        .uk = "Гляньте на pH над колонізованою ямкою: нейтральний. Вони розщеплюють сечовину до аміаку й роблять собі сховок. Скористайтеся ним.",
+    };
+    pub const one_pit_clean: T = .{
+        .en = "One pit clean. The ammonia went with them, so that mouth is acid again. Move on.",
+        .uk = "Одна ямка чиста. Аміак зник разом із ними, тож в усті знову кислота. Рухайтеся далі.",
+    };
+    pub const the_margin_is_clean: T = .{ .en = "The margin is clean. Now it can close.", .uk = "Край чистий. Тепер він зможе закритися." };
+    pub const mind_the_pit_walls: T = .{
+        .en = "Mind the pit walls. The neck of each pit is where this lining renews itself.",
+        .uk = "Обережно зі стінками ямок. У шийці кожної ямки ця слизова оновлюється.",
+    };
+    pub const wave_coming_into_a_pit: T = .{ .en = "Wave coming. Into a pit.", .uk = "Іде хвиля. У ямку." };
+    pub const wave_coming_hold_the_bed: T = .{
+        .en = "Wave coming. It will squirt acid back through the crater: tether to the bed.",
+        .uk = "Іде хвиля. Вона жене кислоту назад крізь кратер: причепіться тросом до дна.",
+    };
+    pub const thats_acid_on_the_hull: T = .{ .en = "That's acid on bare hull. Get back into the gel.", .uk = "Кислота на голому корпусі. Повертайтеся в гель." };
+    pub const coat_is_live: T = .{
+        .en = "Buffer Coat is live. Twelve seconds of acid before it is spent, and it refills in neutral gel or in blood.",
+        .uk = "Буферне покриття працює. Дванадцять секунд у кислоті, доки воно не вичерпається; відновлюється в нейтральному гелі або в крові.",
+    };
+    pub const the_vessel_is_in_the_bed: T = .{
+        .en = "With the colonies gone the slough has lifted, and the vessel under it is bleeding freely. It is in the bed of the crater, half a millimetre down. No gel, no pits. Go.",
+        .uk = "Колоній немає, наліт відійшов, і судина під ним кровить на повну. Вона на дні кратера, на пів міліметра нижче. Ні гелю, ні ямок. Уперед.",
+    };
+    pub const coats_spent: T = .{ .en = "Coat's spent. Get to something neutral.", .uk = "Покриття вичерпано. Шукайте щось нейтральне." };
+    pub const there_it_is_pulsing: T = .{
+        .en = "There. An arteriole with one wall eaten away, pulsing. Stay out of the jet. The blood around it is neutral, so you can work here.",
+        .uk = "Ось. Артеріола з роз’їденою стінкою, пульсує. Не потрапляйте під струмінь. Кров довкола неї нейтральна, тож тут можна працювати.",
+    };
+    pub const press_it_then_weld: T = .{
+        .en = "Coaptive cautery. One arm on PUNCH to press the walls together, the other on DRILL to weld them while they are pressed. Both at once.",
+        .uk = "Коаптаційна коагуляція. Одна рука — УДАР, щоб притиснути стінки одну до одної, друга — СВЕРДЛО, щоб зварити їх, поки вони притиснуті. Обидві разом.",
+    };
+    pub const heat_alone_wont_hold: T = .{
+        .en = "Heat alone won't hold. While blood runs through it, the blood carries the heat away. Press it shut with the other arm.",
+        .uk = "Самого нагріву замало. Поки крізь судину тече кров, вона забирає тепло. Притисніть її другою рукою.",
+    };
+    pub const its_pressed_heat_it_now: T = .{ .en = "It's pressed flat. Heat it now, before it springs open.", .uk = "Її притиснуто. Грійте зараз, поки вона не розкрилася." };
+    pub const half_welded: T = .{
+        .en = "Half welded. Let the bit cool if you must; the weld keeps for a few seconds.",
+        .uk = "Наполовину зварено. Якщо треба, дайте свердлу охолонути: шов кілька секунд протримається.",
+    };
+    pub const not_rounds_at_a_vessel: T = .{ .en = "Not rounds. You will only open it further.", .uk = "Тільки не заряди. Ви лише розкриєте її ще більше." };
+    pub const its_sealed: T = .{ .en = "Sealed. Nothing is coming through it. The bleed is stopped.", .uk = "Заварено. Крізь неї нічого не проходить. Кровотечу зупинено." };
+    pub const marker_on_a_venule: T = .{
+        .en = "Your way out is the venule the crater has laid bare, just beside you. Without the blood this bed is acid again, so don't linger.",
+        .uk = "Ваш вихід — венула, яку оголив кратер, зовсім поруч. Без крові на цьому дні знову кислота, тож не затримуйтеся.",
+    };
+    pub const gastric_vein_next: T = .{
+        .en = "You're in. Gastric vein, portal vein, liver, heart, lungs, and round again to her right kidney.",
+        .uk = "Ви всередині. Шлункова вена, ворітна вена, печінка, серце, легені — і ще одне коло, до її правої нирки.",
+    };
 
     pub const link_re_established: T = .{ .en = "Link re-established. You're back at the last checkpoint.", .uk = "Зв’язок відновлено. Ви знову на останній контрольній точці." };
 };
@@ -1023,6 +1195,89 @@ pub const hint = struct {
         },
     };
     pub const g_exit: T = .{ .en = "Fly through the ring ahead of you.", .uk = "Пролетіть крізь кільце попереду." };
+    pub const s_pits = [3]T{
+        .{ .en = "The pits are the dark holes in the honeycomb under you.", .uk = "Ямки — це темні отвори в стільниках під вами." },
+        .{
+            .en = "Tilt down until a pit is under the reticle, then press {@examine}.",
+            .uk = "Нахиляйте погляд униз, доки під прицілом не опиниться ямка, і натисніть {@examine}.",
+        },
+        .{
+            .en = "Any part of the lining will do: put the reticle on the surface or on a hole in it and press {@examine}.",
+            .uk = "Підійде будь-яка ділянка слизової: наведіть приціл на поверхню або на отвір у ній і натисніть {@examine}.",
+        },
+    };
+    pub const s_gradient = [3]T{
+        .{ .en = "The pH readout is at the top right. It falls as you rise.", .uk = "Показник pH — угорі праворуч. Що вище ви підіймаєтеся, то він нижчий." },
+        .{
+            .en = "Go up with {@up} until the reading is under 4, then down with {@down} until it is back near 7.",
+            .uk = "Підіймайтеся — {@up}, доки показник не стане меншим за 4, а тоді спускайтеся — {@down}, доки він не повернеться до 7.",
+        },
+        .{
+            .en = "Hold {@up} for about a second, wait for the hull bar to flicker, then hold {@down} until the surface stops you.",
+            .uk = "Потримайте {@up} приблизно секунду, дочекайтеся, поки смуга корпусу замиготить, а тоді тримайте {@down}, доки вас не зупинить поверхня.",
+        },
+    };
+    pub const s_wave = [3]T{
+        .{ .en = "Under a wave the only open space is inside a pit.", .uk = "Під хвилею вільне місце є тільки всередині ямки." },
+        .{
+            .en = "Fly over the nearest dark hole and descend into it with {@down}. Stay below its mouth until the roof lifts.",
+            .uk = "Зависніть над найближчим темним отвором і спустіться в нього — {@down}. Залишайтеся нижче від устя, доки стеля не підніметься.",
+        },
+        .{
+            .en = "Or aim down into a pit and press {@tether}: the line pulls you in and holds you there.",
+            .uk = "Або наведіть приціл у глиб ямки й натисніть {@tether}: трос затягне вас усередину й утримає.",
+        },
+    };
+    pub const s_swim = [3]T{
+        .{ .en = "Rounds fired from a distance never arrive. Let them come to you.", .uk = "Заряди, випущені здалеку, не долітають. Дайте їм підійти самим." },
+        .{
+            .en = "A swimmer stops and flares for most of a second before it darts. Shoot or punch it while it is flaring.",
+            .uk = "Перед кидком плавець зупиняється і майже секунду спалахує. Стріляйте або бийте саме в цю мить.",
+        },
+        .{
+            .en = "With PUNCH on both arms, trigger both at once when they are close: the Sync punch kills every swimmer within arm's reach.",
+            .uk = "Поставте УДАР на обидві руки й запустіть обидві разом, коли вони близько: синхроудар убиває кожного плавця на відстані руки.",
+        },
+    };
+    pub const s_margin = [3]T{
+        .{
+            .en = "The marker is over a colonised pit. Hover in its mouth: the pH there is neutral.",
+            .uk = "Маркер стоїть над колонізованою ямкою. Зависніть у її усті: pH там нейтральний.",
+        },
+        .{
+            .en = "From the mouth, fire straight down into the pale mass, or drill it. Both arms at once is quickest.",
+            .uk = "З устя стріляйте просто вниз у бліду масу або свердліть її. Найшвидше — обома руками одночасно.",
+        },
+        .{
+            .en = "Between pits you are in acid: cross quickly, and when a wave is called, drop into the nearest pit, cleared or not.",
+            .uk = "Між ямками ви в кислоті: перелітайте швидко, а коли оголошено хвилю, пірнайте в найближчу ямку, чисту чи ні.",
+        },
+    };
+    pub const s_cross = [3]T{
+        .{
+            .en = "The coat lasts twelve seconds in acid. The crater is less than that across.",
+            .uk = "Покриття тримається в кислоті дванадцять секунд. Перелетіти кратер можна швидше.",
+        },
+        .{
+            .en = "Follow the marker over the rim and down to the bed. Hold {@boost} to go faster.",
+            .uk = "Летіть за маркером через вал і вниз, до дна. Тримайте {@boost}, щоб прискоритися.",
+        },
+        .{
+            .en = "The blood around the vessel is neutral: once you are within a fifth of a millimetre of it, the coat refills.",
+            .uk = "Кров довкола судини нейтральна: щойно ви опинитеся за п’яту частину міліметра від неї, покриття почне відновлюватися.",
+        },
+    };
+    pub const s_cautery = [3]T{
+        .{ .en = "Pressure and heat together. Either one alone does nothing.", .uk = "Тиск і нагрів разом. Окремо не діє ні те, ні те." },
+        .{
+            .en = "Put PUNCH on one arm and DRILL on the other. Come at the vessel from the side, out of the jet, until the drill bites; then hold both.",
+            .uk = "Поставте УДАР на одну руку і СВЕРДЛО на другу. Підійдіть до судини збоку, поза струменем, доки свердло не візьметься; тоді тримайте обидві.",
+        },
+        .{
+            .en = "Hold {@arm_left} and {@arm_right} together. Release the drill arm when HEAT is nearly full and hold it again when it has cooled; the weld keeps.",
+            .uk = "Тримайте {@arm_left} і {@arm_right} разом. Відпустіть руку зі свердлом, коли НАГРІВ майже повний, і натисніть знову, коли воно охолоне; шов протримається.",
+        },
+    };
     pub const wait: T = .{ .en = "Wait for it.", .uk = "Зачекайте." };
 };
 
@@ -1070,4 +1325,13 @@ pub const objective = struct {
         .uk = "Причепіться тросом до ворсинки — наведіть приціл із відстані до 0,4 мм і натисніть {@tether}",
     };
     pub const g_flume: T = .{ .en = "Cross the blunted stretch upstream on the tether", .uk = "Подолайте ділянку сплощених ворсинок проти течії на тросі" };
+    pub const s_arrive: T = .{ .en = "Arrival — gastric antrum", .uk = "Прибуття — антральний відділ шлунка" };
+    pub const s_pits: T = .{ .en = "Identify a gastric pit — aim at one and press {@examine}", .uk = "Розпізнайте шлункову ямку — наведіть приціл і натисніть {@examine}" };
+    pub const s_gradient: T = .{ .en = "Climb until the pH is below 4 — pH {0}", .uk = "Підіймайтеся, доки pH не стане нижчим за 4 — pH {0}" };
+    pub const s_gradient_back: T = .{ .en = "Back down into neutral gel — pH {0}", .uk = "Назад у нейтральний гель — pH {0}" };
+    pub const s_wave: T = .{ .en = "Shelter inside a gastric pit until the wave has passed", .uk = "Сховайтеся в шлунковій ямці, доки хвиля не пройде" };
+    pub const s_swim: T = .{ .en = "Helicobacter in the gel: {0} — strike when one flares", .uk = "Гелікобактер у гелі: {0} — бийте, коли спалахне" };
+    pub const s_margin: T = .{ .en = "Colonised pits cleared {0}/{1}  ·  Swimmers {2}", .uk = "Очищено колонізованих ямок: {0}/{1}  ·  Плавців: {2}" };
+    pub const s_cross: T = .{ .en = "Cross the crater to the bleeding vessel", .uk = "Перелетіть кратер до судини, що кровить" };
+    pub const s_cautery: T = .{ .en = "Press with PUNCH and weld with DRILL together — sealed {0}%", .uk = "Притискайте УДАРОМ і зварюйте СВЕРДЛОМ одночасно — заварено {0}%" };
 };

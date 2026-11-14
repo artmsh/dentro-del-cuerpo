@@ -120,7 +120,9 @@ chain; the post pass reads that chain for bloom, applies exposure, ACES tone map
 and damage flashes, and draws the HUD in the same pass. There are no vertex descriptors: vertex and instance
 data are pulled from buffers by `vertex_id` and `instance_id`, which keeps pipeline setup to a few lines.
 Materials are a small integer id per instance switched in one fragment function (vessel wall, cell membrane,
-metal, fibrin, biofilm, leaflet, clot, calcified, mucosa, crypt floor, hologram, unlit). The first-person arms are drawn after
+metal, fibrin, biofilm, leaflet, clot, calcified, mucosa, crypt floor, hologram, unlit). Chapter 3 adds no
+material: its lining is the vessel-wall material with one cobble per surface cell, its gel the biofilm
+material, the ulcer bed fibrin. The first-person arms are drawn after
 the world in the front slice of the depth range with their own projection, so they never clip into tissue.
 
 Audio is a procedural synthesiser; there are no sample files. The game thread sends events through a
@@ -328,15 +330,18 @@ recognised by the window procedure itself.
 ## Simulation
 
 One world unit is one micrometre. The anatomy of a chapter is a set of analytic functions in one module:
-`src/vein.zig` (centreline, wall radius, valve cusp surfaces, pulsed parabolic flow) and `src/gut.zig`
-(villus lattice, fold profile, canopy flow, the travelling contraction ring). The mesh, the collision, the
+`src/vein.zig` (centreline, wall radius, valve cusp surfaces, pulsed parabolic flow), `src/gut.zig`
+(villus lattice, fold profile, canopy flow, the travelling contraction ring) and `src/stomach.zig` (the
+lattice of pits, the ulcer's rim and crater, the thickness of the gel and the pH at any point in it, the
+antral wave). The mesh, the collision, the
 flow that advects the drone, and the ray casts for the reticle and the weapons are all derived from those
 functions, so what the player sees, hits and is carried by cannot drift apart.
 
 `src/game.zig` holds the rules shared by every chapter: the drone, the two arms and their tools, the entity
 table, damage, the guide's triggers. It has no rendering or platform imports and runs headless. Chapter 1's
 script lives there as well, since it was written first; from chapter 2 on a chapter is a module
-(`src/ch2.zig`) that owns its state, stage script, organisms and upgrade, and `game.zig` dispatches to it at
+(`src/ch2.zig`, `src/ch3.zig`) that owns its state, stage script, organisms and upgrade, and `game.zig`
+dispatches to it at
 a fixed set of points (stage entry, movement and collision, focus, each tool's hit, entity update, grading).
 New chapters follow the chapter 2 shape.
 
@@ -358,7 +363,7 @@ The simulation being headless makes five layers possible.
   descent as buttons, tools reached by stepping.
 - `dentro --shots <dir>` renders offscreen through the real GPU pipeline and writes one image per screen:
   the title and its menu, the route map with each chapter selected, the briefing pages, every stage of
-  both chapters, the upgrade, failure and debrief cards, the pause screen with and without the tether row,
+  every chapter, the upgrade, failure and debrief cards, the pause screen with and without the tether row,
   the language switch, and the longest line, hint and atlas entry in the subtitle box. The stages are
   photographed on a timer while the scripted pilot flies, and the pilot passes through some of them in less
   than the interval, so the run also keeps a copy of the application as it stood when each stage began.
@@ -451,7 +456,10 @@ extreme numerals. Writing creates the directory and any missing parents, writes 
 file beside the save, flushes it to disk and renames it over the save, so a crash leaves the old file or
 the new one. A failed save is reported on stderr once per run of failures instead of once per attempt, and
 play continues. For each chapter the file keeps the best grade flown and, among runs of equal grade, the
-latest (`Save.supersedes`); the two chapters used to differ on equal grades.
+latest (`Save.supersedes`); the first two chapters used to differ on equal grades. Fields are only ever
+appended. Chapters 3 and 4 follow the language, which is therefore written as `-` when the player has
+chosen none and a later field is set; a save with nothing in those fields is written byte for byte as before
+they existed, and an older build reads a newer file by stopping where its own fields end.
 
 Quitting needs one piece of care: AppKit's `terminate:` calls `exit()` from inside the event pump, so the
 cleanup that must precede exit (stopping the audio thread, re-associating the mouse) runs from
@@ -489,9 +497,10 @@ the user's display-language list (`GetUserPreferredUILanguages`).
 
 | | |
 |---|---|
-| `src/vein.zig`, `src/gut.zig` | anatomy of chapters 1 and 2 as analytic functions: shape, flow, collision, ray casts |
+| `src/vein.zig`, `src/gut.zig`, `src/stomach.zig` | anatomy of chapters 1 to 3 as analytic functions: shape, flow, collision, ray casts |
 | `src/game.zig` | shared rules: drone, arms and tools, entities, guide triggers; chapter 1's script |
 | `src/ch2.zig` | chapter 2: state, stage script, organisms, tether |
+| `src/ch3.zig` | chapter 3: state, stage script, acid and the coat, swimmers and colonies, the weld |
 | `src/guide.zig`, `src/campaign.zig` | the atlas and comms queue; the chapter table (both bilingual) |
 | `src/i18n.zig`, `src/strings.zig`, `src/l10n.zig` | languages, templates and plurals; the string catalogue; the tests that walk all text |
 | `src/bot.zig` | scripted pilot used by the tests and `--demo` |

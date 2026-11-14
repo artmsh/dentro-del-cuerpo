@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) void {
     inline for (.{
         .{ 0, "usage: dentro", &[_][]const u8{"--help"} },
         .{ 0, "usage: dentro", &[_][]const u8{ "--demo", "-h" } },
-        .{ 2, "--chapter takes 1 or 2", &[_][]const u8{"--chapter"} },
+        .{ 2, "--chapter takes a number from 1 to", &[_][]const u8{"--chapter"} },
         .{ 2, "--shots takes a directory", &[_][]const u8{"--shots"} },
         .{ 2, "--icon takes a file name", &[_][]const u8{"--icon"} },
         .{ 2, "--pad goes with --demo", &[_][]const u8{"--pad"} },

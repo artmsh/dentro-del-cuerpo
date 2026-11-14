@@ -38,6 +38,18 @@ pub const Topic = enum(u8) {
     rotavirus,
     commensal,
     viral_factory,
+    // chapter 3: gastric antrum
+    gastric_pit,
+    surface_mucous_cell,
+    mucus_gel,
+    gastric_juice,
+    antral_wave,
+    helicobacter,
+    colonised_pit,
+    ulcer_margin,
+    ulcer_bed,
+    bleeding_vessel,
+    food_particle,
 
     pub const count = @typeInfo(Topic).@"enum".field_names.len;
 };
@@ -415,6 +427,142 @@ pub fn entry(t: Topic) Entry {
                 .uk = "Віроплазми — це фабрики, які вірус будує всередині клітини. Тут сусідні клітини злилися довкола них, а келихоподібні клітини поховали все це під слизом. Розсвердліть шапку й стріляйте в пролом, поки він відкритий; увесь цей час купол кидатиме у вас везикули.",
             },
             .hostile = true,
+        },
+        .gastric_pit => .{
+            .name = .{ .en = "Gastric pit", .uk = "Шлункова ямка" },
+            .size = .{ .en = "70 µm across, 0.2 mm deep", .uk = "70 мкм завширшки, 0,2 мм завглибшки" },
+            .short = .{
+                .en = "Gastric pit. The surface dips into a tube, and the glands open into the bottom of it. It is full of gel, and it stays open when the walls meet.",
+                .uk = "Шлункова ямка. Поверхня занурюється в трубку, і на її дні відкриваються залози. Ямка повна гелю й лишається відкритою, коли стінки змикаються.",
+            },
+            .deep = .{
+                .en = "A foveola. In the antrum the pits take up half the thickness of the mucosa; the glands under them make mucus and the hormone gastrin rather than acid, which comes from the body of the stomach above. The stem cells sit in the neck where pit meets gland, and from there new surface cells climb up and out in about three days. Do not fire into one.",
+                .uk = "Фовеола. В антральному відділі ямки займають половину товщини слизової; залози під ними виробляють слиз і гормон гастрин, а не кислоту — та надходить із тіла шлунка вище. Стовбурові клітини сидять у шийці, де ямка переходить у залозу, і звідти нові поверхневі клітини підіймаються назовні приблизно за три дні. Не стріляйте в ямку.",
+            },
+        },
+        .surface_mucous_cell => .{
+            .name = .{ .en = "Surface mucous cells", .uk = "Поверхневі слизові клітини" },
+            .size = .{ .en = "cells 20 µm tall", .uk = "клітини 20 мкм заввишки" },
+            .short = .{
+                .en = "Surface mucous cells. One sheet of them lines the whole stomach, and each one secretes the gel you are flying in.",
+                .uk = "Поверхневі слизові клітини. Один їхній шар вистеляє весь шлунок, і кожна виділяє гель, у якому ви летите.",
+            },
+            .deep = .{
+                .en = "Each cell makes mucin and pumps bicarbonate into it, so the gel holds a gradient: neutral against the cells, acid at the lumen. That gradient is the whole defence; the cells themselves would dissolve at pH 2. They are replaced every three to five days. Aspirin and ibuprofen cut the prostaglandins that drive both the mucus and the bicarbonate, which is the other common way to get an ulcer.",
+                .uk = "Кожна клітина виробляє муцин і закачує в нього бікарбонат, тож гель тримає градієнт: біля клітин він нейтральний, біля просвіту — кислий. Цей градієнт і є весь захист: самі клітини при pH 2 розчинилися б. Вони оновлюються кожні три-п’ять днів. Аспірин та ібупрофен пригнічують простагландини, від яких залежать і слиз, і бікарбонат, — це другий поширений шлях до виразки.",
+            },
+        },
+        .mucus_gel => .{
+            .name = .{ .en = "Mucus gel", .uk = "Слизовий гель" },
+            .size = .{ .en = "0.3 mm thick", .uk = "0,3 мм завтовшки" },
+            .short = .{
+                .en = "The mucus gel. A third of a millimetre of mucin stuck to the lining, neutral at the bottom and acid at the top.",
+                .uk = "Слизовий гель. Третина міліметра муцину, що прилип до слизової: знизу нейтральний, згори кислий.",
+            },
+            .deep = .{
+                .en = "Two layers: a firm one that stays on the cells and a loose one that the waves shear off and the cells replace. Bicarbonate from below meets acid from above inside it, and the pH climbs from 2 to 7 over forty times your length. Acid from the glands gets out through it in narrow channels without mixing. Your rounds drag in it. Helicobacter does not: its spiral body turns like a screw, and its ammonia thins the gel around it.",
+                .uk = "Два шари: щільний, який тримається на клітинах, і пухкий, який хвилі здирають, а клітини відновлюють. Бікарбонат знизу зустрічається в ньому з кислотою згори, і pH зростає від 2 до 7 на відстані сорока ваших корпусів. Кислота із залоз виходить крізь нього вузькими каналами, не змішуючись. Ваші заряди в ньому в’язнуть. Гелікобактер — ні: його спіральне тіло вгвинчується, як шуруп, а його аміак розріджує гель довкола.",
+            },
+        },
+        .gastric_juice => .{
+            .name = .{ .en = "Gastric juice", .uk = "Шлунковий сік" },
+            .size = .{ .en = "pH 2, hydrochloric acid", .uk = "pH 2, соляна кислота" },
+            .short = .{
+                .en = "Gastric juice. Hydrochloric acid at pH 2, with pepsin in it. Your hull is not rated for it.",
+                .uk = "Шлунковий сік. Соляна кислота з pH 2 і пепсином. Ваш корпус на це не розрахований.",
+            },
+            .deep = .{
+                .en = "Parietal cells in the body of the stomach pump hydrogen ions against a gradient of a million to one. The acid kills most of what is swallowed and unfolds proteins so that pepsin can cut them. Two litres a day. The stomach does not digest itself only because of the gel, and where the gel fails you get what is ahead of you.",
+                .uk = "Парієтальні клітини тіла шлунка качають іони водню проти градієнта мільйон до одного. Кислота вбиває більшість проковтнутого й розгортає білки, щоб пепсин міг їх різати. Два літри на добу. Шлунок не перетравлює сам себе лише завдяки гелю, а там, де гель не впорався, виходить те, що у вас попереду.",
+            },
+            .hostile = true,
+        },
+        .antral_wave => .{
+            .name = .{ .en = "Antral wave", .uk = "Антральна хвиля" },
+            .size = .{ .en = "three a minute", .uk = "три на хвилину" },
+            .short = .{
+                .en = "That is the opposite wall. An antral wave: here the stomach closes completely to grind what it holds.",
+                .uk = "Це протилежна стінка. Антральна хвиля: тут шлунок змикається повністю, щоб перетерти свій вміст.",
+            },
+            .deep = .{
+                .en = "A pacemaker in the stomach wall fires three times a minute and a ring of contraction runs down to the pylorus. The pylorus shuts before the ring arrives, so the contents are squeezed back through the closing ring and sheared: that is how solids are ground to under a millimetre or two before anything is let through. Where the walls meet, only a pit or the ulcer crater stays open.",
+                .uk = "Водій ритму в стінці шлунка спрацьовує тричі на хвилину, і кільце скорочення біжить униз до воротаря. Воротар закривається раніше, ніж кільце до нього дійде, тож вміст вичавлюється назад крізь кільце, що змикається, і перетирається: так тверда їжа подрібнюється до частинок, менших за міліметр-два, перш ніж щось пропустять далі. Там, де стінки зійшлися, відкритими лишаються тільки ямки й кратер виразки.",
+            },
+            .hostile = true,
+        },
+        .helicobacter => .{
+            .name = .{ .en = "Helicobacter pylori", .uk = "Helicobacter pylori" },
+            .size = .{ .en = "3 µm spiral rod", .uk = "спіральна паличка 3 мкм" },
+            .short = .{
+                .en = "Helicobacter pylori. A spiral rod with a tuft of flagella, and the cause of this ulcer.",
+                .uk = "Helicobacter pylori. Спіральна паличка з пучком джгутиків — причина цієї виразки.",
+            },
+            .deep = .{
+                .en = "Half the people alive carry it. It survives the stomach by not living in the acid: it drills into the gel and sits against the cells, and its urease splits urea into ammonia, which neutralises acid around it and thins the gel so it can swim. The inflammation it causes weakens the lining for years. Clearing it lets most ulcers heal and stay healed, a finding that earned Marshall and Warren a Nobel prize in 2005.",
+                .uk = "Його носить половина людства. У шлунку він виживає тому, що в кислоті не живе: вгвинчується в гель і тримається біля клітин, а його уреаза розщеплює сечовину до аміаку, який нейтралізує кислоту довкола й розріджує гель, щоб у ньому можна було плавати. Запалення, яке він спричиняє, роками ослаблює слизову. Якщо його знищити, більшість виразок гоїться й не повертається — за це відкриття Маршалл і Воррен отримали Нобелівську премію 2005 року.",
+            },
+            .hostile = true,
+        },
+        .colonised_pit => .{
+            .name = .{ .en = "Colonised pit", .uk = "Колонізована ямка" },
+            .size = .{ .en = "plug 50 µm across", .uk = "корок 50 мкм завширшки" },
+            .short = .{
+                .en = "A pit packed with Helicobacter, stuck to the cells of its wall. The gel over it is neutral: that is their ammonia.",
+                .uk = "Ямка, набита гелікобактером, що прилип до клітин її стінки. Гель над нею нейтральний: це їхній аміак.",
+            },
+            .deep = .{
+                .en = "Most of them swim free in the gel; a fifth or so attach to the surface cells and feed on what leaks from them. A colony in a pit sheds swimmers and keeps the edge of the ulcer inflamed, so new epithelium cannot grow in across the crater. Break the colony up: rounds from the mouth of the pit, or the drill. Miss, and you hit the neck of the pit.",
+                .uk = "Більшість із них вільно плаває в гелі; приблизно п’ята частина прикріплюється до поверхневих клітин і живиться тим, що з них просочується. Колонія в ямці розсилає плавців і підтримує запалення на краю виразки, тому новий епітелій не може наповзти на кратер. Розбийте колонію: зарядами з устя ямки або свердлом. Схибите — влучите в шийку ямки.",
+            },
+            .hostile = true,
+        },
+        .ulcer_margin => .{
+            .name = .{ .en = "Ulcer margin", .uk = "Край виразки" },
+            .size = .{ .en = "rim 0.1 mm high", .uk = "вал 0,1 мм заввишки" },
+            .short = .{
+                .en = "The margin of the ulcer. Swollen, inflamed mucosa heaped up around the hole, with no pits in its last third of a millimetre.",
+                .uk = "Край виразки. Набрякла, запалена слизова валом довкола отвору; на останній третині міліметра перед ним ямок немає.",
+            },
+            .deep = .{
+                .en = "Healing starts here. Cells at the edge flatten and crawl out over the bed, then pits and glands re-form behind them. That is why the band next to the rim is smooth: it is new epithelium that has not yet folded into pits. It makes little mucus, so the gel thins to nothing before the rim. An edge that stays inflamed never closes.",
+                .uk = "Загоєння починається звідси. Клітини на краю сплощуються й наповзають на дно, а вже за ними заново формуються ямки й залози. Тому смуга біля валу гладенька: це новий епітелій, який ще не зібрався в ямки. Слизу він виробляє мало, тож гель сходить нанівець ще до валу. Край, що лишається запаленим, не закриється ніколи.",
+            },
+        },
+        .ulcer_bed => .{
+            .name = .{ .en = "Ulcer bed", .uk = "Дно виразки" },
+            .size = .{ .en = "0.5 mm below the surface", .uk = "на 0,5 мм нижче від поверхні" },
+            .short = .{
+                .en = "The bed of the ulcer. Through the mucosa and into the layer under it; what you see is fibrin, dead tissue and new capillaries.",
+                .uk = "Дно виразки. Крізь слизову і в шар під нею; те, що ви бачите, — фібрин, мертва тканина й нові капіляри.",
+            },
+            .deep = .{
+                .en = "An erosion stops within the mucosa. An ulcer goes through the muscularis mucosae into the submucosa, where the larger vessels run, and that is why ulcers bleed. The grey-white coat is fibrin and dead cells; under it is granulation tissue, capillary loops and fibroblasts building a scar from the bottom up. No gel covers any of it, so the juice here is at full strength.",
+                .uk = "Ерозія зупиняється в межах слизової. Виразка проходить крізь м’язову пластинку слизової в підслизовий шар, де йдуть більші судини, — тому виразки й кровлять. Сіро-білий наліт — це фібрин і мертві клітини; під ним грануляційна тканина: петлі капілярів і фібробласти, що будують рубець знизу вгору. Гелю тут немає зовсім, тож сік діє на повну силу.",
+            },
+        },
+        .bleeding_vessel => .{
+            .name = .{ .en = "Eroded arteriole", .uk = "Роз’їдена артеріола" },
+            .size = .{ .en = "60 µm across", .uk = "60 мкм завширшки" },
+            .short = .{
+                .en = "An arteriole the acid has eaten into. It bleeds in pulses, and the blood around it is neutral.",
+                .uk = "Артеріола, яку роз’їла кислота. Вона кровить поштовхами, а кров довкола неї нейтральна.",
+            },
+            .deep = .{
+                .en = "The acid dissolved one side of the vessel wall, and acid also keeps a clot from holding: below pH 6 platelets stop sticking and pepsin digests fibrin. Endoscopists close a vessel like this by coaptive coagulation: press the probe on hard enough to flatten the vessel, then heat, so the two walls weld to each other. Heat without pressure fails because flowing blood carries it away. The vessels that put people in hospital are ten times this size.",
+                .uk = "Кислота розчинила один бік стінки судини, і вона ж не дає втриматися згустку: при pH, нижчому за 6, тромбоцити перестають злипатися, а пепсин перетравлює фібрин. Ендоскопісти закривають таку судину коаптаційною коагуляцією: притискають зонд так сильно, щоб сплющити судину, а тоді нагрівають — і дві стінки зварюються між собою. Нагрів без притискання не діє, бо кров, що тече, забирає тепло. Судини, з якими потрапляють до лікарні, удесятеро більші за цю.",
+            },
+        },
+        .food_particle => .{
+            .name = .{ .en = "Food particle", .uk = "Частинка їжі" },
+            .size = .{ .en = "20–50 µm", .uk = "20–50 мкм" },
+            .short = .{
+                .en = "A particle of her last meal, ground small enough to leave.",
+                .uk = "Частинка її останньої їжі, перетерта достатньо дрібно, щоб вийти.",
+            },
+            .deep = .{
+                .en = "The pylorus passes liquid freely and holds solids back until the antrum has ground them to under a millimetre or two. This one is a hundredth of that: a starch grain or a shred of plant cell wall, already on its way. Between meals a different, stronger wave sweeps out whatever would not grind.",
+                .uk = "Воротар вільно пропускає рідину, а тверде затримує, доки антральний відділ не перетре його до частинок, менших за міліметр-два. Ця — у сто разів дрібніша: крохмальне зерно або шматочок стінки рослинної клітини, що вже прямує до виходу. Між прийомами їжі інша, сильніша хвиля вимітає все, що перетерти не вдалося.",
+            },
         },
     };
 }

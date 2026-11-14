@@ -8,6 +8,8 @@ const vein_mod = @import("vein.zig");
 const guide = @import("guide.zig");
 const gut_mod = @import("gut.zig");
 const ch2 = @import("ch2.zig");
+const stomach_mod = @import("stomach.zig");
+const ch3 = @import("ch3.zig");
 const i18n = @import("i18n.zig");
 const bindings = @import("bindings.zig");
 const strings = @import("strings.zig");
@@ -65,7 +67,7 @@ pub const Controls = struct {
     hint: bool = false,
     confirm: bool = false,
     skip: bool = false,
-    /// Chapter 2 upgrade: fire or release the mucus tether.
+    /// Chapter 2 upgrade, carried from then on: fire or release the mucus tether.
     tether: bool = false,
 };
 
@@ -103,7 +105,7 @@ pub const DrillTarget = struct {
     cannula: bool = false,
 };
 
-pub const Kind = enum(u8) { none, cocci, nest, anchor, embolus, neutrophil, odd_cell, thrombus, phlebolith, ring, infected, shed, virion, commensal, factory };
+pub const Kind = enum(u8) { none, cocci, nest, anchor, embolus, neutrophil, odd_cell, thrombus, phlebolith, ring, infected, shed, virion, commensal, factory, pylori, colony, vessel, grit };
 
 pub const Entity = struct {
     kind: Kind = .none,
@@ -146,7 +148,7 @@ pub const Particle = struct {
     drag: f32 = 2,
 };
 
-pub const Sfx = enum(u8) { shoot, lance, swing, punch_hit, sync, kill, nest_die, hurt, tissue, scan, objective, checkpoint, upgrade, cut, shatter, escape, absorb, overheat, windup, transit, ui, bump };
+pub const Sfx = enum(u8) { shoot, lance, swing, punch_hit, sync, kill, nest_die, hurt, tissue, scan, objective, checkpoint, upgrade, cut, shatter, escape, absorb, overheat, windup, transit, ui, bump, acid, sizzle };
 
 pub const SfxEvent = struct { id: Sfx, pan: f32 = 0, gain: f32 = 1 };
 
@@ -181,10 +183,25 @@ pub const Stage = enum(u8) {
     g_tether,
     g_flume,
     g_exit,
+    // chapter 3
+    s_arrive,
+    s_pits,
+    s_gradient,
+    s_wave,
+    s_swim,
+    s_margin,
+    s_cross,
+    s_cautery,
+    s_exit,
     done,
 
-    pub fn isGut(st: Stage) bool {
-        return @intFromEnum(st) >= @intFromEnum(Stage.g_arrive) and st != .done;
+    /// Index of the chapter whose script owns this stage; `done` belongs to all of them.
+    pub fn chapter(st: Stage) ?u8 {
+        if (st == .done) return null;
+        const i = @intFromEnum(st);
+        if (i >= @intFromEnum(Stage.s_arrive)) return 2;
+        if (i >= @intFromEnum(Stage.g_arrive)) return 1;
+        return 0;
     }
 };
 
@@ -248,10 +265,12 @@ pub const Sim = struct {
     stage_t: f32 = 0,
     stall_t: f32 = 0,
     vein: Vein = .{},
-    /// 0 vein, 1 jejunum.
+    /// 0 vein, 1 jejunum, 2 stomach.
     chapter: u8 = 0,
     gut: gut_mod.Gut = .{},
     g: ch2.State = .{},
+    sto: stomach_mod.Stomach = .{},
+    g3: ch3.State = .{},
     has_tether: bool = false,
     tether: ?Vec3 = null,
     /// Where the line holds the drone: a little off the surface, so there is a sightline to the next hold.
@@ -329,9 +348,12 @@ pub const Sim = struct {
     }
 
     pub fn initChapter(chapter: u8) Sim {
-        if (chapter != 1) return init();
         var s: Sim = .{};
-        ch2.begin(&s);
+        switch (chapter) {
+            1 => ch2.begin(&s),
+            2 => ch3.begin(&s),
+            else => return init(),
+        }
         return s;
     }
 
@@ -530,7 +552,11 @@ pub const Sim = struct {
     }
 
     pub fn locationCm(s: *const Sim) f32 {
-        if (s.chapter == 1) return ch2.locationCm(s);
+        switch (s.chapter) {
+            1 => return ch2.locationCm(s),
+            2 => return ch3.locationCm(s),
+            else => {},
+        }
         return veinLocationCm(s.station, s.pos.z);
     }
 
@@ -552,10 +578,15 @@ pub const Sim = struct {
         s.stage_t = 0;
         s.progress();
         s.voice.supersede();
-        if (st.isGut()) return ch2.enter(s, st);
+        if (st.chapter()) |ch| switch (ch) {
+            1 => return ch2.enter(s, st),
+            2 => return ch3.enter(s, st),
+            else => {},
+        };
         const vn = &s.vein;
         switch (st) {
             .g_arrive, .g_villus, .g_descend, .g_wave, .g_scan, .g_extrude, .g_factory, .g_tether, .g_flume, .g_exit => unreachable,
+            .s_arrive, .s_pits, .s_gradient, .s_wave, .s_swim, .s_margin, .s_cross, .s_cautery, .s_exit => unreachable,
             .needle => {
                 s.say(L.comms_check);
                 s.say(L.youre_inside_the_cannula);
@@ -700,7 +731,11 @@ pub const Sim = struct {
     }
 
     pub fn hintText(s: *const Sim) Text {
-        if (s.chapter == 1) return ch2.hintText(s);
+        switch (s.chapter) {
+            1 => return ch2.hintText(s),
+            2 => return ch3.hintText(s),
+            else => {},
+        }
         const lv: usize = @min(s.hint_level, 2);
         return switch (s.stage) {
             .needle => H.needle[lv],
@@ -739,6 +774,8 @@ pub const Sim = struct {
             .upgrade_card => {
                 if (c.confirm and s.chapter == 1) {
                     ch2.upgradeTaken(s);
+                } else if (c.confirm and s.chapter == 2) {
+                    ch3.upgradeTaken(s);
                 } else if (c.confirm) {
                     s.has_sync = true;
                     s.mode = .playing;
@@ -758,7 +795,11 @@ pub const Sim = struct {
         s.stats.time += dt;
         s.stage_t += dt;
         s.stall_t += dt;
-        if (s.chapter == 0) s.vein.stepValves(s.clock, dt) else s.gut.step(dt);
+        switch (s.chapter) {
+            0 => s.vein.stepValves(s.clock, dt),
+            1 => s.gut.step(dt),
+            else => s.sto.step(dt),
+        }
 
         s.yaw -= c.look[0];
         s.pitch = m.clamp(s.pitch + c.look[1], -1.5, 1.5);
@@ -766,7 +807,11 @@ pub const Sim = struct {
         s.updateFocus();
         if (c.examine) s.examine();
         if (c.hint) s.giveHint();
-        if (c.tether and s.chapter == 1) ch2.tetherKey(s);
+        if (c.tether) switch (s.chapter) {
+            1 => ch2.tetherKey(s),
+            2 => ch3.tetherKey(s),
+            else => {},
+        };
 
         s.latched = false;
         for (0..2) |i| s.updateTool(i, c, dt);
@@ -867,7 +912,7 @@ pub const Sim = struct {
                     const surf = clotSurface(d.norm()) * (e.radius / clot_radius) + hull_r;
                     if (dl < surf) p = e.pos.add(d.norm().scale(surf));
                 },
-                .phlebolith, .nest, .factory => {
+                .phlebolith, .nest, .factory, .colony, .vessel => {
                     const d = p.sub(e.pos);
                     const dl = d.len();
                     const rad = (if (e.kind == .nest) e.radius * 0.8 else e.radius) + hull_r;
@@ -883,7 +928,11 @@ pub const Sim = struct {
             }
         }
 
-        if (s.chapter == 1) return ch2.moveCollide(s, p, dt);
+        switch (s.chapter) {
+            1 => return ch2.moveCollide(s, p, dt),
+            2 => return ch3.moveCollide(s, p, dt),
+            else => {},
+        }
         const res = s.vein.collide(p, hull_r, &s.sides, &s.in_bore);
         s.pos = res.pos;
         if (res.squeezed) {
@@ -904,7 +953,11 @@ pub const Sim = struct {
     }
 
     pub fn worldFlow(s: *const Sim, p: Vec3) Vec3 {
-        return if (s.chapter == 1) s.gut.flowAt(p, s.clock) else s.vein.flowAt(p, s.clock);
+        return switch (s.chapter) {
+            1 => s.gut.flowAt(p, s.clock),
+            2 => ch3.flowAt(s, p),
+            else => s.vein.flowAt(p, s.clock),
+        };
     }
 
     // ------------------------------------------------------------------ focus and the guide
@@ -916,8 +969,9 @@ pub const Sim = struct {
         var best_t: f32 = 2600;
         var found = false;
 
-        if (s.chapter == 1) {
-            if (ch2.focusRay(s, o, d, best_t)) |f| {
+        if (s.chapter != 0) {
+            const hit = if (s.chapter == 1) ch2.focusRay(s, o, d, best_t) else ch3.focusRay(s, o, d, best_t);
+            if (hit) |f| {
                 best = f;
                 best_t = f.dist;
                 found = true;
@@ -969,6 +1023,7 @@ pub const Sim = struct {
 
     pub fn ringVisible(s: *const Sim, which: u8) bool {
         if (which == 2) return s.stage == .g_exit;
+        if (which == 3) return s.stage == .s_exit;
         return if (which == 0) s.stage == .tools or s.stage == .staph or s.stage == .neutrophil else s.stage == .to_ring2;
     }
 
@@ -992,6 +1047,10 @@ pub const Sim = struct {
             .virion => if (e.known) .rotavirus else .unknown_microbe,
             .commensal => if (e.known) .commensal else .unknown_microbe,
             .factory => .viral_factory,
+            .pylori => .helicobacter,
+            .colony => .colonised_pit,
+            .vessel => .bleeding_vessel,
+            .grit => .food_particle,
             .none => .red_cell,
         };
     }
@@ -1046,7 +1105,11 @@ pub const Sim = struct {
                     s.say(L.the_femurs_nutrient_vein);
                 }
             },
-            else => if (s.chapter == 1) ch2.onIdentify(s, tp),
+            else => switch (s.chapter) {
+                1 => ch2.onIdentify(s, tp),
+                2 => ch3.onIdentify(s, tp),
+                else => {},
+            },
         }
     }
 
@@ -1172,7 +1235,7 @@ pub const Sim = struct {
         // light aim assist onto hostile organisms close to the reticle
         var best_cos: f32 = 0.9982; // ~3.4 degrees
         for (&s.ents) |*e| {
-            if (!(e.kind == .cocci or e.kind == .embolus or e.kind == .shed or (e.kind == .virion and e.known))) continue;
+            if (!(e.kind == .cocci or e.kind == .embolus or e.kind == .shed or e.kind == .pylori or (e.kind == .virion and e.known))) continue;
             const d = e.pos.sub(s.pos);
             const dl = d.len();
             if (dl > 750 or dl < 1) continue;
@@ -1268,6 +1331,7 @@ pub const Sim = struct {
                 .nest => e.flash = 0.5,
                 .anchor => e.flash = 0.5,
                 .infected, .shed, .virion, .commensal, .factory => ch2.punched(s, @intCast(idx), d.norm()),
+                .pylori, .colony, .vessel, .grit => ch3.punched(s, @intCast(idx), d.norm()),
                 else => {},
             }
         }
@@ -1285,6 +1349,7 @@ pub const Sim = struct {
             for (&s.ents, 0..) |*e, idx| {
                 if (e.kind == .cocci and e.pos.dist(s.pos) < 75) s.killCocci(@intCast(idx), e.pos.sub(s.pos).norm().scale(200));
             }
+            if (s.chapter == 2) ch3.syncWave(s);
         } else if (landed) {
             s.sound(.punch_hit, pan, 1);
             s.shake = @max(s.shake, 0.25);
@@ -1307,7 +1372,7 @@ pub const Sim = struct {
         const t: DrillTarget = .{ .ent = fo.ent, .kind = if (fo.ent) |idx| s.ents[idx].kind else .none, .point = fo.point, .tissue = fo.tissue, .cannula = fo.topic == .cannula };
         if (t.ent == null and !t.tissue and !t.cannula) return null;
         // moving organisms are shredded on contact rather than held
-        if (t.kind != .cocci and t.kind != .embolus and t.kind != .virion and t.kind != .shed and t.kind != .commensal and t.kind != .infected) a.latch = t;
+        if (t.kind != .cocci and t.kind != .embolus and t.kind != .virion and t.kind != .shed and t.kind != .commensal and t.kind != .infected and t.kind != .pylori and t.kind != .grit) a.latch = t;
         return t;
     }
 
@@ -1379,6 +1444,7 @@ pub const Sim = struct {
                     return true;
                 },
                 .infected, .shed, .virion, .commensal, .factory => return ch2.drilled(s, idx, tg.point, rate, dt, spark),
+                .pylori, .colony, .vessel, .grit => return ch3.drilled(s, idx, tg.point, rate, dt, spark),
                 else => return false,
             }
         }
@@ -1571,6 +1637,7 @@ pub const Sim = struct {
                 return true;
             },
             .infected, .shed, .virion, .commensal, .factory => return ch2.shotHit(s, sh, idx, at),
+            .pylori, .colony, .vessel, .grit => return ch3.shotHit(s, sh, idx, at),
             else => return false,
         }
     }
@@ -1608,6 +1675,14 @@ pub const Sim = struct {
                 if (s.gut.raycast(sh.pos, dir, best_t)) |h| {
                     sh.alive = false;
                     ch2.shotTissue(s, h);
+                    continue;
+                }
+            }
+            if (s.chapter == 2) {
+                ch3.shotDrag(sh, dt);
+                if (s.sto.raycast(sh.pos, dir, best_t)) |h| {
+                    sh.alive = false;
+                    ch3.shotTissue(s, h);
                     continue;
                 }
             }
@@ -1732,6 +1807,7 @@ pub const Sim = struct {
                     }
                 },
                 .infected, .shed, .virion, .commensal, .factory => ch2.updateEntity(s, @intCast(idx), dt),
+                .pylori, .colony, .vessel, .grit => ch3.updateEntity(s, @intCast(idx), dt),
                 else => {},
             }
         }
@@ -1841,7 +1917,11 @@ pub const Sim = struct {
     // ------------------------------------------------------------------ script
 
     fn script(s: *Sim, dt: f32) void {
-        if (s.chapter == 1) return ch2.script(s, dt);
+        switch (s.chapter) {
+            1 => return ch2.script(s, dt),
+            2 => return ch3.script(s, dt),
+            else => {},
+        }
         const vn = &s.vein;
         const l = Vein.local(s.pos);
         const rw = vn.wallR(s.pos.z, l.theta);
@@ -1974,6 +2054,7 @@ pub const Sim = struct {
     pub fn objective(s: *const Sim, p: bindings.Prompt, buf: []u8) []const u8 {
         const text: Text = switch (s.stage) {
             .g_arrive, .g_villus, .g_descend, .g_wave, .g_scan, .g_extrude, .g_factory, .g_tether, .g_flume, .g_exit => return ch2.objective(s, p, buf),
+            .s_arrive, .s_pits, .s_gradient, .s_wave, .s_swim, .s_margin, .s_cross, .s_cautery, .s_exit => return ch3.objective(s, p, buf),
             .needle => O.needle,
             .flow_wall => O.flow_wall,
             .flow_core => O.flow_core,
@@ -2002,7 +2083,11 @@ pub const Sim = struct {
         score -= @as(f32, @floatFromInt(s.stats.emboli_escaped)) * 4;
         score -= @as(f32, @floatFromInt(s.stats.friendly_fire)) * 2;
         score -= @as(f32, @floatFromInt(s.stats.retries)) * 5;
-        if (s.chapter == 1) score -= ch2.gradePenalty(s);
+        switch (s.chapter) {
+            1 => score -= ch2.gradePenalty(s),
+            2 => score -= ch3.gradePenalty(s),
+            else => {},
+        }
         if (score >= 85) return 'A';
         if (score >= 70) return 'B';
         if (score >= 50) return 'C';
@@ -2011,8 +2096,8 @@ pub const Sim = struct {
 
     /// Atlas entries that belong to this chapter: [first, end).
     pub fn atlasRange(s: *const Sim) [2]usize {
-        const split = @intFromEnum(Topic.villus);
-        return if (s.chapter == 1) .{ split, Topic.count } else .{ 0, split };
+        const first = [_]usize{ 0, @intFromEnum(Topic.villus), @intFromEnum(Topic.gastric_pit), Topic.count };
+        return .{ first[s.chapter], first[s.chapter + 1] };
     }
 
     pub fn atlasTotal(s: *const Sim) u32 {

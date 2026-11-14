@@ -93,6 +93,7 @@ pub const chapters = [_]Chapter{
             .en = "Buffer Coat — timed acid immunity; drill cautery.",
             .uk = "Буферне покриття — тимчасова стійкість до кислоти; припікання свердлом.",
         },
+        .playable = true,
         .x = 0.545,
         .y = 0.425,
     },
@@ -340,3 +341,13 @@ pub const chapters = [_]Chapter{
 };
 
 pub const main_count = 11;
+
+/// The chapters that can be flown: the first ones of the route, in order.
+pub const playable_count = blk: {
+    var n: usize = 0;
+    for (chapters) |c| {
+        if (!c.playable) break;
+        n += 1;
+    }
+    break :blk n;
+};

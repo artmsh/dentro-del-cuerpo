@@ -16,10 +16,10 @@
 <p align="center"><sub>Chapter 1, treating a septic microthrombus: one arm drills the biofilm open, the other fires into it. Rendered offscreen by <code>dentro --shots</code> through the game's Metal pipeline (<a href="docs/images/capture.sh">capture.sh</a>).</sub></p>
 
 > [!WARNING]
-> **Alpha.** Chapters 1 and 2 of 11 are playable, about five minutes each; chapters 3 to 11 and the two
+> **Alpha.** Chapters 1 to 3 of 11 are playable, about five minutes each; chapters 4 to 11 and the two
 > hidden chapters exist only as design and as entries on the route map. A scripted pilot in
-> `zig build test` finishes both playable chapters. The campaign is complete when all eleven chapters in
-> [DESIGN.md](docs/DESIGN.md) are playable.
+> `zig build test` finishes the three playable chapters. The campaign is complete when all eleven chapters
+> in [DESIGN.md](docs/DESIGN.md) are playable.
 
 *Inside the Body.* A doctor pilots the drone in through a vein in the patient's right leg and organ by organ
 to the brain, treating what it finds on the way. It is playable in English and Ukrainian, on macOS and on
@@ -31,7 +31,8 @@ and Direct3D 11 on Windows, with no engine in between; the only third-party code
 
 Each chapter is built around one real structure the player has to learn to read before the objective can be
 solved: the sinus bulge and cusps of a venous valve, the villi and travelling contraction ring of the
-jejunum, and in later chapters the hexagonal liver lobule or the cardiac cycle read from valve states. The
+jejunum, the pits of the stomach lining and the pH gradient across its mucus, and in later chapters the
+hexagonal liver lobule or the cardiac cycle read from valve states. The
 anatomy, pathogens and dimensions are real (one world unit is one micrometre); the drone, its tools and the
 pace are fiction, and the in-game atlas labels which is which.
 
@@ -40,8 +41,8 @@ pace are fiction, and the in-game atlas labels which is which.
 - Two independent arms, each with its own key or trigger, tool (Punch, Drill or Shoot), HUD panel, half of
   the reticle, colour and stereo side. A drill stays locked in its cut while its key is held, so the pilot
   can work the other arm on something else.
-- Anatomy defined as analytic functions (`src/vein.zig`, `src/gut.zig`) from which the mesh, collision,
-  the flow that carries the drone and the reticle ray casts are all derived.
+- Anatomy defined as analytic functions (`src/vein.zig`, `src/gut.zig`, `src/stomach.zig`) from which the
+  mesh, collision, the flow that carries the drone and the reticle ray casts are all derived.
 - Dr. Marín on comms: `T` names what the reticle is on and files it in the atlas, `T` again gives the longer
   explanation, `H` gives three levels of hint per objective.
 - Chapter 1, Vein: pulsed parabolic flow, two venous valves to time, a septic microthrombus to treat with
@@ -50,6 +51,10 @@ pace are fiction, and the in-game atlas labels which is which.
 - Chapter 2, Intestines: a chyme stream fast above the villus tips and still between them, peristaltic
   contractions to wait out, a scan that separates rotavirus-infected cells from commensal bacteria, and the
   Mucus Tether upgrade.
+- Chapter 3, Stomach: a mucus gel that is neutral at the lining and pH 2 at its top, with the reading on the
+  HUD; antral waves that close the lumen and are sat out inside a gastric pit; *Helicobacter pylori* that
+  outswims a round in the gel and is hit while it flares; four colonised pits at an ulcer's margin; the
+  Buffer Coat upgrade, and a bleeding vessel that one arm presses flat while the other welds it.
 - Keyboard and mouse, or an Xbox, DualShock 4 or DualSense controller, over USB or Bluetooth with no
   driver or setup. The whole game can be played on the controller alone, menus included, and the two can
   be mixed at any moment. Every prompt on screen names the control of the device used last, in that
@@ -76,9 +81,9 @@ game found: a shooter flown inside the human body.
 
 | | Dentro del cuerpo | [Cell Sword](https://classyk.itch.io/cell-sword) |
 |---|---|---|
-| Setting | real anatomy and pathogens (*S. aureus*, rotavirus) | fictional nanobot disease ("Rust") |
+| Setting | real anatomy and pathogens (*S. aureus*, rotavirus, *H. pylori*) | fictional nanobot disease ("Rust") |
 | Movement | first person, two independently aimed arms | 6DoF ship, cockpit or third-person view |
-| Content | 2 chapters, about 5 minutes each | 12-mission campaign, 5 difficulty levels |
+| Content | 3 chapters, about 5 minutes each | 12-mission campaign, 5 difficulty levels |
 | Platforms | macOS 14+ on Apple Silicon; Windows 10 and 11 on x64; free | Windows, macOS, Linux; $7.99 |
 | Input | keyboard and mouse; Xbox and PlayStation controllers; fixed layout | keyboard, mouse, gamepads; remappable |
 | Engine | none: Zig on AppKit and Metal, and on Win32 and Direct3D 11 | Godot |
@@ -143,7 +148,8 @@ zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast   # builds the fold
 
 ### Both
 
-Chapter 2 unlocks on the route map when chapter 1 is finished; `--chapter 2` opens it directly. The save
+A chapter unlocks on the route map when the one before it is finished; `--chapter 2` or `--chapter 3` opens
+one directly. The save
 file keeps for each chapter the best grade flown and, among runs of equal grade, the latest. It is replaced
 whole on every save, so an interrupted write leaves the previous one, and a save that cannot be written is
 reported once on stderr while play goes on. The game starts in Ukrainian if Ukrainian comes before English in the system's list of preferred languages (on
@@ -163,6 +169,7 @@ kept in the save file; `--lang en` or `--lang uk` sets it for one run without ch
 | Right arm tool | `X` next; `8` Punch, `9` Drill, `0` Shoot | `RB` next, d-pad `→` previous |
 | Identify what the reticle is on; again for the longer explanation. In chapter 2 it is also the scan pulse | `T` (or `F`) | `X` |
 | Mucus Tether (chapter 2 upgrade): on tissue within 0.4 mm it attaches and reels in, on nothing it releases | `G` | click `RS`, or d-pad `↑` |
+| Buffer Coat (chapter 3 upgrade): nothing to press; it takes the acid in place of the hull for 12 s and refills in neutral gel or blood | | |
 | Ask Dr. Marín for a hint (three levels per objective) | `H` | `Y` |
 | Skip the current comms line | `Tab` | `View` |
 | Pause, and resume | `Esc` | `Menu` |
@@ -188,11 +195,12 @@ XInput and gets Xbox names. A DualShock 4 or DualSense is read directly from its
 Bluetooth and gets PlayStation names; when Steam Input or a tool such as DS4Windows presents it as an XInput
 controller instead, the game listens to that one and the names are Xbox's.
 
-After the chapter 1 upgrade, triggering both arms within 0.12 s lands them as one Sync Strike.
+After the chapter 1 upgrade, triggering both arms within 0.12 s lands them as one Sync Strike. After the
+chapter 3 upgrade, a drill held on a vessel that the other arm's punch is pressing flat welds it shut.
 
 ## Scope
 
-A personal project, built for the author and published as-is. Chapters 3 to 11 are designed in
+A personal project, built for the author and published as-is. Chapters 4 to 11 are designed in
 [DESIGN.md](docs/DESIGN.md): the patient, the route between organs and, for each chapter, the feature to
 read, the objective, the challenge and the upgrade. The first hidden chapter's trigger (three cells in the
 vein that should not be in circulating blood) is already in chapter 1.
@@ -227,7 +235,7 @@ vein that should not be in circulating blood) is already in chapter 1.
 ## Development
 
 ```sh
-zig build test                 # unit tests, translation checks, a scripted pilot that must finish both chapters, and the binary's exit codes
+zig build test                 # unit tests, translation checks, a scripted pilot that must finish every playable chapter, and the binary's exit codes
 zig-out/bin/dentro --help      # the modes and options
 zig-out/bin/dentro --selftest  # the same playthroughs, with a printed summary
 zig-out/bin/dentro --shots DIR # offscreen GPU render of every screen and stage, one BMP each
@@ -236,7 +244,7 @@ zig-out/bin/dentro --prompts ps --lang uk --shots DIR   # with the prompts writt
 zig-out/bin/dentro --inputtest # opens the window and drives it with synthetic key events
 zig-out/bin/dentro --padtest   # opens the window and plays from the title screen with a synthetic controller
 zig-out/bin/dentro --demo      # the scripted pilot flies chapter 1 in the window, with audio
-zig-out/bin/dentro --chapter 2 --demo
+zig-out/bin/dentro --chapter 3 --demo   # or 2
 zig-out/bin/dentro --demo --pad   # the same pilot, holding a controller instead of handing over its controls
 ```
 
@@ -267,7 +275,9 @@ directory cannot be made, a frame cannot be written or a chapter is not flown to
 rely on its status.
 
 ```text
-Build Summary: 12/12 steps succeeded; 151/151 tests passed
+Build Summary: 12/12 steps succeeded; 163/163 tests passed
+…
+selftest ch3: completed=true stage=done sim_time=106.3s deaths=0 stability=92.8 grade=A atlas=3
 …
 selftest ch2: completed=true stage=done sim_time=86.8s deaths=0 stability=100.0 grade=A atlas=3
 …

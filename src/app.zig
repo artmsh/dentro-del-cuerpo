@@ -81,12 +81,40 @@ pub const Save = struct {
     /// The language the player picked in the game; null until they pick one, so the system's preference
     /// keeps applying.
     lang: ?Lang = null,
+    ch3_done: bool = false,
+    grade3: u8 = '-',
+    ch4_done: bool = false,
+    grade4: u8 = '-',
+
+    /// Whether chapter `ch` (an index into campaign.chapters) has been finished.
+    pub fn finished(sv: *const Save, ch: usize) bool {
+        return switch (ch) {
+            0 => sv.ch1_done,
+            1 => sv.ch2_done,
+            2 => sv.ch3_done,
+            3 => sv.ch4_done,
+            else => false,
+        };
+    }
+
+    /// The grade on record for chapter `ch`, '-' if there is none.
+    pub fn gradeIn(sv: *const Save, ch: usize) u8 {
+        return switch (ch) {
+            0 => sv.grade,
+            1 => sv.grade2,
+            2 => sv.grade3,
+            3 => sv.grade4,
+            else => '-',
+        };
+    }
 
     /// The longest a chapter's time on the link is recorded as, in seconds.
     const max_time: f32 = 1_000_000;
 
     /// The file is one line of space-separated values in field order. Fields were appended over time, so a
-    /// file may stop after any field from `time` on; what is missing keeps its default.
+    /// file may stop after any field from `time` on; what is missing keeps its default. The language is the
+    /// tenth field and may be absent as a value while later fields are present: it is then written as `-`,
+    /// which no build reads as a language.
     ///
     /// The file is outside the program's control, so this is total: whatever the bytes are, the result is
     /// null (too few fields to be a save) or a save whose every field is in its range. A field that is not
@@ -95,7 +123,7 @@ pub const Save = struct {
     /// keeps, so what is read is exactly what `format` writes back.
     pub fn parse(data: []const u8) ?Save {
         var it = std.mem.tokenizeAny(u8, data, " \r\n");
-        var toks: [10][]const u8 = undefined;
+        var toks: [14][]const u8 = undefined;
         var n: usize = 0;
         while (it.next()) |tok| {
             if (n >= toks.len) break;
@@ -114,6 +142,10 @@ pub const Save = struct {
             .ch2_done = n >= 8 and number(toks[7], 0, 1) > 0.5,
             .grade2 = if (n >= 9) gradeOf(toks[8]) else '-',
             .lang = if (n >= 10) Lang.fromTag(toks[9]) else null,
+            .ch3_done = n >= 11 and number(toks[10], 0, 1) > 0.5,
+            .grade3 = if (n >= 12) gradeOf(toks[11]) else '-',
+            .ch4_done = n >= 13 and number(toks[12], 0, 1) > 0.5,
+            .grade4 = if (n >= 14) gradeOf(toks[13]) else '-',
         };
     }
 
@@ -149,9 +181,17 @@ pub const Save = struct {
         return !done or saved < 'A' or saved > 'D' or new <= saved;
     }
 
+    /// A save with nothing in the fields after the language is written exactly as the builds before those
+    /// fields wrote it.
     pub fn format(sv: Save, buf: []u8) []const u8 {
-        const lang_tag = if (sv.lang) |l| l.tag() else "";
-        return std.fmt.bufPrint(buf, "{d} {d} {d} {d:.1} {d} {d} {d:.1} {d} {d}{s}{s}\n", .{ @intFromBool(sv.ch1_done), sv.grade, sv.emboli, sv.stability, @intFromBool(sv.marrow), sv.atlas, sv.time, @intFromBool(sv.ch2_done), sv.grade2, if (lang_tag.len > 0) " " else "", lang_tag }) catch "";
+        const later = sv.ch3_done or sv.grade3 != '-' or sv.ch4_done or sv.grade4 != '-';
+        const lang_tag = if (sv.lang) |l| l.tag() else if (later) "-" else "";
+        const head = std.fmt.bufPrint(buf, "{d} {d} {d} {d:.1} {d} {d} {d:.1} {d} {d}{s}{s}", .{ @intFromBool(sv.ch1_done), sv.grade, sv.emboli, sv.stability, @intFromBool(sv.marrow), sv.atlas, sv.time, @intFromBool(sv.ch2_done), sv.grade2, if (lang_tag.len > 0) " " else "", lang_tag }) catch return "";
+        const tail = (if (later)
+            std.fmt.bufPrint(buf[head.len..], " {d} {d} {d} {d}\n", .{ @intFromBool(sv.ch3_done), sv.grade3, @intFromBool(sv.ch4_done), sv.grade4 })
+        else
+            std.fmt.bufPrint(buf[head.len..], "\n", .{})) catch return "";
+        return buf[0 .. head.len + tail.len];
     }
 };
 
@@ -314,7 +354,20 @@ pub const App = struct {
         c.phase = app.rng.range(0, m.tau);
         c.spin = app.rng.range(0.2, 1.1);
         const k = app.rng.f();
-        if (app.sim.chapter == 1) {
+        if (app.sim.chapter == 2) {
+            // what the antrum is grinding, down to the last fines: flecks of food, a few fat droplets and
+            // strands of shed mucus
+            if (k < 0.22) {
+                c.kind = .red;
+                c.scale = app.rng.range(0.8, 2.4);
+            } else if (k < 0.985) {
+                c.kind = .platelet;
+                c.scale = app.rng.range(0.9, 2.4);
+            } else {
+                c.kind = .white;
+                c.scale = app.rng.range(2.0, 4.0);
+            }
+        } else if (app.sim.chapter == 1) {
             // chyme: fat droplets, flakes of food debris, the odd glob of mucus
             if (k < 0.72) {
                 c.kind = .red;
@@ -341,6 +394,13 @@ pub const App = struct {
     }
 
     fn validate(app: *App, c: *Cell) void {
+        if (app.sim.chapter == 2) {
+            const sto = @import("stomach.zig");
+            // the gel holds nothing loose: fines are in the juice above it and over the bare crater
+            const top = sto.surfaceY(c.pos.x, c.pos.z) + sto.mucus(c.pos.x, c.pos.z);
+            c.visible = c.pos.z > sto.z_min and c.pos.z < sto.z_max and c.pos.y > top + c.scale + 4 and app.sim.sto.clear(c.pos, c.scale + 3);
+            return;
+        }
         if (app.sim.chapter == 1) {
             const gut = @import("gut.zig");
             c.visible = c.pos.z > gut.z_min and c.pos.z < gut.z_max and app.sim.gut.clear(c.pos, c.scale + 3);
@@ -384,6 +444,8 @@ pub const App = struct {
     /// Decorative cell under the reticle, so the guide can identify erythrocytes and platelets too.
     fn ambientFocus(app: *App) ?game.Focus {
         const s = &app.sim;
+        // Only the blood cells and the chyme's fat droplets have entries; the stomach's fines do not.
+        if (s.chapter >= 2) return null;
         const o = s.pos;
         const d = s.forward();
         var best: f32 = 140;
@@ -407,7 +469,7 @@ pub const App = struct {
     // ------------------------------------------------------------------ flow of screens
 
     pub fn chapterDone(app: *const App, i: usize) bool {
-        return (i == 0 and app.save.ch1_done) or (i == 1 and app.save.ch2_done);
+        return app.save.finished(i);
     }
 
     pub fn chapterUnlocked(app: *const App, i: usize) bool {
@@ -420,6 +482,12 @@ pub const App = struct {
         if (app.chapter == 1) {
             if (Save.supersedes(s.grade(), app.save.ch2_done, app.save.grade2)) app.save.grade2 = s.grade();
             app.save.ch2_done = true;
+        } else if (app.chapter == 2) {
+            if (Save.supersedes(s.grade(), app.save.ch3_done, app.save.grade3)) app.save.grade3 = s.grade();
+            app.save.ch3_done = true;
+        } else if (app.chapter == 3) {
+            if (Save.supersedes(s.grade(), app.save.ch4_done, app.save.grade4)) app.save.grade4 = s.grade();
+            app.save.ch4_done = true;
         } else {
             if (Save.supersedes(s.grade(), app.save.ch1_done, app.save.grade)) {
                 app.save.grade = s.grade();
@@ -658,7 +726,8 @@ test "both failure states have a way back" {
     const app = try std.testing.allocator.create(App);
     defer std.testing.allocator.destroy(app);
     const dt: f32 = 1.0 / 60.0;
-    const first = [_]game.Stage{ .needle, .g_arrive };
+    const first = [_]game.Stage{ .needle, .g_arrive, .s_arrive };
+    try std.testing.expectEqual(campaign.playable_count, first.len);
     for (first, 0..) |first_stage, ch| {
         app.init(false, .en);
         app.chapter = @intCast(ch);
@@ -699,6 +768,22 @@ test "the save file round-trips, and files from before a field existed still loa
     plain.lang = null;
     try std.testing.expectEqualStrings("1 66 2 81.5 1 9 312.4 1 65\n", plain.format(&buf));
     try std.testing.expectEqualDeep(plain, Save.parse("1 66 2 81.5 1 9 312.4 1 65\n").?);
+
+    // Chapters 3 and 4 follow the language. With no language chosen its place is held by a dash, which
+    // reads as no language here and in the builds that stop reading at it.
+    var later = sv;
+    later.ch3_done = true;
+    later.grade3 = 'C';
+    try std.testing.expectEqualStrings("1 66 2 81.5 1 9 312.4 1 65 uk 1 67 0 45\n", later.format(&buf));
+    try std.testing.expectEqualDeep(later, Save.parse(later.format(&buf)).?);
+    later.lang = null;
+    later.ch4_done = true;
+    later.grade4 = 'A';
+    try std.testing.expectEqualStrings("1 66 2 81.5 1 9 312.4 1 65 - 1 67 1 65\n", later.format(&buf));
+    try std.testing.expectEqualDeep(later, Save.parse(later.format(&buf)).?);
+    // A file that stops part of the way through them keeps what it has.
+    const part = Save.parse("1 66 2 81.5 1 9 312.4 1 65 en 1\n").?;
+    try std.testing.expect(part.ch3_done and part.grade3 == '-' and !part.ch4_done and part.lang == .en);
 
     // The first format had seven fields; chapter 2's two were appended later.
     const old = Save.parse("1 66 2 81.5 1 9 312.4\n").?;
@@ -902,7 +987,7 @@ fn gradeIsValid(c: u8) bool {
 
 /// What every `Save` the parser returns must satisfy, whatever the file held.
 fn saveIsValid(sv: Save) bool {
-    return gradeIsValid(sv.grade) and gradeIsValid(sv.grade2) and
+    return gradeIsValid(sv.grade) and gradeIsValid(sv.grade2) and gradeIsValid(sv.grade3) and gradeIsValid(sv.grade4) and
         sv.stability >= 0 and sv.stability <= 100 and sv.time >= 0 and std.math.isFinite(sv.time);
 }
 
@@ -942,7 +1027,7 @@ test "the save parser is total: any bytes give a valid save or none, and never t
             },
             // the right shape with hostile fields
             1 => {
-                const fields = rng.below(14);
+                const fields = rng.below(18);
                 for (0..fields) |_| {
                     const w = words[rng.below(words.len)];
                     @memcpy(buf[n..][0..w.len], w);
@@ -953,7 +1038,7 @@ test "the save parser is total: any bytes give a valid save or none, and never t
             },
             // a real save with a few bytes overwritten, dropped or repeated
             else => {
-                const good = "1 66 2 81.5 1 9 312.4 1 65 uk\n";
+                const good = if (round % 2 == 0) "1 66 2 81.5 1 9 312.4 1 65 uk\n" else "1 66 2 81.5 1 9 312.4 1 65 - 1 67 1 65\n";
                 @memcpy(buf[0..good.len], good);
                 n = good.len;
                 for (0..1 + rng.below(4)) |_| {
@@ -1023,6 +1108,16 @@ test "the title screen's entries can each be selected and chosen, and Begin is t
     try std.testing.expectEqual(TitleItem.begin, app.title_sel);
 }
 
+/// Where the save keeps the grade of chapter `ch`.
+fn savedGrade(app: *App, ch: usize) *u8 {
+    return switch (ch) {
+        0 => &app.save.grade,
+        1 => &app.save.grade2,
+        2 => &app.save.grade3,
+        else => &app.save.grade4,
+    };
+}
+
 /// Bring the chapter being flown to its debrief with the grade `stability` earns on a clean run.
 fn finishWith(app: *App, stability: f32) void {
     const dt: f32 = 1.0 / 60.0;
@@ -1037,7 +1132,7 @@ test "the debrief cannot be paused, and a chapter finished again after any relau
     const app = try std.testing.allocator.create(App);
     defer std.testing.allocator.destroy(app);
     const dt: f32 = 1.0 / 60.0;
-    for (0..2) |ch| {
+    for (0..campaign.playable_count) |ch| {
         app.init(false, .en);
         app.chapter = @intCast(ch);
         app.startChapter(0);
@@ -1049,8 +1144,9 @@ test "the debrief cannot be paused, and a chapter finished again after any relau
         try std.testing.expectEqual(Screen.play, app.screen);
 
         finishWith(app, 40);
-        const saved = if (ch == 0) &app.save.grade else &app.save.grade2;
+        const saved = savedGrade(app, ch);
         try std.testing.expectEqual(game.Mode.complete, app.sim.mode);
+        try std.testing.expect(app.save.finished(ch) and app.chapterDone(ch));
         try std.testing.expectEqual(@as(u8, 'D'), saved.*);
         // On the debrief neither the pause key nor a lost focus opens the pause menu.
         try std.testing.expect(!app.canPause());
@@ -1071,7 +1167,7 @@ test "the debrief cannot be paused, and a chapter finished again after any relau
     }
 }
 
-test "one rule decides which run is on record, in both chapters: the best grade, and the latest of equals" {
+test "one rule decides which run is on record, in every chapter: the best grade, and the latest of equals" {
     try std.testing.expect(Save.supersedes('C', false, '-'));
     try std.testing.expect(Save.supersedes('D', true, '-'));
     try std.testing.expect(Save.supersedes('A', true, 'B'));
@@ -1080,9 +1176,9 @@ test "one rule decides which run is on record, in both chapters: the best grade,
 
     const app = try std.testing.allocator.create(App);
     defer std.testing.allocator.destroy(app);
-    for (0..2) |ch| {
+    for (0..campaign.playable_count) |ch| {
         app.init(false, .en);
-        const saved = if (ch == 0) &app.save.grade else &app.save.grade2;
+        const saved = savedGrade(app, ch);
         const Run = struct { stability: f32, grade: u8, on_record: u8 };
         for ([_]Run{
             .{ .stability = 75, .grade = 'B', .on_record = 'B' }, // first completion

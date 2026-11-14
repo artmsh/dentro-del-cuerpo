@@ -104,9 +104,16 @@ const MenuText = struct {
 fn runSelftest(arena: std.mem.Allocator) !void {
     const sim = try arena.create(game.Sim);
     const cp = try arena.create(game.Sim);
+    bot.trace = util.envIsSet("DENTRO_TRACE");
+    {
+        std.debug.print("--- chapter 3: stomach\n", .{});
+        const r3 = bot.runHeadlessChapter(sim, cp, 2, 1500, true);
+        const g = &sim.g3;
+        std.debug.print("selftest ch3: completed={} stage={s} sim_time={d:.1}s deaths={d} stability={d:.1} grade={c} atlas={d}\n  colonies={d}/{d} swimmers_killed={d} waves_survived={d} crush_hits={d} acid_time={d:.1}s coat_time={d:.1}s weld_time={d:.1}s bled={d:.1}s tissue_hits={d} tether_uses={d} dual_arm_time={d:.1}s\n", .{ r3.completed, @tagName(r3.stage), r3.sim_seconds, r3.deaths, r3.stability, r3.grade, r3.atlas, g.cleared, g.total, g.swimmers_killed, g.waves_survived, g.crush_hits, g.acid_time, g.coat_time, g.cautery_t, g.blood_lost, r3.stats.tissue_hits, g.tether_uses, r3.stats.dual_time });
+        if (!r3.completed) std.process.exit(1);
+    }
     {
         std.debug.print("--- chapter 2: intestines\n", .{});
-        bot.trace = util.envIsSet("DENTRO_TRACE");
         const r2 = bot.runHeadlessChapter(sim, cp, 1, 1500, true);
         const g = &sim.g;
         std.debug.print("selftest ch2: completed={} stage={s} sim_time={d:.1}s deaths={d} stability={d:.1} grade={c} atlas={d}\n  cleared={d}/{d} extruded={d} spread={d} bursts={d} commensals_lost={d} tissue_hits={d} crush_hits={d} waves_survived={d} tether_uses={d} dual_arm_time={d:.1}s\n", .{ r2.completed, @tagName(r2.stage), r2.sim_seconds, r2.deaths, r2.stability, r2.grade, r2.atlas, g.cleared, g.total, g.extruded, g.spread, g.bursts, g.commensals_lost, r2.stats.tissue_hits, g.crush_hits, g.waves_survived, g.tether_uses, r2.stats.dual_time });
@@ -262,7 +269,7 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
     // The game as it stood when the current stage began, and room to set the present aside.
     const at_entry = try arena.create(app_mod.App);
     const present = try arena.create(app_mod.App);
-    for (0..2) |ch| {
+    for (0..campaign.playable_count) |ch| {
         if (only) |o| {
             if (o != ch) continue;
         }
@@ -313,13 +320,20 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
                 .g_arrive => 2.5,
                 .g_wave => 9.0,
                 .g_exit => 0.8,
+                .s_arrive => 2.5,
+                .s_gradient => 0.9,
+                .s_wave => 6.0,
+                .s_exit => 0.6,
                 else => 1.4,
             };
             if (since >= delay and since < delay + dt) {
                 sh.snap(@tagName(s.stage));
                 stage_shot = true;
             }
-            const busy = s.stage == .treat or s.stage == .g_extrude or s.stage == .g_factory or s.stage == .g_flume or s.stage == .g_wave;
+            const busy = switch (s.stage) {
+                .treat, .g_extrude, .g_factory, .g_flume, .g_wave, .s_wave, .s_swim, .s_margin, .s_cautery => true,
+                else => false,
+            };
             const every: f32 = if (s.stage == .treat) 5.0 else 3.0;
             if (busy and since > delay + 1 and extra < 5 and @mod(since, every) < dt) {
                 extra += 1;
@@ -334,6 +348,14 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
                 sh.snap("g_wave-ring-overhead");
                 s.pitch = 0.45;
                 sh.snap("g_wave-ring-ahead");
+                s.pitch = keep;
+            }
+            // The same in the stomach: the pilot is down a pit, and the far wall is closing on its mouth.
+            if (s.stage == .s_wave and !ring_shot and s.sto.squeeze(s.pos.z) > 0.7) {
+                ring_shot = true;
+                const keep = s.pitch;
+                s.pitch = 1.2;
+                sh.snap("s_wave-ring-overhead");
                 s.pitch = keep;
             }
             const mi = @intFromEnum(s.mode);
@@ -367,12 +389,16 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
     // Text the pilot's run does not reach. Each case is put on screen directly: the worst case for the
     // subtitle box from each source of lines, the HUD warnings, the failure cards and the debrief notes.
     app.bot = null;
-    for (0..2) |ch| {
+    for (0..campaign.playable_count) |ch| {
         app.chapter = @intCast(ch);
         app.startChapter(0);
         for (0..40) |_| app.step(.{}, .{}, dt);
         const s = &app.sim;
-        const tag: []const u8 = if (ch == 0) "vein" else "gut";
+        const tag: []const u8 = switch (ch) {
+            0 => "vein",
+            1 => "gut",
+            else => "stomach",
+        };
         var nb: [48]u8 = undefined;
         if (ch == 0) {
             const cases = [_]struct { []const u8, Text }{
@@ -411,6 +437,30 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
         if (ch == 1) {
             s.g.commensals_lost = 5;
             sh.snap("complete-notes-gut-flora");
+        }
+        if (ch == 2) {
+            s.g3.blood_lost = 61;
+            s.g3.acid_time = 38.5;
+            s.g3.crush_hits = 2;
+            sh.snap("complete-notes-stomach-bled");
+            s.stats.tissue_hits = 6;
+            sh.snap("complete-notes-stomach-lining");
+            // The HUD's warnings in the stomach: acid on a bare hull, then on the coat, and the pause
+            // menu's row for the coat.
+            s.mode = .playing;
+            s.stats.tissue_hits = 0;
+            s.pos.y = 420;
+            for (0..20) |_| app.step(.{}, .{}, dt);
+            s.voice.clear();
+            sh.snap("hud-acid-bare-hull");
+            s.g3.has_coat = true;
+            s.g3.coat = 7.4;
+            for (0..3) |_| app.step(.{}, .{}, dt);
+            s.voice.clear();
+            sh.snap("hud-acid-coat-holding");
+            app.openPause();
+            sh.snap("pause-with-coat");
+            app.step(.{}, .{ .back = true }, dt);
         }
         s.mode = .playing;
     }
@@ -1471,6 +1521,8 @@ test {
     _ = @import("game.zig");
     _ = @import("audio.zig");
     _ = @import("gut.zig");
+    _ = @import("stomach.zig");
+    _ = @import("ch3.zig");
     _ = @import("app.zig");
     _ = @import("bot.zig");
     _ = @import("utf8.zig");
