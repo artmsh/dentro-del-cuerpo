@@ -9,6 +9,8 @@ const gut = @import("gut.zig");
 const ch2 = @import("ch2.zig");
 const stomach = @import("stomach.zig");
 const ch3 = @import("ch3.zig");
+const kidney = @import("kidney.zig");
+const ch4 = @import("ch4.zig");
 const Vec3 = m.Vec3;
 const v3 = m.v3;
 const Vein = vein_mod.Vein;
@@ -491,6 +493,164 @@ pub const Bot = struct {
         return e.pos.add(vesselSide(e).scale(e.radius + 16)).add(e.end.scale(24));
     }
 
+    // ------------------------------------------------------------------ chapter 4
+
+    /// Fly towards `target` through the calyx, keeping off the papilla and the dome on the way.
+    fn calyxTo(s: *const Sim, c: *Controls, target: Vec3, fast: bool) f32 {
+        const d = target.sub(s.pos);
+        const dist = d.len();
+        var p = target;
+        if (dist > 220) {
+            p = s.pos.add(d.scale(220 / dist));
+            const lo = kidney.papillaY(p.x, p.z) + 130;
+            p.y = @max(p.y, lo);
+            if (p.x * p.x + p.z * p.z > kidney.outlet_r * kidney.outlet_r) {
+                const hi = kidney.wallY(p.x, p.z) - 130;
+                p.y = if (hi > lo) @min(p.y, hi) else 0.5 * (lo + hi);
+            }
+        }
+        _ = flyTo(s, c, p, fast);
+        return dist;
+    }
+
+    /// The piece to work on: one wedged in the outlet first, then the biggest, then the nearest.
+    fn kidneyPiece(s: *const Sim) ?*const game.Entity {
+        var best: f32 = 1e12;
+        var out: ?*const game.Entity = null;
+        for (&s.ents) |*e| {
+            if (e.kind != .calculus or e.state == 1 or ch4.passable(e)) continue;
+            var score = e.pos.dist(s.pos) - e.radius + 1e4 * @as(f32, @floatFromInt(e.variant));
+            if (e.state == 2) score -= 1e6;
+            if (score < best) {
+                best = score;
+                out = e;
+            }
+        }
+        return out;
+    }
+
+    /// Turn the shooting arm on the nearest shard in range. Returns true if one took the reticle.
+    fn shootShards(s: *const Sim, c: *Controls, dt: f32, arm: usize, range: f32) bool {
+        const e = nearestOf(s, .shard, range) orelse return false;
+        const lead = e.pos.add(e.vel.sub(s.flow).scale(e.pos.dist(s.pos) / 950.0));
+        if (aimAt(s, c, lead, dt) > 0.9995) c.arm[arm] = true;
+        return true;
+    }
+
+    fn thinkKidney(b: *Bot, s: *const Sim, dt: f32, c: *Controls) void {
+        // Left arm shoots and the right drills at the stalk; the left punches while the right notches;
+        // with Resonance both punch.
+        const resonance = s.stage == .k_resonance;
+        const want_left: game.Tool = if (s.stage == .k_split or resonance) .punch else .shoot;
+        const want_right: game.Tool = if (resonance) .punch else if (s.stage == .k_neck or s.stage == .k_split) .drill else .punch;
+        if (s.arms[0].tool != want_left) c.select[0] = want_left;
+        if (s.arms[1].tool != want_right) c.select[1] = want_right;
+        const drill = &s.arms[1];
+        if (drill.heat > 0.93) b.cooling = true;
+        if (drill.heat < 0.3) b.cooling = false;
+
+        // The way across the tip that passes over no duct: out between two of the outer ring, round
+        // between the rings, and out again between two more on the stone's side.
+        const route = [_]Vec3{
+            kidney.onPapilla(-316, -182).add(v3(0, 150, 0)),
+            kidney.onPapilla(-316, 182).add(v3(0, 150, 0)),
+            kidney.onPapilla(-260, 450).add(v3(0, 150, 0)),
+        };
+        switch (s.stage) {
+            .k_arrive => {
+                _ = calyxTo(s, c, route[0], false);
+                _ = aimAt(s, c, kidney.ductPos(6), dt);
+            },
+            .k_duct => {
+                _ = calyxTo(s, c, route[0], false);
+                // the nearest opening
+                var best: f32 = 1e9;
+                var at = kidney.ductPos(0);
+                for (0..kidney.duct_count) |i| {
+                    const d = kidney.ductPos(i).dist(s.pos);
+                    if (d < best) {
+                        best = d;
+                        at = kidney.ductPos(i);
+                    }
+                }
+                _ = aimAt(s, c, at, dt);
+                if ((s.focus.topic == .duct_of_bellini or s.focus.topic == .area_cribrosa) and b.tap()) c.examine = true;
+            },
+            .k_jets => {
+                const stand = ch4.standPoint();
+                if (b.phase < route.len) {
+                    if (calyxTo(s, c, route[b.phase], false) < 50) b.phase += 1;
+                } else {
+                    _ = calyxTo(s, c, stand, true);
+                }
+                if (!shootShards(s, c, dt, 0, 320)) _ = aimAt(s, c, stand.add(v3(0, 200, 300)), dt);
+            },
+            .k_stone => {
+                const st = s.findConst(.calculus) orelse return;
+                _ = calyxTo(s, c, ch4.standPoint(), false);
+                _ = aimAt(s, c, st.pos, dt);
+                if (focusKind(s) == .calculus and b.tap()) c.examine = true;
+            },
+            .k_neck => {
+                const e = s.findConst(.plaque) orelse return;
+                const d = calyxTo(s, c, ch4.standPoint(), false);
+                // once the bit is in, the reticle is free for the shards
+                if (drill.latch != null and shootShards(s, c, dt, 0, 420)) {
+                    if (!b.cooling) c.arm[1] = true;
+                    return;
+                }
+                _ = aimAt(s, c, e.pos, dt);
+                const on = focusKind(s) == .plaque and s.focus.dist < game.drill_reach;
+                if (!b.cooling and d < 30 and (drill.latch != null or on)) c.arm[1] = true;
+            },
+            .k_split => {
+                const e = kidneyPiece(s) orelse return;
+                const out = s.pos.sub(e.pos).norm();
+                const stand = e.pos.add(out.scale(e.radius + game.hull_r + 9));
+                const d = s.pos.dist(e.pos) - e.radius;
+                if (d > 40) _ = calyxTo(s, c, stand, d > 300) else _ = flyTo(s, c, stand, false);
+                const cs = aimAt(s, c, e.pos, dt);
+                const on = focusKind(s) == .calculus and s.focus.dist < game.drill_reach;
+                if (!b.cooling and (drill.latch != null or (on and cs > 0.97))) c.arm[1] = true;
+                // the notch is through: the blow, with the bit still in
+                if (drill.engaged and e.aux >= 1 and cs > 0.9) c.arm[0] = true;
+            },
+            .k_resonance => {
+                // a shard on its way in gets a wave to itself
+                if (nearestOf(s, .shard, 160)) |sh| {
+                    if (aimAt(s, c, sh.pos, dt) > 0.95 and b.tap()) c.arm = .{ true, true };
+                    return;
+                }
+                const e = kidneyPiece(s) orelse return;
+                // two pieces that parted together are still side by side: aim between them
+                var aim = e.pos;
+                for (&s.ents) |*o| {
+                    if (o == e or o.kind != .calculus or ch4.passable(o)) continue;
+                    if (o.pos.dist(e.pos) < 2.6 * e.radius) {
+                        aim = e.pos.add(o.pos).scale(0.5);
+                        break;
+                    }
+                }
+                const d = s.pos.dist(e.pos) - e.radius;
+                const out = s.pos.sub(aim).norm();
+                if (d > 320 or d < 120) _ = calyxTo(s, c, aim.add(out.scale(e.radius + 220)), d > 600);
+                const cs = aimAt(s, c, aim, dt);
+                if (d < 420 and cs > 0.985 and b.tap()) c.arm = .{ true, true };
+            },
+            .k_exit => {
+                const wp = s.waypoint orelse return;
+                if (b.phase == 0) {
+                    if (calyxTo(s, c, wp.add(v3(0, 20, 170)), true) < 40) b.phase = 1;
+                    _ = aimAt(s, c, wp, dt);
+                } else {
+                    _ = flyTo(s, c, wp.add(v3(0, 0, -70)), true);
+                    _ = aimAt(s, c, wp.add(v3(0, 0, -300)), dt);
+                }
+            },
+            else => {},
+        }
+    }
+
     pub fn think(b: *Bot, s: *const Sim, dt: f32) Controls {
         var c: Controls = .{};
         b.tap_cd = @max(0, b.tap_cd - dt);
@@ -509,6 +669,10 @@ pub const Bot = struct {
         }
         if (s.chapter == 2) {
             b.thinkStomach(s, dt, &c);
+            return c;
+        }
+        if (s.chapter == 3) {
+            b.thinkKidney(s, dt, &c);
             return c;
         }
         const vn = &s.vein;
@@ -795,7 +959,7 @@ pub fn runHeadlessVia(sim: *Sim, checkpoint: *Sim, chapter: u8, max_seconds: f32
             bot = .{};
             if (log) std.debug.print("[{d:7.1}s] hull lost, retry from checkpoint (stage {s})\n", .{ t, @tagName(sim.stage) });
         }
-        if (log and trace and @mod(t, 4.0) < dt) std.debug.print("    t={d:.0} pos=({d:.0},{d:.0},{d:.0}) hull={d:.0} flow={d:.0} phase={d} ring={?d:.0} tether={} wp={?d:.0}\n", .{ t, sim.pos.x, sim.pos.y, sim.pos.z, sim.hull, sim.flow.z, bot.phase, if (sim.chapter == 2) sim.sto.ring_z else sim.gut.ring_z, sim.tether != null, if (sim.waypoint) |w| @as(?f32, w.z) else null });
+        if (log and trace and @mod(t, 4.0) < dt) std.debug.print("    t={d:.0} pos=({d:.0},{d:.0},{d:.0}) hull={d:.0} flow={d:.0} phase={d} ring={?d:.0} tether={} wp={?d:.0}\n", .{ t, sim.pos.x, sim.pos.y, sim.pos.z, sim.hull, sim.flow.z, bot.phase, if (sim.chapter == 2) sim.sto.ring_z else if (sim.chapter == 1) sim.gut.ring_z else null, sim.tether != null, if (sim.waypoint) |w| @as(?f32, w.z) else null });
         if (sim.stage != last) {
             last = sim.stage;
             if (log) std.debug.print("[{d:7.1}s] stage {s}  hull {d:.0} stability {d:.0} z {d:.0}\n", .{ t, @tagName(sim.stage), sim.hull, sim.stability, sim.pos.z });
@@ -874,5 +1038,31 @@ test "scripted pilot finishes the stomach chapter: pits under the waves, the col
     try std.testing.expect(g.cautery_t >= ch3.seal_time - 0.1);
     try std.testing.expect(r.stats.dual_time > ch3.seal_time);
     try std.testing.expect(g.tether_uses >= 2);
+    try std.testing.expect(r.stability > 0);
+}
+
+test "scripted pilot finishes the kidney chapter: the stalk, notch and blow, Resonance, and nothing lodged" {
+    const gpa = std.testing.allocator;
+    const sim = try gpa.create(Sim);
+    defer gpa.destroy(sim);
+    const cp = try gpa.create(Sim);
+    defer gpa.destroy(cp);
+    const r = runHeadlessChapter(sim, cp, 3, 1500, false);
+    try std.testing.expect(r.completed);
+    const g = &sim.g4;
+    try std.testing.expect(g.neck_cut and g.has_resonance);
+    // every piece left is small enough to pass, and none of them was made with a bare blow
+    try std.testing.expectEqual(@as(u32, 0), ch4.oversized(sim));
+    try std.testing.expect(g.clean_splits >= 7);
+    try std.testing.expect(g.wave_splits >= 4);
+    try std.testing.expectEqual(@as(u32, 15), g.clean_splits + g.wave_splits);
+    try std.testing.expectEqual(@as(u32, 0), g.bad_punches);
+    try std.testing.expectEqual(@as(u32, 0), g.lodged);
+    // the shards shaken loose over the stalk were shot while the other arm kept drilling
+    try std.testing.expect(g.shards_shot >= 2);
+    try std.testing.expect(r.stats.dual_time > 3);
+    // the tip was crossed between the ducts: the one spurt that took the drone is the one that delivered it
+    try std.testing.expect(g.jet_hits <= 1);
+    try std.testing.expect(r.stats.sync_strikes >= 2);
     try std.testing.expect(r.stability > 0);
 }

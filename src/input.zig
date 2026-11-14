@@ -743,4 +743,16 @@ test "the scripted pilot finishes every chapter through a controller alone" {
     // the weld needs one trigger held to press and the other to drill, for its whole length
     try expect(antrum.stats.dual_time > 6);
     try expect(antrum.stability > 0);
+
+    through = .{};
+    const calyx = bot.runHeadlessVia(sim, cp, 3, 1500, false, &through);
+    try expect(calyx.completed);
+    try expect(sim.g4.neck_cut and sim.g4.has_resonance);
+    try expect(@import("ch4.zig").oversized(sim) == 0);
+    // a notch needs one trigger held while the other is pressed; Resonance needs both pressed together
+    try expect(sim.g4.clean_splits >= 7);
+    try expect(sim.g4.wave_splits >= 4);
+    try expect(sim.g4.bad_punches == 0);
+    try expect(calyx.stats.dual_time > 3);
+    try expect(calyx.stability > 0);
 }

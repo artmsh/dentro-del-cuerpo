@@ -21,6 +21,7 @@ Hull 8 µm, deformable (red-cell sized, so it passes capillaries). Fictional cap
 | Mucus tether (ch. 2) | anchor to a surface and crawl against flow | H. pylori / bacterial adhesins |
 | Buffer coat (ch. 3) | a bicarbonate reserve the hull spends in acid in place of itself; 12 s, refilled in neutral gel or blood | bicarbonate secreted into the mucus by the surface epithelium |
 | Cautery bit (ch. 3) | the drill bit heats as it turns and welds a vessel that the other arm presses flat | coaptive thermal coagulation of a bleeding ulcer vessel |
+| Resonance (ch. 4) | a Sync punch leaves the arms as a shockwave tuned to the stone and splits every oversized piece within 0.7 mm ahead, with no notch | shock wave lithotripsy |
 | Surfactant skin (ch. 7) | cross air–liquid interfaces | pulmonary surfactant |
 | Sheath glide (ch. 10) | travel the perineural space of olfactory fila | the route *Naegleria fowleri* takes |
 
@@ -178,3 +179,51 @@ secretion by the surface cells, *H. pylori*'s size, helical shape, motility in m
 its colonisation of antral pits, retropulsion of gastric contents by the antral wave, and coaptive
 coagulation as the treatment for a bleeding ulcer vessel. Fiction: the coat, a drill that welds, a hull that
 gel repairs, a wave every 40 s instead of every 20, and the pace of all of it.
+
+## Chapter 4 beat sheet (playable)
+
+One minor calyx of the right kidney's lower pole: a cup 6.4 mm across standing over a renal papilla, with the
+fornix as the gutter where the two meet and the neck of the calyx, 0.58 mm wide, in the roof. Nine ducts of
+Bellini, each 0.11 mm across, open on the area cribrosa at the papilla's tip. A calcium oxalate stone 1.28 mm
+across stands on a stalk above a Randall's plaque, 1.1 mm from the axis. The drone arrives out of a duct and
+never leaves the calyx.
+
+1. **Arrival.** Out of a duct of Bellini onto the tip of the papilla. The arrival card gives the route,
+   including the glomerulus that the drone had to go round: the filter passes nothing wider than about 8 nm,
+   so the route left the blood in the vasa recta and entered a collecting duct through its wall. The
+   glomerulus has an atlas entry and is not flown. The HUD gains the distance to the neck, the size of the
+   largest piece of stone against the size that passes, and whether the outlet is clear.
+2. **Ducts.** The pilot identifies a duct. Each of the nine fires for 1.6 s in every 7.2 s, one after another
+   round the tip, and its rim brightens before it does.
+3. **Jets.** The crossing to the stone. A jet does the hull no harm and carries the drone 0.5 mm/s up and
+   away from where it was working; the tether holds against it. Each spurt near the drone also brings out a
+   crystal of calcium oxalate, 20 µm long, which drifts with the urine towards the neck and cuts the hull on
+   contact. Crystals are shot, drilled or punched apart, or avoided.
+4. **Stone.** The pilot identifies the stone or the plaque under it.
+5. **Stalk.** Seven seconds of drilling through the stalk, the bit's heat allowing five of them at a
+   time. The drilling shakes a crystal off the stone every 1.5 s, and it comes for the drone, so the other
+   arm shoots while this one cuts. A blow on the stone while it is still attached tears the plaque out of
+   the papilla and costs stability.
+6. **Fragments.** Freed, the stone drifts towards the neck, as everything loose in the calyx does. Whole, it
+   lodges there, and while the neck is blocked stability falls until the piece in it is split. A piece
+   passes at half a millimetre, which is four halvings and sixteen pieces. A halving takes both arms: the
+   drill cuts a notch in 1.3 s on a piece held still, the notch stays deep enough for half a second after
+   the bit leaves it, and the other arm's punch has to land in that time (the chapter's dual-arm
+   encounter). A blow with no notch splits nothing and throws three shards, which come for the drone. Rounds do nothing to stone.
+7. **Upgrade.** Resonance, after seven clean splits, with eight pieces left of 0.64 mm each.
+8. **Resonance.** A Sync punch now goes out as a wave that halves every oversized piece within 0.7 mm ahead
+   of the reticle and breaks the crystals in its path, at the cost of one shard thrown back from each piece
+   it splits. Pieces side by side go in one wave, so the pilot lines them up. Pieces already small enough
+   are left alone.
+9. **End.** Out through the fornix, where a calyx under pressure leaks into the veins round the kidney.
+   Debrief with grade, blows that landed on a notch, pieces that blocked the outlet, shards carried into the
+   ureter and hits on the lining; the same retry paths as the earlier chapters.
+
+Real: the papilla, the area cribrosa and the ducts of Bellini with their size, urine leaving the ducts in
+spurts as the calyx contracts, Randall's plaque as the apatite base on which most calcium oxalate stones
+grow and the stalk that holds them to it, the bipyramidal dihydrate crystals found in a stone-former's urine
+and their size, fragment size as the measure of a lithotripsy, shock waves as a way to break a stone, and
+backflow through the fornix into the veins when the calyx is under pressure. Fiction: a neck half a
+millimetre wide where a real one is several millimetres, so that a stone this small matters; nine ducts
+where a papilla has a dozen or two, firing every 7 s; a stone that halves cleanly along a notch; shards
+that come for the drone; Resonance; and the pace of all of it.

@@ -120,6 +120,7 @@ pub const chapters = [_]Chapter{
             .en = "Resonance — a Sync punch becomes a ranged shockwave.",
             .uk = "Резонанс — синхроудар стає ударною хвилею, що б’є на відстані.",
         },
+        .playable = true,
         .x = 0.435,
         .y = 0.455,
     },

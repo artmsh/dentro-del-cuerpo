@@ -2,7 +2,7 @@ Dentro del cuerpo
 =================
 
 A first-person game about a remotely piloted micro-drone inside a human body.
-Three chapters, about five minutes each, in English and Ukrainian.
+Four chapters, about five minutes each, in English and Ukrainian.
 
 Project page, source and issue tracker:
 https://github.com/artmsh/dentro-del-cuerpo
@@ -37,6 +37,7 @@ Right arm tool          X next; 8, 9, 0            RB next, d-pad right previous
 Identify / scan         T (or F)                   X
 Mucus Tether (ch. 2)    G                          click RS, or d-pad up
 Buffer Coat (ch. 3)     works by itself in acid
+Resonance (ch. 4)       Q + E, Punch on both arms  LT + RT, Punch on both arms
 Hint                    H                          Y
 Skip a comms line       Tab                        View
 Pause and resume        Esc                        Menu

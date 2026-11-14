@@ -182,6 +182,16 @@ pub const hud = struct {
 
     pub const arrival_chapter: T = .{ .en = "CHAPTER 2  ·  TRANSIT COMPLETE", .uk = "РОЗДІЛ 2  ·  ТРАНЗИТ ЗАВЕРШЕНО" };
     pub const arrival_place: T = .{ .en = "Proximal jejunum", .uk = "Проксимальна порожня кишка" };
+    pub const site_calyx: T = .{ .en = "MINOR CALYX · RIGHT KIDNEY", .uk = "МАЛА ЧАШЕЧКА · ПРАВА НИРКА" };
+    pub const to_outlet: T = .{ .en = "TO THE NECK OF THE CALYX", .uk = "ДО ШИЙКИ ЧАШЕЧКИ" };
+    pub const largest_piece: T = .{ .en = "LARGEST PIECE", .uk = "НАЙБІЛЬШИЙ УЛАМОК" };
+    pub const passes_under: T = .{ .en = "PASSES UNDER {0} mm", .uk = "ПРОЙДЕ, ЯКЩО МЕНШИЙ ЗА {0} мм" };
+    pub const outlet_clear: T = .{ .en = "OUTLET CLEAR", .uk = "ВИХІД ВІЛЬНИЙ" };
+    pub const outlet_blocked: T = .{ .en = "OUTLET BLOCKED — SPLIT THE PIECE IN IT", .uk = "ВИХІД ПЕРЕКРИТО — РОЗКОЛІТЬ УЛАМОК У НЬОМУ" };
+    pub const in_a_jet: T = .{ .en = "IN A URINE JET", .uk = "У СТРУМЕНІ СЕЧІ" };
+    pub const notch: T = .{ .en = "NOTCH {0}%", .uk = "НАДРІЗ {0}%" };
+    pub const notch_ready: T = .{ .en = "NOTCH READY — STRIKE", .uk = "НАДРІЗ ГОТОВИЙ — БИЙТЕ" };
+
     pub const arrival_route = [2]T{
         .{ .en = "femoral vein → vena cava → right heart → lungs → left heart → aorta →", .uk = "стегнова вена → порожниста вена → праве серце → легені → ліве серце → аорта →" },
         .{ .en = "superior mesenteric artery → villus capillary → out through the tip", .uk = "верхня брижова артерія → капіляр ворсинки → назовні крізь верхівку" },
@@ -191,6 +201,12 @@ pub const hud = struct {
     pub const arrival3_route = [2]T{
         .{ .en = "jejunal lumen, against the stream on the tether → duodenum →", .uk = "просвіт порожньої кишки, проти течії на тросі → дванадцятипала кишка →" },
         .{ .en = "pylorus, on a wave of duodenogastric reflux → mucus gel of the antrum", .uk = "воротар, на хвилі дуоденогастрального рефлюксу → слизовий гель антрального відділу" },
+    };
+    pub const arrival4_chapter: T = .{ .en = "CHAPTER 4  ·  TRANSIT COMPLETE", .uk = "РОЗДІЛ 4  ·  ТРАНЗИТ ЗАВЕРШЕНО" };
+    pub const arrival4_place: T = .{ .en = "Minor calyx, right kidney", .uk = "Мала чашечка правої нирки" };
+    pub const arrival4_route = [2]T{
+        .{ .en = "gastric vein → portal vein → liver → heart and lungs → aorta → right renal artery →", .uk = "шлункова вена → ворітна вена → печінка → серце й легені → аорта → права ниркова артерія →" },
+        .{ .en = "glomerulus: the filter does not pass → vasa recta → through a duct wall → duct of Bellini", .uk = "клубочок: фільтр не пропускає → прямі судини → крізь стінку протоки → протока Белліні" },
     };
     pub const transit: T = .{ .en = "TRANSIT — TEMPO LINK 1:1", .uk = "ТРАНЗИТ — МАСШТАБ ЧАСУ 1:1" };
     pub const transit_distance: T = .{ .en = "{0} cm to femoral junction", .uk = "{0} см до стегнової вени" };
@@ -242,6 +258,12 @@ pub const card = struct {
         .en = "The hull now carries a bicarbonate reserve. In acid it spends itself instead of the hull: twelve seconds, shown under the hull bar, refilled in neutral gel or in blood. There is nothing to press; it works when acid touches you. The drill bit now heats as it turns. Held on a vessel that the other arm is pressing flat with PUNCH, it welds the walls together.",
         .uk = "Корпус тепер несе запас бікарбонату. У кислоті витрачається він, а не корпус: дванадцять секунд — шкала під смугою корпусу; запас поповнюється в нейтральному гелі або в крові. Натискати нічого не треба: покриття спрацьовує, щойно вас торкнеться кислота. А свердло тепер нагрівається під час обертання. Якщо тримати його на судині, яку друга рука сплющує УДАРОМ, воно зварює її стінки.",
     };
+    pub const resonance_kicker: T = .{ .en = "RESONANT FREQUENCY MEASURED  —  UPGRADE", .uk = "РЕЗОНАНСНУ ЧАСТОТУ ВИМІРЯНО  —  ПОКРАЩЕННЯ" };
+    pub const resonance_name: T = .{ .en = "RESONANCE", .uk = "РЕЗОНАНС" };
+    pub const resonance_body: T = .{
+        .en = "A Sync punch now leaves the arms as a shockwave tuned to the stone. Every piece ahead of the reticle that is still too big, out to 0.7 mm, parts cleanly in two with no notch, each piece once in a wave, and crystal shards caught in the wave are shattered. Pieces small enough to pass are left as they are. It is still a Sync punch: PUNCH on both arms, triggered within a tenth of a second.",
+        .uk = "Синхроудар тепер виходить із рук ударною хвилею, налаштованою на камінь. Кожен завеликий уламок перед прицілом на відстані до 0,7 мм чисто ділиться надвоє без надрізу — кожен один раз за хвилю, — а кристалічні осколки, що потрапили у хвилю, розсипаються. Уламки, досить дрібні, щоб пройти, лишаються як є. Це й далі синхроудар: УДАР на обох руках, з різницею до десятої частки секунди.",
+    };
     pub const install: T = .{ .en = "{@confirm} — install", .uk = "{@confirm} — встановити" };
 
     pub const signal_lost: T = .{ .en = "SIGNAL LOST", .uk = "СИГНАЛ ВТРАЧЕНО" };
@@ -251,6 +273,10 @@ pub const card = struct {
     pub const lost_vein: T = .{ .en = "Too much damage to healthy tissue, too many emboli. She did not make it.", .uk = "Забагато ушкоджень здорової тканини, забагато емболів. Вона не вижила." };
     pub const lost_gut: T = .{ .en = "Too much damage to the lining, too much virus spread. She did not make it.", .uk = "Забагато ушкоджень слизової, вірус поширився надто далеко. Вона не вижила." };
     pub const lost_stomach: T = .{ .en = "Too much damage to the lining, too much blood lost. She did not make it.", .uk = "Забагато ушкоджень слизової, забагато втраченої крові. Вона не вижила." };
+    pub const lost_kidney: T = .{
+        .en = "Too much damage to the lining, the calyx blocked for too long. She did not make it.",
+        .uk = "Забагато ушкоджень вистилки, чашечка надто довго була перекрита. Вона не вижила.",
+    };
     pub const restart: T = .{ .en = "{@confirm} — restart the chapter", .uk = "{@confirm} — почати розділ заново" };
 
     pub const vein_kicker: T = .{ .en = "CHAPTER 1  ·  VEIN", .uk = "РОЗДІЛ 1  ·  ВЕНА" };
@@ -260,6 +286,8 @@ pub const card = struct {
 
     pub const stomach_kicker: T = .{ .en = "CHAPTER 3  ·  STOMACH", .uk = "РОЗДІЛ 3  ·  ШЛУНОК" };
     pub const stomach_title: T = .{ .en = "Out through the venule", .uk = "Назовні крізь венулу" };
+    pub const kidney_kicker: T = .{ .en = "CHAPTER 4  ·  KIDNEYS", .uk = "РОЗДІЛ 4  ·  НИРКИ" };
+    pub const kidney_title: T = .{ .en = "Out by the fornix", .uk = "Назовні крізь склепіння" };
     pub const row_stability: T = .{ .en = "Patient stability", .uk = "Стабільність пацієнтки" };
     pub const row_emboli: T = .{ .en = "Emboli that reached the lungs", .uk = "Емболів, що дісталися легень" };
     pub const row_tissue: T = .{ .en = "Hits on healthy tissue", .uk = "Влучань у здорову тканину" };
@@ -276,6 +304,10 @@ pub const card = struct {
     pub const row_acid: T = .{ .en = "Seconds of acid on bare hull", .uk = "Секунд у кислоті без покриття" };
     pub const row_crushed: T = .{ .en = "Times caught between the walls", .uk = "Разів затиснуто між стінками" };
     pub const row_bleed: T = .{ .en = "Seconds the vessel bled", .uk = "Секунд, що кровила судина" };
+    pub const row_notched: T = .{ .en = "Blows that landed on a notch", .uk = "Ударів, що влучили в надріз" };
+    pub const row_lodged: T = .{ .en = "Pieces that blocked the outlet", .uk = "Уламків, що перекривали вихід" };
+    pub const row_shards: T = .{ .en = "Shards carried into the ureter", .uk = "Осколків, занесених у сечовід" };
+    pub const row_calyx_lining: T = .{ .en = "Hits on the lining", .uk = "Влучань у вистилку" };
     pub const out_of_100: T = .{ .en = "{0} / 100", .uk = "{0} / 100" };
     pub const out_of: T = .{ .en = "{0} / {1}", .uk = "{0} / {1}" };
     pub const duration: T = .{ .en = "{0} min {1} s", .uk = "{0} хв {1} с" };
@@ -289,6 +321,18 @@ pub const card = struct {
     pub const note_stomach_clean: T = .{ .en = "Margin clear and the vessel welded without delay. With the bacteria gone the crater will close in a few weeks.", .uk = "Край чистий, судину заварено без зволікань. Без бактерій кратер закриється за кілька тижнів." };
     pub const note_stomach_bled: T = .{ .en = "The vessel is shut. She lost more blood than she needed to while it was open.", .uk = "Судину закрито. Поки вона була відкрита, пацієнтка втратила більше крові, ніж мусила." };
     pub const note_stomach_lining: T = .{ .en = "The ulcer will heal. The pits you hit will take a few days longer than the rest.", .uk = "Виразка загоїться. Ямкам, у які ви влучили, знадобиться на кілька днів більше, ніж решті." };
+    pub const note_kidney_clean: T = .{
+        .en = "Nothing lodged and nothing was crushed. Sixteen grains will pass in the next day or two, and she will not notice them.",
+        .uk = "Ніщо не застрягло й нічого не розкришено. Шістнадцять піщинок вийдуть за день-два, і вона їх не помітить.",
+    };
+    pub const note_kidney_lodged: T = .{
+        .en = "Everything is small enough to pass now. The time the calyx spent blocked she will feel as an ache in her side tonight.",
+        .uk = "Тепер усе досить дрібне, щоб пройти. Час, поки чашечка була перекрита, вона відчує сьогодні ввечері як ниючий біль у боці.",
+    };
+    pub const note_kidney_shards: T = .{
+        .en = "The stone is gone. The shards that went with it will scratch on the way down: a little blood in her urine for a day.",
+        .uk = "Каменя немає. Осколки, що пішли разом із ним, подряпають дорогою: день буде трохи крові в сечі.",
+    };
     pub const to_route_map: T = .{ .en = "{@confirm} — route map", .uk = "{@confirm} — карта маршруту" };
     /// The caption beside the grade letter on the debrief.
     pub const grade: T = .{ .en = "GRADE", .uk = "ОЦІНКА" };
@@ -347,6 +391,11 @@ pub const pause = struct {
     pub const coat = [2]T{
         .{ .en = "auto", .uk = "авто" },
         .{ .en = "Buffer Coat: 12 s in acid; refills in neutral gel or blood", .uk = "Буферне покриття: 12 с у кислоті; поповнюється в нейтральному гелі або крові" },
+    };
+    /// The chapter 4 upgrade, listed once the drone carries it. It is a Sync punch and has no control of its own.
+    pub const resonance = [2]T{
+        .{ .en = "{@arm_left} + {@arm_right}", .uk = "{@arm_left} + {@arm_right}" },
+        .{ .en = "Resonance: a Sync punch splits stone ahead, to 0.7 mm", .uk = "Резонанс: синхроудар розколює камінь попереду, до 0,7 мм" },
     };
     /// A control that exists only on the keyboard: the window's own shortcut, which the platform names.
     /// It is listed when the prompts are for the keyboard.
@@ -839,6 +888,99 @@ pub const line = struct {
         .uk = "Ви всередині. Шлункова вена, ворітна вена, печінка, серце, легені — і ще одне коло, до її правої нирки.",
     };
 
+    // chapter 4
+    pub const out_of_the_duct: T = .{
+        .en = "And out. That was a duct of Bellini, and this is a minor calyx of her right kidney: the cup that catches what the papilla under you lets go.",
+        .uk = "І назовні. То була протока Белліні, а це — мала чашечка її правої нирки: келих, що ловить усе, що випускає сосочок під вами.",
+    };
+    pub const the_glomerulus_was_a_dead_end: T = .{
+        .en = "You did not come through the glomerulus, and nothing your size ever will: its filter stops whatever is wider than eight nanometres. The route left the blood further down and came in through the wall of a duct. I have filed the glomerulus in your atlas.",
+        .uk = "Крізь клубочок ви не проходили, і ніщо вашого розміру не пройде: його фільтр затримує все, ширше за вісім нанометрів. Маршрут покинув кров нижче й увійшов крізь стінку протоки. Клубочок я внесла до вашого атласу.",
+    };
+    pub const look_at_the_openings: T = .{
+        .en = "Look down at the tip under you. Every drop of urine this part of the kidney makes leaves through those openings. Identify one.",
+        .uk = "Гляньте вниз, на верхівку під вами. Кожна крапля сечі, яку виробляє ця частина нирки, виходить крізь оці отвори. Розпізнайте один.",
+    };
+    pub const they_fire_in_spurts: T = .{
+        .en = "They do not run steadily. The calyx milks the papilla, and each duct fires in spurts. A spurt will not hurt the hull, but it will throw you across the calyx. The rim brightens before one fires.",
+        .uk = "Вони не течуть рівномірно. Чашечка видоює сосочок, і кожна протока викидає сечу поштовхами. Викид не зашкодить корпусу, але кине вас через усю чашечку. Перед викидом край протоки світлішає.",
+    };
+    pub const the_stone_is_across: T = .{
+        .en = "The stone is on the flank of the papilla ahead of you, a millimetre off. Cross the tip between spurts.",
+        .uk = "Камінь — на схилі сосочка перед вами, за міліметр. Перетніть верхівку між викидами.",
+    };
+    pub const thats_a_jet: T = .{ .en = "That is a jet. Don't fight it: slide out sideways.", .uk = "Це струмінь. Не боріться з ним: вислизніть убік." };
+    pub const the_jets_carry_crystals: T = .{
+        .en = "The jets carry crystals of their own. She would have passed those anyway, but they cut like any other: shoot them or keep clear.",
+        .uk = "Струмені несуть і власні кристали. Вони вийшли б і так, але ріжуть не гірше за інші: стріляйте або тримайтеся подалі.",
+    };
+    pub const there_is_the_stone: T = .{
+        .en = "There. Calcium oxalate, a millimetre and a third across. Whole, it will not go through the neck of this calyx. Identify it.",
+        .uk = "Ось він. Оксалат кальцію, міліметр і третина завширшки. Цілим він крізь шийку цієї чашечки не пройде. Розпізнайте його.",
+    };
+    pub const it_sits_on_a_stalk: T = .{
+        .en = "It grew on a plaque in the papilla and a stalk still holds it there. Get under the stone and put the DRILL on the stalk. On the stalk, not on the papilla.",
+        .uk = "Він виріс на бляшці в сосочку й досі тримається там на ніжці. Залетіть під камінь і поставте СВЕРДЛО на ніжку. На ніжку, а не на сосочок.",
+    };
+    pub const shards_while_you_drill: T = .{
+        .en = "The drilling will shake crystals off the stone above you, and at your size they are razors. Keep the other arm on SHOOT and pick them off as they come.",
+        .uk = "Свердління струшуватиме кристали з каменя над вами, а у вашому масштабі це леза. Тримайте на другій руці ПОСТРІЛ і збивайте їх на підльоті.",
+    };
+    pub const shard_coming: T = .{ .en = "Shard, coming at you. Shoot it.", .uk = "Осколок, летить на вас. Стріляйте." };
+    pub const that_one_cut_the_hull: T = .{
+        .en = "That one cut the hull. They are slow: shoot them early, or move off their line.",
+        .uk = "Цей розрізав корпус. Вони повільні: стріляйте заздалегідь або зійдіть із їхнього шляху.",
+    };
+    pub const half_through_the_stalk: T = .{ .en = "Half through the stalk.", .uk = "Ніжку перерізано наполовину." };
+    pub const its_free: T = .{
+        .en = "It's free, and it is drifting to the outlet, as everything in here does. At that size it will plug the neck of the calyx, and a plugged calyx is a part of the kidney that cannot drain.",
+        .uk = "Він вільний і дрейфує до виходу, як і все тут. За такого розміру він заткне шийку чашечки, а заткнута чашечка — це частина нирки, з якої немає відтоку.",
+    };
+    pub const score_then_strike: T = .{
+        .en = "So we break it, and we choose the size of the pieces. DRILL on one arm to cut a notch. When the notch glows right across, PUNCH with the other arm while the bit is still in, and it parts in two along the notch.",
+        .uk = "Тож ми його розіб’ємо — і самі оберемо розмір уламків. СВЕРДЛО на одній руці, щоб прорізати надріз. Коли надріз засвітиться на всю ширину, бийте УДАРОМ другої руки, не виймаючи свердла, — і камінь розділиться надвоє по надрізу.",
+    };
+    pub const two_clean_halves: T = .{
+        .en = "Two halves, clean. Each is still too big. Halve them again, and those again: four halvings make sixteen pieces, and each of the sixteen will pass.",
+        .uk = "Дві половини, чисто. Кожна ще завелика. Розділіть їх ще раз, а потім ще: чотири поділи дають шістнадцять уламків, і кожен із шістнадцяти пройде.",
+    };
+    pub const not_without_a_notch: T = .{ .en = "Not without a notch! A bare blow only crushes the surface into shards.", .uk = "Не без надрізу! Удар по цілому лише кришить поверхню на осколки." };
+    pub const not_while_its_on_the_stalk: T = .{
+        .en = "Not while it is on its stalk: every blow goes straight into the papilla under it. Cut the stalk first.",
+        .uk = "Не тоді, коли він на ніжці: кожен удар іде просто в сосочок під ним. Спершу переріжте ніжку.",
+    };
+    pub const rounds_do_nothing_to_stone: T = .{ .en = "Rounds only chip dust off a stone. The drill and the punch, together.", .uk = "Заряди лише збивають із каменя пил. Свердло й удар, разом." };
+    pub const a_piece_is_in_the_outlet: T = .{
+        .en = "A piece is in the outlet, too big to go through, and nothing is draining past it. Go up there and split it where it sits.",
+        .uk = "В отворі виходу уламок, завеликий, щоб пройти, і повз нього ніщо не відтікає. Підніміться туди й розколіть його на місці.",
+    };
+    pub const its_draining_again: T = .{ .en = "It's draining again.", .uk = "Відтік відновився." };
+    pub const that_piece_will_pass: T = .{
+        .en = "That piece is small enough: it is on its way to the ureter, and she will never feel it.",
+        .uk = "Цей уламок досить дрібний: він уже прямує до сечоводу, і вона його не відчує.",
+    };
+    pub const resonance_is_live: T = .{
+        .en = "Resonance is live. A Sync punch now goes out ahead of you as a shockwave tuned to this stone, and every piece in front of you that is still too big parts in two with no notch. PUNCH on both arms, and strike together.",
+        .uk = "Резонанс працює. Синхроудар тепер виходить уперед ударною хвилею, налаштованою на цей камінь, і кожен завеликий уламок перед вами ділиться надвоє без надрізу. УДАР на обох руках — і бийте одночасно.",
+    };
+    pub const line_them_up: T = .{ .en = "Get more than one piece in front of you and a single wave will split them all.", .uk = "Зберіть перед собою кілька уламків — і одна хвиля розколе їх усі." };
+    pub const nothing_in_that_wave: T = .{
+        .en = "Nothing in that wave. Face a piece that is still too big, from within two thirds of a millimetre.",
+        .uk = "У цю хвилю нічого не потрапило. Станьте обличчям до завеликого уламка, не далі ніж за дві третини міліметра.",
+    };
+    pub const every_piece_will_pass: T = .{
+        .en = "Every piece is small enough to pass. The plaque is still in the papilla, and that is a matter for her diet and her urologist, not for us.",
+        .uk = "Кожен уламок досить дрібний, щоб пройти. Бляшка лишилася в сосочку — але це вже справа її дієти та її уролога, а не наша.",
+    };
+    pub const out_by_the_fornix: T = .{
+        .en = "Your way out is not the ureter. The fornix, the gutter round the foot of the papilla, leaks into the veins when a calyx has been under pressure, and this one has. I have marked the place.",
+        .uk = "Ваш вихід — не сечовід. Склепіння, жолобок довкола основи сосочка, протікає у вени, коли чашечка побувала під тиском, — а ця побувала. Я позначила місце.",
+    };
+    pub const renal_vein_next: T = .{
+        .en = "You're through. Renal vein, vena cava, heart, lungs, and out again to her gallbladder.",
+        .uk = "Ви пройшли. Ниркова вена, порожниста вена, серце, легені — і знову в дорогу, до її жовчного міхура.",
+    };
+
     pub const link_re_established: T = .{ .en = "Link re-established. You're back at the last checkpoint.", .uk = "Зв’язок відновлено. Ви знову на останній контрольній точці." };
 };
 
@@ -1278,6 +1420,90 @@ pub const hint = struct {
             .uk = "Тримайте {@arm_left} і {@arm_right} разом. Відпустіть руку зі свердлом, коли НАГРІВ майже повний, і натисніть знову, коли воно охолоне; шов протримається.",
         },
     };
+    pub const k_duct = [3]T{
+        .{
+            .en = "The ducts are the dark openings on the tip of the papilla, under you.",
+            .uk = "Протоки — це темні отвори на верхівці сосочка, під вами.",
+        },
+        .{
+            .en = "Tilt down until an opening, or the tip around it, is under the reticle, then press {@examine}.",
+            .uk = "Нахиляйте погляд униз, доки під прицілом не опиниться отвір або верхівка довкола нього, і натисніть {@examine}.",
+        },
+        .{
+            .en = "Any part of the papilla will do: put the reticle on it and press {@examine}.",
+            .uk = "Підійде будь-яка ділянка сосочка: наведіть на неї приціл і натисніть {@examine}.",
+        },
+    };
+    pub const k_jets = [3]T{
+        .{
+            .en = "A duct that is about to fire brightens at the rim. Go round it, or wait until it has fired.",
+            .uk = "Протока, що от-от викине сечу, світлішає по краю. Обминіть її або зачекайте, доки вона спрацює.",
+        },
+        .{
+            .en = "The stone is the pale mass ahead of you on the flank of the papilla. Fly towards it a little above the surface, and keep off the lines that rise straight from the openings.",
+            .uk = "Камінь — світла брила перед вами на схилі сосочка. Летіть до нього трохи над поверхнею й не перетинайте ліній, що здіймаються просто з отворів.",
+        },
+        .{
+            .en = "If a jet takes you, steer sideways out of it with {@move}. To wait beside a duct, hold on with {@tether}.",
+            .uk = "Якщо струмінь вас підхопив, виходьте з нього вбік — {@move}. Щоб перечекати біля протоки, тримайтеся тросом — {@tether}.",
+        },
+    };
+    pub const k_stone = [3]T{
+        .{
+            .en = "The stone is the big pale body on the flank of the papilla.",
+            .uk = "Камінь — велике світле тіло на схилі сосочка.",
+        },
+        .{
+            .en = "Put the reticle on the stone and press {@examine}.",
+            .uk = "Наведіть приціл на камінь і натисніть {@examine}.",
+        },
+        .{
+            .en = "The stalk under the stone counts as well: reticle on either, then {@examine}.",
+            .uk = "Ніжка під каменем теж зараховується: приціл на камінь або на ніжку, тоді {@examine}.",
+        },
+    };
+    pub const k_neck = [3]T{
+        .{
+            .en = "The stalk is under the stone, between it and the papilla.",
+            .uk = "Ніжка — під каменем, між ним і сосочком.",
+        },
+        .{
+            .en = "Set one arm to DRILL and the other to SHOOT. Fly into the gap under the stone until the reticle is on the stalk and the drill bites, then hold it.",
+            .uk = "Поставте на одну руку СВЕРДЛО, на другу — ПОСТРІЛ. Залетіть у щілину під каменем, доки приціл не опиниться на ніжці й свердло не візьметься, і тримайте.",
+        },
+        .{
+            .en = "Keep the drill arm held and the bit stays in the stalk while you look about. Turn to each shard with {@look} and fire the other arm; let the bit cool when HEAT is nearly full.",
+            .uk = "Тримайте руку зі свердлом натиснутою — і свердло лишиться в ніжці, поки ви роззираєтеся. Повертайтеся до кожного осколка — {@look} — і стріляйте другою рукою; дайте свердлу охолонути, коли НАГРІВ майже повний.",
+        },
+    };
+    pub const k_split = [3]T{
+        .{
+            .en = "Notch first, then the blow. A blow with no notch makes shards.",
+            .uk = "Спершу надріз, потім удар. Удар без надрізу дає осколки.",
+        },
+        .{
+            .en = "Set DRILL on one arm and PUNCH on the other. Close on a piece until the drill bites and hold it until the notch glows right across; then trigger the punch arm while still holding the drill.",
+            .uk = "Поставте СВЕРДЛО на одну руку й УДАР на другу. Підлетіть до уламка, доки свердло не візьметься, і тримайте, доки надріз не засвітиться на всю ширину; тоді бийте другою рукою, не відпускаючи свердла.",
+        },
+        .{
+            .en = "With DRILL on the right arm and PUNCH on the left: hold {@arm_right} until the panel reads NOTCH READY, then press {@arm_left} without letting go of {@arm_right}. Take the largest pieces first, and any piece near the outlet before the rest.",
+            .uk = "Якщо СВЕРДЛО на правій руці, а УДАР на лівій: тримайте {@arm_right}, доки на панелі не з’явиться «НАДРІЗ ГОТОВИЙ», тоді натисніть {@arm_left}, не відпускаючи {@arm_right}. Спершу беріться за найбільші уламки, а за ті, що біля виходу, — раніше за решту.",
+        },
+    };
+    pub const k_resonance = [3]T{
+        .{
+            .en = "Resonance rides on a Sync punch: both arms on PUNCH, triggered together.",
+            .uk = "Резонанс працює через синхроудар: УДАР на обох руках, одночасно.",
+        },
+        .{
+            .en = "Set PUNCH on both arms. Face a piece that is still too big, from within two thirds of a millimetre, and trigger both arms at once.",
+            .uk = "Поставте УДАР на обидві руки. Станьте обличчям до завеликого уламка, не далі ніж за дві третини міліметра, і запустіть обидві руки разом.",
+        },
+        .{
+            .en = "{@tool_left} and {@tool_right} until both panels read PUNCH; then {@arm_left} and {@arm_right} in the same instant, with the piece under the reticle. Pieces beside it split too.",
+            .uk = "{@tool_left} і {@tool_right}, доки на обох панелях не буде «УДАР»; тоді {@arm_left} і {@arm_right} в одну мить, тримаючи уламок під прицілом. Уламки поруч із ним теж розколються.",
+        },
+    };
     pub const wait: T = .{ .en = "Wait for it.", .uk = "Зачекайте." };
 };
 
@@ -1334,4 +1560,11 @@ pub const objective = struct {
     pub const s_margin: T = .{ .en = "Colonised pits cleared {0}/{1}  ·  Swimmers {2}", .uk = "Очищено колонізованих ямок: {0}/{1}  ·  Плавців: {2}" };
     pub const s_cross: T = .{ .en = "Cross the crater to the bleeding vessel", .uk = "Перелетіть кратер до судини, що кровить" };
     pub const s_cautery: T = .{ .en = "Press with PUNCH and weld with DRILL together — sealed {0}%", .uk = "Притискайте УДАРОМ і зварюйте СВЕРДЛОМ одночасно — заварено {0}%" };
+    pub const k_arrive: T = .{ .en = "Arrival — minor calyx, right kidney", .uk = "Прибуття — мала чашечка правої нирки" };
+    pub const k_duct: T = .{ .en = "Identify a duct of Bellini — aim at an opening and press {@examine}", .uk = "Розпізнайте протоку Белліні — наведіть приціл на отвір і натисніть {@examine}" };
+    pub const k_jets: T = .{ .en = "Cross the tip of the papilla to the stone — watch the ducts", .uk = "Перетніть верхівку сосочка до каменя — стежте за протоками" };
+    pub const k_stone: T = .{ .en = "Identify the stone — aim at it and press {@examine}", .uk = "Розпізнайте камінь — наведіть на нього приціл і натисніть {@examine}" };
+    pub const k_neck: T = .{ .en = "Drill through the stalk under the stone — {0}%", .uk = "Переріжте свердлом ніжку під каменем — {0}%" };
+    pub const k_split: T = .{ .en = "Notch with DRILL, then PUNCH — pieces too big to pass: {0}", .uk = "Надріз СВЕРДЛОМ, потім УДАР — завеликих уламків: {0}" };
+    pub const k_resonance: T = .{ .en = "Split what is left with Sync punches — pieces too big to pass: {0}", .uk = "Розколіть решту синхроударами — завеликих уламків: {0}" };
 };

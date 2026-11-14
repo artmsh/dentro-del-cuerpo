@@ -71,6 +71,14 @@ pub const Meshes = struct {
     ulcer_bed: gpu.Mesh,
     gel_sheet: gpu.Mesh,
     helix: gpu.Mesh,
+    /// Chapter 4: the renal papilla and the dome of the calyx over it, both in world coordinates about the
+    /// papilla's axis, the infundibulum above the dome, a crystal (a bipyramid of unit half-length along
+    /// +Y), and a lump of stone of radius `stone_unit`.
+    papilla: gpu.Mesh,
+    calyx_dome: gpu.Mesh,
+    infundibulum: gpu.Mesh,
+    crystal: gpu.Mesh,
+    stone: gpu.Mesh,
 
     pub fn build(b: *mesh_mod.Builder) Meshes {
         var ms: Meshes = undefined;
@@ -110,7 +118,105 @@ pub const Meshes = struct {
             ms.mucosa_strip = b.end();
         }
         buildStomach(b, &ms);
+        buildKidney(b, &ms);
         return ms;
+    }
+
+    /// Cobbles of the wall material around the infundibulum, and so around the seam of its texture.
+    pub const infundibulum_cells_around: f32 = 92;
+    /// The stone is modelled this many units in radius, so that the calcified material, whose grain is
+    /// sized for a body of unit radius, comes out fine on one a millimetre across.
+    pub const stone_unit: f32 = 5;
+
+    /// Chapter 4 scenery, from the functions in kidney.zig that the collision reads.
+    fn buildKidney(b: *mesh_mod.Builder, ms: *Meshes) void {
+        const kd = @import("kidney.zig");
+        const cols: u32 = 72;
+        // The papilla and the dome, each on a polar grid about the axis. Texture is laid on from above,
+        // so a cobble is one cell wide where the surface is level and longer down the slopes.
+        inline for (.{ false, true }) |dome| {
+            const cell: f32 = if (dome) 34 else 14;
+            const v_per: f32 = 1.0 / (cell * 0.32);
+            const rings: u32 = if (dome) 36 else 44;
+            const r0: f32 = if (dome) kd.outlet_r else 0.01;
+            const r1: f32 = kd.fornix_r + 90;
+            b.begin();
+            for (0..rings + 1) |j| {
+                const rho = m.lerp(r0, r1, @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(rings)));
+                for (0..cols + 1) |i| {
+                    const th = m.tau * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(cols));
+                    const x = rho * @cos(th);
+                    const z = rho * @sin(th);
+                    if (dome) {
+                        _ = b.vert(m.v3(x, kd.wallY(x, z), z), m.v3(-2 * x / kd.b_wall, -1, -2 * z / kd.b_wall).norm(), x / cell, z * v_per);
+                    } else {
+                        _ = b.vert(kd.onPapilla(x, z), kd.papillaNormal(x, z), x / cell, z * v_per);
+                    }
+                }
+            }
+            for (0..rings) |j| {
+                for (0..cols) |i| {
+                    const a: u32 = @intCast(j * (cols + 1) + i);
+                    b.quad(a, a + 1, a + cols + 2, a + cols + 1);
+                }
+            }
+            if (dome) ms.calyx_dome = b.end() else ms.papilla = b.end();
+        }
+
+        // The infundibulum: a tube about the axis from the mouth in the dome up to the end of the model.
+        {
+            const cell: f32 = 34;
+            const v_per: f32 = 1.0 / (cell * 0.32);
+            const rings: u32 = 14;
+            const around: u32 = 48;
+            b.begin();
+            for (0..rings + 1) |j| {
+                // rows close together over the taper, further apart above it
+                const t = @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(rings));
+                const y = kd.mouth_y + (kd.y_max - kd.mouth_y) * t * t;
+                const rad = kd.tubeR(y);
+                const slope = (kd.tubeR(y + 5) - kd.tubeR(y - 5)) / 10;
+                for (0..around + 1) |i| {
+                    const u = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(around));
+                    const c = @cos(u * m.tau);
+                    const s = @sin(u * m.tau);
+                    _ = b.vert(m.v3(rad * c, y, rad * s), m.v3(-c, slope, -s).norm(), u * infundibulum_cells_around, (y - kd.mouth_y) * v_per);
+                }
+            }
+            for (0..rings) |j| {
+                for (0..around) |i| {
+                    const a: u32 = @intCast(j * (around + 1) + i);
+                    b.quad(a, a + 1, a + around + 2, a + around + 1);
+                }
+            }
+            ms.infundibulum = b.end();
+        }
+
+        ms.stone = b.blob(22, 30, 11.0, 0.15, 2.3, 1.0);
+        for (b.verts.items[b.base..]) |*v| {
+            for (&v.pos) |*x| x.* *= stone_unit;
+        }
+
+        // A crystal of calcium oxalate dihydrate: two square pyramids base to base, flat-faced.
+        {
+            b.begin();
+            const w: f32 = 0.6;
+            const base = [4]Vec3{ m.v3(w, 0, 0), m.v3(0, 0, w), m.v3(-w, 0, 0), m.v3(0, 0, -w) };
+            for ([2]f32{ 1, -1 }) |tip| {
+                const apex = m.v3(0, tip, 0);
+                for (0..4) |i| {
+                    const p = base[i];
+                    const q = base[(i + 1) % 4];
+                    var n = q.sub(p).cross(apex.sub(p)).norm();
+                    if (n.dot(p.add(q).add(apex)) < 0) n = n.neg();
+                    const a = b.vert(p, n, 0, 0);
+                    const c = b.vert(q, n, 1, 0);
+                    const d = b.vert(apex, n, 0.5, 1);
+                    b.tri(a, c, d);
+                }
+            }
+            ms.crystal = b.end();
+        }
     }
 
     /// Cobbles of the wall material around a pit, and so around the seam of its texture.

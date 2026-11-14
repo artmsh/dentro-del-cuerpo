@@ -10,7 +10,7 @@ const Lang = i18n.Lang;
 pub const Mode = enum { play, demo, inputtest, padtest, selftest, shots, icon };
 
 pub const usage =
-    \\usage: dentro [--fullscreen] [--software] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2|3]
+    \\usage: dentro [--fullscreen] [--software] [--lang en|uk] [--prompts kbm|xbox|ps] [--chapter 1|2|3|4]
     \\              [--demo [--pad] | --inputtest | --padtest | --selftest | --shots <dir> | --icon <png|ico>]
     \\
     \\  (no mode)        play in a window
@@ -26,7 +26,7 @@ pub const usage =
     \\  --lang en|uk     language for this run (not --selftest or --icon)
     \\  --prompts D      write the prompts for kbm, xbox or ps instead of the device last used
     \\                   (play, --demo, --inputtest, --shots)
-    \\  --chapter 1|2|3  the chapter to open (play), fly (--demo) or render (--shots)
+    \\  --chapter N      the chapter to open (play), fly (--demo) or render (--shots): 1, 2, 3 or 4
     \\  --help, -h       print this and exit
     \\
 ;
@@ -210,6 +210,7 @@ test "no arguments is normal play, and each mode is chosen by its flag" {
     try std.testing.expectEqualStrings("icon.png", run(&.{ "--icon", "icon.png" }).run.path);
     try std.testing.expectEqual(@as(?u8, 1), run(&.{ "--chapter", "2" }).run.chapter);
     try std.testing.expectEqual(@as(?u8, 2), run(&.{ "--chapter", "3" }).run.chapter);
+    try std.testing.expectEqual(@as(?u8, 3), run(&.{ "--chapter", "4" }).run.chapter);
 }
 
 test "an option that needs a value is refused without one, wherever it stands" {

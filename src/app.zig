@@ -354,7 +354,19 @@ pub const App = struct {
         c.phase = app.rng.range(0, m.tau);
         c.spin = app.rng.range(0.2, 1.1);
         const k = app.rng.f();
-        if (app.sim.chapter == 2) {
+        if (app.sim.chapter == 3) {
+            // urine is nearly clear: a few shed lining cells and the microscopic crystals of a stone-former
+            if (k < 0.12) {
+                c.kind = .red;
+                c.scale = app.rng.range(0.8, 2.0);
+            } else if (k < 0.99) {
+                c.kind = .platelet;
+                c.scale = app.rng.range(0.7, 1.8);
+            } else {
+                c.kind = .white;
+                c.scale = app.rng.range(2.5, 4.5);
+            }
+        } else if (app.sim.chapter == 2) {
             // what the antrum is grinding, down to the last fines: flecks of food, a few fat droplets and
             // strands of shed mucus
             if (k < 0.22) {
@@ -394,6 +406,12 @@ pub const App = struct {
     }
 
     fn validate(app: *App, c: *Cell) void {
+        if (app.sim.chapter == 3) {
+            const kidney = @import("kidney.zig");
+            // sparse: five cells in six are left out
+            c.visible = c.tint < 0.17 and kidney.clear(c.pos, c.scale + 3);
+            return;
+        }
         if (app.sim.chapter == 2) {
             const sto = @import("stomach.zig");
             // the gel holds nothing loose: fines are in the juice above it and over the bare crater
@@ -726,7 +744,7 @@ test "both failure states have a way back" {
     const app = try std.testing.allocator.create(App);
     defer std.testing.allocator.destroy(app);
     const dt: f32 = 1.0 / 60.0;
-    const first = [_]game.Stage{ .needle, .g_arrive, .s_arrive };
+    const first = [_]game.Stage{ .needle, .g_arrive, .s_arrive, .k_arrive };
     try std.testing.expectEqual(campaign.playable_count, first.len);
     for (first, 0..) |first_stage, ch| {
         app.init(false, .en);

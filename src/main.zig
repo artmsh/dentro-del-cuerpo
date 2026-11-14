@@ -26,6 +26,8 @@ const util = @import("util.zig");
 const image = @import("image.zig");
 const game = @import("game.zig");
 const ch2 = @import("ch2.zig");
+const ch4 = @import("ch4.zig");
+const kidney = @import("kidney.zig");
 const bot = @import("bot.zig");
 const vein_mod = @import("vein.zig");
 const app_mod = @import("app.zig");
@@ -105,6 +107,13 @@ fn runSelftest(arena: std.mem.Allocator) !void {
     const sim = try arena.create(game.Sim);
     const cp = try arena.create(game.Sim);
     bot.trace = util.envIsSet("DENTRO_TRACE");
+    {
+        std.debug.print("--- chapter 4: kidneys\n", .{});
+        const r4 = bot.runHeadlessChapter(sim, cp, 3, 1500, true);
+        const g = &sim.g4;
+        std.debug.print("selftest ch4: completed={} stage={s} sim_time={d:.1}s deaths={d} stability={d:.1} grade={c} atlas={d}\n  clean_splits={d} wave_splits={d} bare_blows={d} lodged={d} blocked={d:.1}s passed={d} shards={d} shards_shot={d} shards_escaped={d} cuts={d} jet_time={d:.1}s tissue_hits={d} dual_arm_time={d:.1}s\n", .{ r4.completed, @tagName(r4.stage), r4.sim_seconds, r4.deaths, r4.stability, r4.grade, r4.atlas, g.clean_splits, g.wave_splits, g.bad_punches, g.lodged, g.blocked_t, g.passed, g.shards_made, g.shards_shot, g.shards_escaped, g.cuts, g.jet_time, r4.stats.tissue_hits, r4.stats.dual_time });
+        if (!r4.completed) std.process.exit(1);
+    }
     {
         std.debug.print("--- chapter 3: stomach\n", .{});
         const r3 = bot.runHeadlessChapter(sim, cp, 2, 1500, true);
@@ -281,6 +290,7 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
         var t: f32 = 0;
         var done_mode: [6]bool = @splat(false);
         var ring_shot = false;
+        var marker_shot = false;
         var stage_shot = false;
         while (t < 900) : (t += dt) {
             app.step(.{}, .{}, dt);
@@ -324,6 +334,9 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
                 .s_gradient => 0.9,
                 .s_wave => 6.0,
                 .s_exit => 0.6,
+                .k_arrive => 2.5,
+                .k_jets => 1.0,
+                .k_exit => 1.0,
                 else => 1.4,
             };
             if (since >= delay and since < delay + dt) {
@@ -331,7 +344,7 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
                 stage_shot = true;
             }
             const busy = switch (s.stage) {
-                .treat, .g_extrude, .g_factory, .g_flume, .g_wave, .s_wave, .s_swim, .s_margin, .s_cautery => true,
+                .treat, .g_extrude, .g_factory, .g_flume, .g_wave, .s_wave, .s_swim, .s_margin, .s_cautery, .k_neck, .k_split, .k_resonance => true,
                 else => false,
             };
             const every: f32 = if (s.stage == .treat) 5.0 else 3.0;
@@ -357,6 +370,33 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
                 s.pitch = 1.2;
                 sh.snap("s_wave-ring-overhead");
                 s.pitch = keep;
+            }
+            // In the kidney the pilot keeps clear of the ducts, so look at one while it spurts.
+            if (s.stage == .k_jets and !ring_shot) {
+                for (0..kidney.duct_count) |i| {
+                    const at = kidney.ductPos(i);
+                    if (kidney.jetStrength(i, s.clock) < 0.9 or at.dist(s.pos) > 420) continue;
+                    ring_shot = true;
+                    const keep = [2]f32{ s.yaw, s.pitch };
+                    const d = at.add(kidney.ductNormal(i).scale(70)).sub(s.pos).norm();
+                    s.yaw = std.math.atan2(d.x, d.z);
+                    s.pitch = std.math.asin(d.y);
+                    sh.snap("k_jets-spurt");
+                    s.yaw = keep[0];
+                    s.pitch = keep[1];
+                    break;
+                }
+            }
+            // The transit marker stands in the fornix, out of sight from the stone until the pilot turns for it.
+            if (s.stage == .k_exit and !marker_shot and ch4.exitSite().dist(s.pos) < 700) {
+                marker_shot = true;
+                const keep = [2]f32{ s.yaw, s.pitch };
+                const d = ch4.exitSite().sub(s.pos).norm();
+                s.yaw = std.math.atan2(d.x, d.z);
+                s.pitch = std.math.asin(d.y);
+                sh.snap("k_exit-marker");
+                s.yaw = keep[0];
+                s.pitch = keep[1];
             }
             const mi = @intFromEnum(s.mode);
             if (s.mode != .playing and !done_mode[mi]) {
@@ -397,7 +437,8 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
         const tag: []const u8 = switch (ch) {
             0 => "vein",
             1 => "gut",
-            else => "stomach",
+            2 => "stomach",
+            else => "kidney",
         };
         var nb: [48]u8 = undefined;
         if (ch == 0) {
@@ -460,6 +501,51 @@ fn runShots(arena: std.mem.Allocator, options: gpu.Options, dir: []const u8, onl
             sh.snap("hud-acid-coat-holding");
             app.openPause();
             sh.snap("pause-with-coat");
+            app.step(.{}, .{ .back = true }, dt);
+        }
+        if (ch == 3) {
+            s.g4.lodged = 2;
+            s.g4.bad_punches = 3;
+            s.g4.clean_splits = 7;
+            sh.snap("complete-notes-kidney-lodged");
+            s.g4.lodged = 0;
+            s.g4.shards_escaped = 5;
+            sh.snap("complete-notes-kidney-shards");
+            // The HUD's warnings in the kidney: a piece wedged in the outlet, a notch that is ready, and
+            // the pause menu's row for Resonance.
+            s.mode = .playing;
+            s.stats.emboli_escaped = 0;
+            s.hidden_unlocked = false;
+            s.stage = .k_split;
+            s.g4.neck_cut = true;
+            if (s.find(.calculus)) |st| {
+                st.state = 2;
+                st.pos = m.v3(0, ch4.stopY(st.radius).?, 0);
+            }
+            s.pos = m.v3(0, 1500, -500);
+            s.yaw = 0.25;
+            s.pitch = 1.0;
+            for (0..3) |_| app.step(.{}, .{}, dt);
+            s.voice.clear();
+            sh.snap("hud-outlet-blocked");
+            if (s.find(.calculus)) |st| {
+                st.state = 0;
+                st.pos = m.v3(0, 900, 900);
+                st.vel = .{};
+                st.aux = 1;
+                st.timer = 0.25;
+                s.pos = st.pos.add(m.v3(0, 0, -(st.radius + 14)));
+                s.yaw = 0;
+                s.pitch = 0;
+            }
+            s.arms[0].tool = .punch;
+            s.arms[1].tool = .drill;
+            for (0..2) |_| app.step(.{ .arm = .{ false, true } }, .{}, dt);
+            s.voice.clear();
+            sh.snap("hud-notch-ready");
+            s.g4.has_resonance = true;
+            app.openPause();
+            sh.snap("pause-with-resonance");
             app.step(.{}, .{ .back = true }, dt);
         }
         s.mode = .playing;
@@ -1523,6 +1609,8 @@ test {
     _ = @import("gut.zig");
     _ = @import("stomach.zig");
     _ = @import("ch3.zig");
+    _ = @import("kidney.zig");
+    _ = @import("ch4.zig");
     _ = @import("app.zig");
     _ = @import("bot.zig");
     _ = @import("utf8.zig");

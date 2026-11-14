@@ -50,6 +50,19 @@ pub const Topic = enum(u8) {
     ulcer_bed,
     bleeding_vessel,
     food_particle,
+    // chapter 4: a minor calyx of the right kidney
+    renal_papilla,
+    area_cribrosa,
+    duct_of_bellini,
+    urine_jet,
+    urothelium,
+    fornix,
+    infundibulum,
+    randalls_plaque,
+    kidney_stone,
+    stone_fragment,
+    crystal_shard,
+    glomerulus,
 
     pub const count = @typeInfo(Topic).@"enum".field_names.len;
 };
@@ -562,6 +575,151 @@ pub fn entry(t: Topic) Entry {
             .deep = .{
                 .en = "The pylorus passes liquid freely and holds solids back until the antrum has ground them to under a millimetre or two. This one is a hundredth of that: a starch grain or a shred of plant cell wall, already on its way. Between meals a different, stronger wave sweeps out whatever would not grind.",
                 .uk = "Воротар вільно пропускає рідину, а тверде затримує, доки антральний відділ не перетре його до частинок, менших за міліметр-два. Ця — у сто разів дрібніша: крохмальне зерно або шматочок стінки рослинної клітини, що вже прямує до виходу. Між прийомами їжі інша, сильніша хвиля вимітає все, що перетерти не вдалося.",
+            },
+        },
+        .renal_papilla => .{
+            .name = .{ .en = "Renal papilla", .uk = "Нирковий сосочок" },
+            .size = .{ .en = "6 mm across at its foot", .uk = "6 мм завширшки біля основи" },
+            .short = .{
+                .en = "Renal papilla: the tip of one of the kidney's pyramids, standing up into the calyx that collects from it.",
+                .uk = "Нирковий сосочок — верхівка однієї з пірамід нирки, що вдається в чашечку, яка збирає з неї сечу.",
+            },
+            .deep = .{
+                .en = "Each kidney has eight to eighteen pyramids. A pyramid is collecting ducts running side by side towards one point and merging as they go, so that by the papilla only a dozen or two are left. The tissue here works on very little oxygen, in the saltiest fluid in the body; that salt is what draws water back out of the urine on its way past.",
+                .uk = "У кожній нирці від восьми до вісімнадцяти пірамід. Піраміда — це збірні трубочки, що йдуть поруч до однієї точки й дорогою зливаються, тож біля сосочка їх лишається один-два десятки. Тканина тут працює майже без кисню, у найсолонішій рідині тіла; саме ця сіль відтягує воду із сечі, що тече повз неї.",
+            },
+        },
+        .area_cribrosa => .{
+            .name = .{ .en = "Area cribrosa", .uk = "Решітчасте поле" },
+            .size = .{ .en = "2 mm across", .uk = "2 мм завширшки" },
+            .short = .{
+                .en = "Area cribrosa: the tip of the papilla, pierced like a sieve where the ducts open.",
+                .uk = "Решітчасте поле — верхівка сосочка, продірявлена, мов сито, отворами проток.",
+            },
+            .deep = .{
+                .en = "The name is Latin for a sieve plate. Everything the kidney makes leaves through these few openings: about a litre and a half a day from the two kidneys, shared among a dozen or so papillae on each side. What comes out here is finished urine. Nothing downstream changes it; the calyces, the pelvis, the ureter and the bladder only carry it and store it.",
+                .uk = "Латиною ця назва означає «дірчаста пластинка». Усе, що виробляє нирка, виходить крізь ці кілька отворів: близько півтора літра на добу з обох нирок, поділені між десятком-півтора сосочків з кожного боку. Звідси виходить уже готова сеча. Далі її ніщо не змінює: чашечки, миска, сечовід і сечовий міхур лише проводять її та зберігають.",
+            },
+        },
+        .duct_of_bellini => .{
+            .name = .{ .en = "Duct of Bellini", .uk = "Протока Белліні" },
+            .size = .{ .en = "0.1–0.2 mm opening", .uk = "отвір 0,1–0,2 мм" },
+            .short = .{
+                .en = "A papillary duct, or duct of Bellini: the last stretch of the collecting system. You came in through one.",
+                .uk = "Сосочкова протока, або протока Белліні, — остання ділянка збірної системи. Крізь таку ви сюди й потрапили.",
+            },
+            .deep = .{
+                .en = "Lorenzo Bellini described them in 1662, at nineteen. Each drains thousands of nephrons. The urine does not seep out steadily: the wall of the calyx contracts about a dozen times a minute and milks the papilla, so each duct empties in spurts. Your display brightens the rim of a duct shortly before it fires.",
+                .uk = "Лоренцо Белліні описав їх 1662 року, у дев’ятнадцять. Кожна збирає сечу з тисяч нефронів. Сеча не сочиться рівномірно: стінка чашечки скорочується з десяток разів на хвилину й видоює сосочок, тож кожна протока спорожнюється поштовхами. Ваш дисплей підсвічує край протоки незадовго до викиду.",
+            },
+        },
+        .urine_jet => .{
+            .name = .{ .en = "Urine jet", .uk = "Струмінь сечі" },
+            .size = .{ .en = "0.5 mm/s at the duct", .uk = "0,5 мм/с біля протоки" },
+            .short = .{
+                .en = "A spurt of urine from a duct. It does the hull no harm; the crystals it carries do.",
+                .uk = "Викид сечі з протоки. Корпусу він не шкодить — шкодять кристали, які він несе.",
+            },
+            .deep = .{
+                .en = "Urine is water with urea, salts and a little acid. Hers is supersaturated with calcium oxalate, which is the whole trouble: more is dissolved in it than it can hold, so any surface that lets a crystal start will grow one. Drinking enough to dilute it is still the best prevention there is.",
+                .uk = "Сеча — це вода із сечовиною, солями й дещицею кислоти. У неї вона перенасичена оксалатом кальцію, і в цьому вся біда: розчинено більше, ніж сеча здатна втримати, тож на будь-якій поверхні, де кристал може зародитися, він росте. Пити стільки, щоб її розвести, — досі найкраща профілактика.",
+            },
+        },
+        .urothelium => .{
+            .name = .{ .en = "Urothelium", .uk = "Уротелій" },
+            .size = .{ .en = "2–3 cells thick here", .uk = "тут 2–3 шари клітин" },
+            .short = .{
+                .en = "Urothelium: the lining of the calyx, and of everything from here down to the bladder.",
+                .uk = "Уротелій — вистилка чашечки й усього, що лежить звідси аж до сечового міхура.",
+            },
+            .deep = .{
+                .en = "Its top layer is umbrella cells, each wide enough to roof several of the cells beneath it and armoured with plates of uroplakin. It is the tightest barrier in the body: urine stays in, and the water of the tissue stays out of it. Under the lining of a calyx lies smooth muscle, which is what milks the papilla. Rounds and blows tear the lining, and a torn lining bleeds into the urine.",
+                .uk = "Його верхній шар — парасолькові клітини: кожна така широка, що накриває кілька клітин під собою, і вкрита пластинками уроплакіну. Це найщільніший бар’єр у тілі: сеча лишається всередині, а вода тканин до неї не потрапляє. Під вистилкою чашечки лежить гладенький м’яз — саме він видоює сосочок. Заряди й удари рвуть вистилку, а розірвана вистилка кровить у сечу.",
+            },
+        },
+        .fornix => .{
+            .name = .{ .en = "Calyceal fornix", .uk = "Склепіння чашечки" },
+            .size = .{ .en = "under 1 mm wide", .uk = "до 1 мм завширшки" },
+            .short = .{
+                .en = "The fornix: the gutter where the wall of the calyx meets the foot of the papilla.",
+                .uk = "Склепіння — жолобок, де стінка чашечки сходиться з основою сосочка.",
+            },
+            .deep = .{
+                .en = "It is the thinnest place in the collecting system. When pressure in the calyx rises, as it does behind a stone stuck in the ureter, the fornix is what gives: urine leaks through it into the veins and lymphatics around the kidney, which radiologists call pyelovenous backflow. That leak is a path from urine into a vein, and it is your way out.",
+                .uk = "Це найтонше місце збірної системи. Коли тиск у чашечці зростає — як за каменем, що застряг у сечоводі, — піддається саме склепіння: сеча просочується крізь нього у вени й лімфатичні судини довкола нирки; рентгенологи називають це пієловенозним рефлюксом. Така протічка — шлях із сечі у вену, і це ваш вихід.",
+            },
+        },
+        .infundibulum => .{
+            .name = .{ .en = "Infundibulum", .uk = "Шийка чашечки" },
+            .size = .{ .en = "0.6 mm at its narrowest", .uk = "0,6 мм у найвужчому місці" },
+            .short = .{
+                .en = "The infundibulum: the neck of the calyx, and the only way out for anything loose in here.",
+                .uk = "Шийка чашечки — єдиний вихід для всього, що тут плаває.",
+            },
+            .deep = .{
+                .en = "From here urine runs to the renal pelvis and down 25 centimetres of ureter, squeezed along by peristalsis a few times a minute. A stone that sticks anywhere on the way stops the kidney draining, and the pain of that, renal colic, is among the worst there is. In most people this neck is several millimetres wide. Hers is little more than half of one, which is why no piece wider than half a millimetre can be allowed to reach it.",
+                .uk = "Звідси сеча тече до ниркової миски й далі 25 сантиметрів сечоводом, який кілька разів на хвилину проштовхує її перистальтикою. Камінь, що застряг будь-де на цьому шляху, зупиняє відтік із нирки, і біль від цього — ниркова коліка — один із найсильніших. У більшості людей ця шийка має кілька міліметрів завширшки. У неї — трохи більше половини міліметра, і тому жоден уламок, ширший за пів міліметра, не має до неї дістатися.",
+            },
+        },
+        .randalls_plaque => .{
+            .name = .{ .en = "Randall's plaque", .uk = "Бляшка Рендалла" },
+            .size = .{ .en = "0.2 mm across", .uk = "0,2 мм завширшки" },
+            .short = .{
+                .en = "Randall's plaque: calcium phosphate laid down in the papilla itself and bared where the lining has worn away. The stone grew on it.",
+                .uk = "Бляшка Рендалла — фосфат кальцію, відкладений у самому сосочку й оголений там, де стерлася вистилка. На ній і виріс камінь.",
+            },
+            .deep = .{
+                .en = "Alexander Randall found these in 1937, in one kidney in five at autopsy. A plaque begins deep in the papilla, around the thin loops of Henle, as apatite, the mineral of bone, and spreads until it lies just under the lining. Where the lining is lost, urine meets the mineral and calcium oxalate crystallises on it, layer upon layer. Most calcium oxalate stones start this way, held by a stalk. The stalk is the only thing holding this one.",
+                .uk = "Александер Рендалл знайшов їх 1937 року — на розтинах у кожній п’ятій нирці. Бляшка зароджується глибоко в сосочку, довкола тонких петель Генле, як апатит — мінерал кісток — і шириться, доки не опиниться під самою вистилкою. Там, де вистилка зникла, сеча торкається мінералу, і на ньому шар за шаром кристалізується оксалат кальцію. Так починається більшість оксалатних каменів — на ніжці. Цей тримається тільки на ній.",
+            },
+        },
+        .kidney_stone => .{
+            .name = .{ .en = "Calcium oxalate stone", .uk = "Оксалатний камінь" },
+            .size = .{ .en = "1.3 mm", .uk = "1,3 мм" },
+            .short = .{
+                .en = "Calcium oxalate stone, still on its stalk. Three kidney stones in four are made of this.",
+                .uk = "Камінь з оксалату кальцію, ще на ніжці. З цього складаються три ниркові камені з чотирьох.",
+            },
+            .deep = .{
+                .en = "Calcium oxalate monohydrate, whewellite: dense, brown and among the hardest of stones, laid down in layers like a pearl. Whole, it will not pass the neck of this calyx. Surgeons break stones like it with a laser fibre, or with shock waves focused from outside the body, and what decides whether the treatment worked is the size of the pieces left behind.",
+                .uk = "Моногідрат оксалату кальцію, вевеліт: щільний, бурий, один із найтвердіших каменів, що наростає шарами, як перлина. Цілим він крізь шийку цієї чашечки не пройде. Хірурги дроблять такі камені лазерним волокном або ударними хвилями, сфокусованими ззовні тіла, а чи вдалося лікування, вирішує розмір уламків, що лишилися.",
+            },
+        },
+        .stone_fragment => .{
+            .name = .{ .en = "Stone fragment", .uk = "Уламок каменя" },
+            .size = .{ .en = "0.5–1 mm", .uk = "0,5–1 мм" },
+            .short = .{
+                .en = "A piece of the stone. Half a millimetre across, it will pass; any bigger, it will lodge.",
+                .uk = "Уламок каменя. Пів міліметра завширшки — пройде; більший — застрягне.",
+            },
+            .deep = .{
+                .en = "A crystalline stone breaks along the boundaries between its layers and grains, and scoring it first decides where: the bit cuts a notch, the blow opens the notch into a crack, and the stone parts in two. A blow with no notch crushes the surface instead and throws off slivers. Urologists call pieces small enough to pass by themselves clinically insignificant fragments, although one that stays behind can seed the next stone.",
+                .uk = "Кристалічний камінь розколюється по межах між шарами й зернами, а де саме — вирішує надріз: свердло прорізає борозну, удар розкриває її в тріщину, і камінь ділиться надвоє. Удар без надрізу натомість кришить поверхню й розкидає скалки. Уламки, досить дрібні, щоб вийти самостійно, урологи називають клінічно незначущими фрагментами — хоча той, що залишився, може дати початок наступному каменю.",
+            },
+        },
+        .crystal_shard => .{
+            .name = .{ .en = "Crystal shard", .uk = "Кристалічний осколок" },
+            .size = .{ .en = "10–30 µm", .uk = "10–30 мкм" },
+            .short = .{
+                .en = "A sliver of calcium oxalate. At your scale its edges are broken glass: shoot it or keep clear.",
+                .uk = "Скалка оксалату кальцію. У вашому масштабі її краї — бите скло: стріляйте або тримайтеся подалі.",
+            },
+            .deep = .{
+                .en = "Crystals like it are what a laboratory looks for in the urine of someone who forms stones: the dihydrate grows as tiny bipyramids, like envelopes with two points, 10 to 30 microns long. They scratch the lining on their way down, which is one reason passing a stone bleeds. To her they are dust. To a hull eight microns across each one is a blade.",
+                .uk = "Саме такі кристали лабораторія шукає в сечі людини, в якої утворюються камені: дигідрат росте крихітними біпірамідами, схожими на конверти з двома вістрями, завдовжки 10–30 мікронів. Дорогою вниз вони дряпають вистилку — це одна з причин, чому вихід каменя супроводжується кров’ю. Для неї вони — пил. Для корпусу завширшки вісім мікронів кожен — лезо.",
+            },
+            .hostile = true,
+        },
+        .glomerulus => .{
+            .name = .{ .en = "Glomerulus", .uk = "Нирковий клубочок" },
+            .size = .{ .en = "0.2 mm tuft", .uk = "клубок капілярів 0,2 мм" },
+            .short = .{
+                .en = "Glomerulus: the tuft of capillaries where blood is filtered into urine. You went past it, not through it.",
+                .uk = "Нирковий клубочок — клубок капілярів, де кров фільтрується в сечу. Ви пройшли повз нього, а не крізь нього.",
+            },
+            .deep = .{
+                .en = "There are a million in each kidney, and together they filter 180 litres of plasma a day. The filter has three layers: the capillary wall with its pores, a basement membrane, and the interlocking feet of the podocytes, with slits between them that pass nothing wider than about 8 nanometres. Water, salts and urea go through; albumin, at 7 nanometres, mostly does not; a red cell is a thousand times too big, and so are you. The route had to leave the blood further down and enter a collecting duct through its wall.",
+                .uk = "У кожній нирці їх мільйон, і разом вони фільтрують 180 літрів плазми на добу. Фільтр має три шари: стінку капіляра з порами, базальну мембрану й переплетені ніжки подоцитів, щілини між якими не пропускають нічого ширшого, ніж приблизно 8 нанометрів. Вода, солі й сечовина проходять; альбумін із його 7 нанометрами — здебільшого ні; еритроцит у тисячу разів завеликий, і ви теж. Маршруту довелося покинути кров нижче й увійти до збірної трубочки крізь її стінку.",
             },
         },
     };

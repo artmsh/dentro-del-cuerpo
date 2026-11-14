@@ -122,7 +122,9 @@ data are pulled from buffers by `vertex_id` and `instance_id`, which keeps pipel
 Materials are a small integer id per instance switched in one fragment function (vessel wall, cell membrane,
 metal, fibrin, biofilm, leaflet, clot, calcified, mucosa, crypt floor, hologram, unlit). Chapter 3 adds no
 material: its lining is the vessel-wall material with one cobble per surface cell, its gel the biofilm
-material, the ulcer bed fibrin. The first-person arms are drawn after
+material, the ulcer bed fibrin. Chapter 4 adds none either: the papilla and the calyx are the vessel-wall
+material, the stone and its stalk the calcified one, whose crack glow shows the notch and the cut, the
+crystals the cell material and the lumen of a duct unlit. The first-person arms are drawn after
 the world in the front slice of the depth range with their own projection, so they never clip into tissue.
 
 Audio is a procedural synthesiser; there are no sample files. The game thread sends events through a
@@ -331,16 +333,17 @@ recognised by the window procedure itself.
 
 One world unit is one micrometre. The anatomy of a chapter is a set of analytic functions in one module:
 `src/vein.zig` (centreline, wall radius, valve cusp surfaces, pulsed parabolic flow), `src/gut.zig`
-(villus lattice, fold profile, canopy flow, the travelling contraction ring) and `src/stomach.zig` (the
+(villus lattice, fold profile, canopy flow, the travelling contraction ring), `src/stomach.zig` (the
 lattice of pits, the ulcer's rim and crater, the thickness of the gel and the pH at any point in it, the
-antral wave). The mesh, the collision, the
+antral wave) and `src/kidney.zig` (the papilla, the dome of the calyx and its neck, the ducts and the timing
+and reach of their jets, the drift towards the outlet). The mesh, the collision, the
 flow that advects the drone, and the ray casts for the reticle and the weapons are all derived from those
 functions, so what the player sees, hits and is carried by cannot drift apart.
 
 `src/game.zig` holds the rules shared by every chapter: the drone, the two arms and their tools, the entity
 table, damage, the guide's triggers. It has no rendering or platform imports and runs headless. Chapter 1's
 script lives there as well, since it was written first; from chapter 2 on a chapter is a module
-(`src/ch2.zig`, `src/ch3.zig`) that owns its state, stage script, organisms and upgrade, and `game.zig`
+(`src/ch2.zig`, `src/ch3.zig`, `src/ch4.zig`) that owns its state, stage script, organisms and upgrade, and `game.zig`
 dispatches to it at
 a fixed set of points (stage entry, movement and collision, focus, each tool's hit, entity update, grading).
 New chapters follow the chapter 2 shape.
@@ -497,10 +500,11 @@ the user's display-language list (`GetUserPreferredUILanguages`).
 
 | | |
 |---|---|
-| `src/vein.zig`, `src/gut.zig`, `src/stomach.zig` | anatomy of chapters 1 to 3 as analytic functions: shape, flow, collision, ray casts |
+| `src/vein.zig`, `src/gut.zig`, `src/stomach.zig`, `src/kidney.zig` | anatomy of chapters 1 to 4 as analytic functions: shape, flow, collision, ray casts |
 | `src/game.zig` | shared rules: drone, arms and tools, entities, guide triggers; chapter 1's script |
 | `src/ch2.zig` | chapter 2: state, stage script, organisms, tether |
 | `src/ch3.zig` | chapter 3: state, stage script, acid and the coat, swimmers and colonies, the weld |
+| `src/ch4.zig` | chapter 4: state, stage script, the stalk, notch and blow, shards, lodging, Resonance |
 | `src/guide.zig`, `src/campaign.zig` | the atlas and comms queue; the chapter table (both bilingual) |
 | `src/i18n.zig`, `src/strings.zig`, `src/l10n.zig` | languages, templates and plurals; the string catalogue; the tests that walk all text |
 | `src/bot.zig` | scripted pilot used by the tests and `--demo` |
